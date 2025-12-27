@@ -1,0 +1,125 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  
+  <groupId>com.github.kraudy.compiler</groupId>
+  <artifactId>MasterCompiler</artifactId>
+  <packaging>jar</packaging>
+  <version>1.0-SNAPSHOT</version>
+  <name>MasterCompiler</name>
+  <url>http://maven.apache.org</url>
+
+  <properties>
+    <!-- Define versions for consistency and easy updates -->
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <junit.version>5.10.3</junit.version> <!-- Last JUnit 5 version supporting Java 8 -->
+    <surefire.version>3.2.5</surefire.version> <!-- Surefire for JUnit 5 + Java 8 support -->
+  </properties>
+
+  <dependencies>
+
+    <dependency>
+        <groupId>net.sf.jt400</groupId>
+        <artifactId>jt400</artifactId>
+        <version>21.0.4</version>
+    </dependency>
+
+    <dependency>
+        <groupId>io.github.theprez</groupId>
+        <artifactId>dotenv-java-ibmi</artifactId>
+        <version>0.0.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.17.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+      <version>2.17.2</version>
+    </dependency>
+
+    <!-- Full JUnit Jupiter (replaces just api; includes engine for running tests) -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- SLF4J API (required for the facade) -->
+    <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>2.0.16</version> <!-- Java 8 compatible -->
+    </dependency>
+    
+    <!-- Logback as backend (includes binding to SLF4J) -->
+    <dependency>
+        <groupId>ch.qos.logback</groupId>
+        <artifactId>logback-classic</artifactId>
+        <version>1.3.16</version> <!-- Last Java 8 compatible series -->
+    </dependency>
+
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Maven Compiler Plugin -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <debug>true</debug> <!-- Enable debug information -->
+          <debuglevel>lines,vars,source</debuglevel> <!-- Include line numbers, variables, and source file info -->
+          <source>1.8</source>
+          <target>1.8</target>
+        </configuration>
+      </plugin>
+
+      <!-- Maven Surefire Plugin - Required to run JUnit 5 tests -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${surefire.version}</version>
+      </plugin>
+
+      <!-- Maven Shade Plugin for creating an executable JAR with dependencies -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.github.kraudy.compiler.MasterCompiler</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <developers>
+    <developer>
+      <id>kraudy</id>
+      <name>Roberto Torrez</name>
+      <email>robkraudy@gmail.com</email>
+    </developer>
+  </developers>
+
+</project>
