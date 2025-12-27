@@ -1,9 +1,7 @@
 
-<div style="text-align: center;">
-  <img src="./images/Master%20Compiler.jpg" alt="alt text" style="width: 20%; max-width: 800px; height: auto;">
-</div>
+<img src="./images/Master%20Compiler.jpg" alt="Master Compiler logo" style="display: block; margin: 0 auto; width: 40%; max-width: 800px; height: auto; object-fit: cover; aspect-ratio: 1 / 1;">
 
-# MasterCompiler
+# Master Compiler
 
 Master compilation tool for the IBM i platform. 
 
@@ -13,11 +11,9 @@ Do you like building cool stuff for fun and freedom? Then this project is for yo
 
 ---
 
-This project aims to give the whole IBM i community a standard way to describe the compilation flow of objects in a simple, elegant, modern, and clean manner. Affords easy integration with any DevOps pipeline; could be run locally (just upload the JAR file) or remotely in a Docker container.
+This project aims to give the whole IBM i community a standard way to describe the compilation flow of objects and allow easy integration with any DevOps pipeline to be run locally (just upload the JAR file) or remotely in a Docker container.
 
-## Requirementes
-
-Java 8
+All you need as a requirement is Java 8.
 
 ---
 
@@ -55,8 +51,10 @@ Define a yaml file
 defaults: {}  # optional | Global compilation command params
 
 before:       # optional | Global pre-compilation system commands
-  chglibl:                # cl command
-    libl: mylib1 mylib2   # cl command param
+  chglibl:                # Set library list before targets compilation
+    libl: mylib1 mylib2 
+  chgcurlib:              # Set curlib before targets compilation
+    CURLIB: mylib1
 
 after: {}     # optional | Global post-compilation system commands
 
@@ -66,7 +64,8 @@ failure: {}   # optional | Global on success system commands
 
 targets:      # Required | Global on success system commands
 
-  mylib1.hello.pgm.rgple:  # Required | Compilation target
+  # we can specify curlib as the target library. Convenient.
+  curlib.hello.pgm.rgple:  # Required | Compilation target
 
     params:               # Required | Per-target compilation command params
       # Compilation params
