@@ -17,13 +17,13 @@ import java.util.Map;
 /*
  *  Extracts commands and its param:value pairs from spec (Yaml file)
  */
-public class CommandMapDeserializer extends JsonDeserializer<List<String>> {
+public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>> {
   @Override
-  public List<String> deserialize(JsonParser parser, DeserializationContext ctxt)
+  public List<CommandObject> deserialize(JsonParser parser, DeserializationContext ctxt)
           throws IOException {
 
     /* Stores list of system commands to be executed. Mapped from hooks */
-    List<String> paramList = new ArrayList<>();
+    List<CommandObject> paramList = new ArrayList<>();
 
     ObjectNode node = parser.getCodec().readTree(parser);
 
@@ -37,13 +37,11 @@ public class CommandMapDeserializer extends JsonDeserializer<List<String>> {
 
       /* Get command */
       SysCmd sysCmd = SysCmd.fromString(entry.getKey());
+      CommandObject commandObject = new CommandObject(sysCmd);
 
       JsonNode paramsNode = entry.getValue();
 
       if (!paramsNode.isObject()) throw new IllegalArgumentException("Parameters for " + sysCmd.name() + " must be param: value");
-
-      /* Create param map per command */
-      ParamMap result = new ParamMap();
 
       /* Gets list of params and values per command */
       Iterator<Map.Entry<String, JsonNode>> paramFields = paramsNode.fields();
@@ -55,11 +53,11 @@ public class CommandMapDeserializer extends JsonDeserializer<List<String>> {
           /* Get string value */
           String valueNode = Utilities.nodeToString(paramEntry.getValue());
 
-          result.put(sysCmd, paramCmd, valueNode);
+          commandObject.put(paramCmd, valueNode);
       }
 
       /* Store command's strings to be later executed */
-      paramList.add(result.getCommandStringWithoutSummary(sysCmd));
+      paramList.add(commandObject);
     }
 
     return paramList;

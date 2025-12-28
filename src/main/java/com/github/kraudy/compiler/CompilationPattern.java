@@ -210,6 +210,22 @@ public class CompilationPattern {
     
   }
 
+  /* Execution error messages */
+  public enum ErrMsg { 
+    CPF2112,  //Object type *BNDDIR already exists.
+    CPF5D10,  //Not able to insert binding directory into library.
+    CPF5D0B,  //Binding directory was not created
+    ; 
+
+    public static ErrMsg fromString(String value) {
+      try {
+          return ErrMsg.valueOf(value.toUpperCase().trim());
+      } catch (IllegalArgumentException e) {
+          throw new IllegalArgumentException("Could not convert '" + value + "' to ErrMsg. Unknown value: '" + value + "'");
+      }
+    }
+  }
+
   /* Params defined values. You see these when you press F4 */
   public enum ValCmd { 
     FIRST, REPLACE, OUTFILE, LIBL, FILE, DTAARA, PGM, MODULE, OBJ, SRVPGM, CURLIB, ALL, CURRENT,

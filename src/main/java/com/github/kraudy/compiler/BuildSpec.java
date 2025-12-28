@@ -23,23 +23,23 @@ public class BuildSpec {
   /* Global pre-compilation system commands */
   @JsonProperty(value = "before", required = false)
   @JsonDeserialize(using = CommandMapDeserializer.class)
-  public final List<String> before = new ArrayList<>();
+  public final List<CommandObject> before = new ArrayList<>();
 
   /* Global post-compilation system commands */
   @JsonProperty(value = "after", required = false)
   @JsonDeserialize(using = CommandMapDeserializer.class)
-  public final List<String> after = new ArrayList<>();
+  public final List<CommandObject> after = new ArrayList<>();
 
 
   /* Global on success system commands */
   @JsonProperty(value = "success", required = false)
   @JsonDeserialize(using = CommandMapDeserializer.class)
-  public final List<String> success = new ArrayList<>();
+  public final List<CommandObject> success = new ArrayList<>();
 
   /* Global on failure system commands */
   @JsonProperty(value = "failure", required = false)
   @JsonDeserialize(using = CommandMapDeserializer.class)
-  public final List<String> failure = new ArrayList<>();
+  public final List<CommandObject> failure = new ArrayList<>();
 
   /* Ordered sequence of targets and their spec */
   @JsonProperty(value = "targets", required = true) // Required
@@ -58,22 +58,22 @@ public class BuildSpec {
     /* Per-target pre-compilation system commands */
     @JsonProperty(value = "before", required = false)
     @JsonDeserialize(using = CommandMapDeserializer.class)
-    public final List<String> before = new ArrayList<>();
+    public final List<CommandObject> before = new ArrayList<>();
 
     /* Per-target post-compilation system commands */
     @JsonProperty(value = "after", required = false)
     @JsonDeserialize(using = CommandMapDeserializer.class)
-    public final List<String> after = new ArrayList<>();
+    public final List<CommandObject> after = new ArrayList<>();
 
     /* Per-target on success system commands */
     @JsonProperty(value = "success", required = false)
     @JsonDeserialize(using = CommandMapDeserializer.class)
-    public final List<String> success  = new ArrayList<>();
+    public final List<CommandObject> success  = new ArrayList<>();
 
     /* Per-target on failure system commands */
     @JsonProperty(value = "failure", required = false)
     @JsonDeserialize(using = CommandMapDeserializer.class)
-    public final List<String> failure  = new ArrayList<>();
+    public final List<CommandObject> failure  = new ArrayList<>();
 
     @JsonAnySetter
     public void unknown(String name, Object value) {

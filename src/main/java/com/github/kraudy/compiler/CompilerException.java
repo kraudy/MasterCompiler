@@ -8,6 +8,7 @@ import java.sql.Timestamp;
 public class CompilerException extends RuntimeException {
   private final String failedCommand;               // Failed command
   private final TargetKey targetKey;                // Compilation target
+  private final CommandObject commandObject;        // Command object
   private final Timestamp commandTime;              // Fail time
   private final String extraContext;   // System messages
 
@@ -16,6 +17,7 @@ public class CompilerException extends RuntimeException {
     super(message, null);
     this.failedCommand = null;
     this.targetKey = null;
+    this.commandObject = null;
     this.commandTime = null;
     this.extraContext = null;
   }
@@ -25,6 +27,17 @@ public class CompilerException extends RuntimeException {
     super(message, cause);
     this.failedCommand = null;
     this.targetKey = null;
+    this.commandObject = null;
+    this.commandTime = null;
+    this.extraContext = null;
+  }
+
+  /* Constructor for system command */
+  public CompilerException(String message, Throwable cause, CommandObject commandObject) {
+    super(message, cause);
+    this.failedCommand = null;
+    this.targetKey = null;
+    this.commandObject = commandObject;
     this.commandTime = null;
     this.extraContext = null;
   }
@@ -34,6 +47,7 @@ public class CompilerException extends RuntimeException {
     super(message, cause);
     this.failedCommand = null;
     this.targetKey = targetKey;
+    this.commandObject = null;
     this.commandTime = null;
     this.extraContext = null;
   }
@@ -43,6 +57,7 @@ public class CompilerException extends RuntimeException {
     super(message, cause);
     this.failedCommand = failedCommand;
     this.targetKey = null;
+    this.commandObject = null;
     this.commandTime = commandTime;
     this.extraContext = extraContext;
   }
@@ -64,6 +79,8 @@ public class CompilerException extends RuntimeException {
     if (failedCommand != null) sb.append("- Command: ").append(failedCommand).append("\n");
 
     if (targetKey != null) sb.append("- Target: ").append(targetKey.asString()).append("\n");
+
+    if (commandObject != null) sb.append("- System Command: ").append(commandObject.asString()).append("\n");
 
     if (commandTime != null) sb.append("- Time: ").append(commandTime).append("\n");
 

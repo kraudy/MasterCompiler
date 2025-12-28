@@ -32,7 +32,7 @@ public class Migrator {
     this.commandExec = commandExec;
   }
 
-  public void migrateSource(TargetKey key) throws SQLException{
+  public void migrateSource(TargetKey key) throws Exception, SQLException{
     switch (key.getCompilationCommand()){
       case CRTCLMOD:
       case CRTRPGMOD:
@@ -77,54 +77,53 @@ public class Migrator {
     }
   }
 
-  public void createSourcePf(TargetKey key){
-    ParamMap map = new ParamMap();
-    map.put(SysCmd.CRTSRCPF, ParamCmd.FILE, key.getQualifiedSourceFile());
+  public void createSourcePf(TargetKey key) throws Exception {
+    CommandObject cmd = new CommandObject(SysCmd.CRTSRCPF);
+
+    cmd.put(ParamCmd.FILE, key.getQualifiedSourceFile());
     
-    commandExec.executeCommand(map.getCommandString(SysCmd.CRTSRCPF));
+    commandExec.executeCommand(cmd);
   }
 
-  public void createSourceMember(TargetKey key){
+  public void createSourceMember(TargetKey key) throws Exception {
+    CommandObject cmd = new CommandObject(SysCmd.ADDPFM);
 
-    ParamMap map = new ParamMap();
+    cmd.put(ParamCmd.FILE, key.getQualifiedSourceFile());
+    cmd.put(ParamCmd.MBR, key.getSourceName());
+    cmd.put(ParamCmd.SRCTYPE, key.getSourceType());
 
-    map.put(SysCmd.ADDPFM, ParamCmd.FILE, key.getQualifiedSourceFile());
-    map.put(SysCmd.ADDPFM, ParamCmd.MBR, key.getSourceName());
-    map.put(SysCmd.ADDPFM, ParamCmd.SRCTYPE, key.getSourceType());
-
-    commandExec.executeCommand(map.getCommandString(SysCmd.ADDPFM));
+    commandExec.executeCommand(cmd);
 
   }
 
-  public void migrateMemberToStreamFile(TargetKey key){
-    ParamMap map = new ParamMap();
+  public void migrateMemberToStreamFile(TargetKey key) throws Exception {
+    CommandObject cmd = new CommandObject(SysCmd.CPYTOSTMF);
 
     if(!key.containsStreamFile()) key.setStreamSourceFile(currentUser.getHomeDirectory() + "/" + "sources" + "/" + key.asString());
 
-    map.put(SysCmd.CPYTOSTMF, ParamCmd.FROMMBR, key.getMemberPath());
-    map.put(SysCmd.CPYTOSTMF, ParamCmd.TOSTMF, key.getStreamFile());
-    map.put(SysCmd.CPYTOSTMF, ParamCmd.STMFOPT, "*REPLACE");
-    map.put(SysCmd.CPYTOSTMF, ParamCmd.STMFCCSID, MasterCompiler.UTF8_CCSID);
-    map.put(SysCmd.CPYTOSTMF, ParamCmd.ENDLINFMT, "*LF");
+    cmd.put(ParamCmd.FROMMBR, key.getMemberPath());
+    cmd.put(ParamCmd.TOSTMF, key.getStreamFile());
+    cmd.put(ParamCmd.STMFOPT, "*REPLACE");
+    cmd.put(ParamCmd.STMFCCSID, MasterCompiler.UTF8_CCSID);
+    cmd.put(ParamCmd.ENDLINFMT, "*LF");
 
-    commandExec.executeCommand(map.getCommandString(SysCmd.CPYTOSTMF));
+    commandExec.executeCommand(cmd);
   }
 
-  public void migrateStreamFileToMember(TargetKey key){
-    ParamMap map = new ParamMap();
+  public void migrateStreamFileToMember(TargetKey key) throws Exception {
+    CommandObject cmd = new CommandObject(SysCmd.CPYFRMSTMF);
 
-    map.put(SysCmd.CPYFRMSTMF, ParamCmd.FROMSTMF, key.getStreamFile());
-    map.put(SysCmd.CPYFRMSTMF, ParamCmd.TOMBR, key.getMemberPath());
-    map.put(SysCmd.CPYFRMSTMF, ParamCmd.MBROPT, "*REPLACE");
-    map.put(SysCmd.CPYFRMSTMF, ParamCmd.CVTDTA, "*AUTO");
-    map.put(SysCmd.CPYFRMSTMF, ParamCmd.STMFCODPAG, MasterCompiler.UTF8_CCSID);
+    cmd.put(ParamCmd.FROMSTMF, key.getStreamFile());
+    cmd.put(ParamCmd.TOMBR, key.getMemberPath());
+    cmd.put(ParamCmd.MBROPT, "*REPLACE");
+    cmd.put(ParamCmd.CVTDTA, "*AUTO");
+    cmd.put(ParamCmd.STMFCODPAG, MasterCompiler.UTF8_CCSID);
 
-    commandExec.executeCommand(map.getCommandString(SysCmd.CPYFRMSTMF));
+    commandExec.executeCommand(cmd);
   }
 
   /* Validate if Source PF exists */
   public boolean sourcePfExists(TargetKey key) throws SQLException{
-    //TODO: Change this for library list
     try (Statement validateStmt = connection.createStatement();
         ResultSet validateRs = validateStmt.executeQuery(
             "With " +

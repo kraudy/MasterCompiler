@@ -84,7 +84,7 @@ public class MasterCompiler{
     try {
       /* Global before */
       if(!globalSpec.before.isEmpty()){
-        if (verbose) logger.error("\nExecuting global before");
+        if (verbose) logger.error("Executing global before");
         commandExec.executeCommand(globalSpec.before);
       }
 
@@ -95,18 +95,18 @@ public class MasterCompiler{
 
       /* Execute global after */
       if(!globalSpec.after.isEmpty()){
-        if (verbose) logger.error("\nExecuting global after");
+        if (verbose) logger.error("Executing global after");
         commandExec.executeCommand(globalSpec.after);
       }
 
       /* Execute global success */
       if(!globalSpec.success.isEmpty()){
-        if (verbose) logger.error("\nExecuting global success");
+        if (verbose) logger.error("Executing global success");
         commandExec.executeCommand(globalSpec.success);
       }
       
     } catch (CompilerException e){
-      if (verbose) logger.error("\nCompilation failed");
+      if (verbose) logger.error("Compilation failed");
 
       /* Get full compiler exception context */
       logger.error(e.getFullContext());
@@ -114,7 +114,7 @@ public class MasterCompiler{
       /* Global compiler failure */
       try{
         if(!globalSpec.failure.isEmpty()){
-          if (verbose) logger.error("\nExecuting global failure");
+          if (verbose) logger.error("Executing global failure");
           commandExec.executeCommand(globalSpec.failure);
         }
       } catch (Exception failureErr) {
@@ -123,7 +123,7 @@ public class MasterCompiler{
 
     } catch (Exception e) {
       /* Unhandled Exception. Fail loudly */
-      logger.error("\nUnhandled Exception. Fail loudly", e);
+      logger.error("Unhandled Exception. Fail loudly", e);
 
     } finally {
       /* Show chain of commands */
@@ -144,24 +144,24 @@ public class MasterCompiler{
       if (diff) {
         sourceDes.getObjectTimestamps(key);
         if (!key.needsRebuild()) {
-          if (verbose) logger.info("\nSkipping unchanged target: " + key.asString() + key.getTimestmaps());
+          if (verbose) logger.info("Skipping unchanged target: " + key.asString() + key.getTimestmaps());
           continue; 
         }
       }
 
-      if (verbose) logger.info("\nBuilding: " + key.asString());
+      if (verbose) logger.info("Building: " + key.asString());
 
       try{
 
         /* Resolve curlib */
         if(key.isCurLib()){
-          if (verbose) logger.error("\nResolving curlib");
+          if (verbose) logger.error("Resolving curlib");
           key.setLibrary(getCurLIb());
         }
 
         /* Per target before */
         if(!targetSpec.before.isEmpty()){
-          if (verbose) logger.error("\nExecuting target before");
+          if (verbose) logger.error("Executing target before");
           commandExec.executeCommand(targetSpec.before);
         }
 
@@ -182,13 +182,13 @@ public class MasterCompiler{
 
         /* Per target after */
         if(!targetSpec.after.isEmpty()){
-          if (verbose) logger.error("\nExecuting target after");
+          if (verbose) logger.info("Executing target after");
           commandExec.executeCommand(targetSpec.after);
         } 
 
         /* Per target success */
         if(!targetSpec.success.isEmpty()){
-          if (verbose) logger.error("\nExecuting target success");
+          if (verbose) logger.info("Executing target success");
           commandExec.executeCommand(targetSpec.success);
         } 
 
@@ -197,7 +197,7 @@ public class MasterCompiler{
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
-          if (verbose) logger.error("\nExecuting target failure");
+          if (verbose) logger.error("Executing target failure");
           commandExec.executeCommand(targetSpec.failure);
         } 
 

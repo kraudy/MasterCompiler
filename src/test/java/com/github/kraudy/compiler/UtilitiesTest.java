@@ -134,11 +134,11 @@ public class UtilitiesTest {
       BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
 
       assertEquals(2, spec.before.size()); /* 2 commands */
-      assertTrue(spec.before.contains("CHGLIBL LIBL(mylib1 mylib2)"));
-      assertTrue(spec.before.contains("CHGCURLIB CURLIB(mylib2)"));
+      assertTrue(spec.before.get(0).getCommandString().contains("CHGLIBL LIBL(mylib1 mylib2)"));
+      assertTrue(spec.before.get(1).getCommandString().contains("CHGCURLIB CURLIB(mylib2)"));
 
       assertEquals(1, spec.after.size()); /* 1 command */
-      assertTrue(spec.after.contains("CHGLIBL LIBL()"));
+      assertTrue(spec.after.get(0).getCommandString().contains("CHGLIBL LIBL()"));
 
       assertFalse(spec.targets.isEmpty());
     } finally {
@@ -174,10 +174,10 @@ public class UtilitiesTest {
       assertNotNull(ts1);
 
       assertEquals(1, ts1.before.size()); // 1 command in before
-      assertTrue(ts1.before.contains("CHGCURLIB CURLIB(mylib1)"));
+      assertTrue(ts1.before.get(0).getCommandString().contains("CHGCURLIB CURLIB(mylib1)"));
 
       assertEquals(1, ts1.after.size());  // 1 command in after
-      assertTrue(ts1.after.contains("CHGCURLIB CURLIB(mylib2)"));
+      assertTrue(ts1.after.get(0).getCommandString().contains("CHGCURLIB CURLIB(mylib2)"));
 
       assertEquals("Target specific text", ts1.params.get(ParamCmd.TEXT));
       assertEquals("/home/sources/HELLO.RPGLE", ts1.params.get(ParamCmd.SRCSTMF));

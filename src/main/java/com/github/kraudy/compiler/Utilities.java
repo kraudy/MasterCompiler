@@ -2,6 +2,7 @@ package com.github.kraudy.compiler;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -9,7 +10,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.github.kraudy.compiler.CompilationPattern.Command;
+import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 
 /*

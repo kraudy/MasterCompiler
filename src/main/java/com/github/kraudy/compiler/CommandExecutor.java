@@ -6,10 +6,17 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
+import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
+import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 
 public class CommandExecutor {
   private static final Logger logger = LoggerFactory.getLogger(CommandExecutor.class);
@@ -20,6 +27,11 @@ public class CommandExecutor {
   private final boolean dryRun;
   private final StringBuilder CmdExecutionChain = new StringBuilder();
 
+  /* System commands with a recovery command in case of failure */
+  private static final List<SysCmd> sysCmdWithRecovery = Arrays.asList(
+    SysCmd.CRTBNDDIR
+  );
+
   public CommandExecutor(Connection connection, boolean debug, boolean verbose, boolean dryRun){
     this.connection = connection;
     this.debug = debug;
@@ -28,21 +40,50 @@ public class CommandExecutor {
 
   }
  
-  public void executeCommand(List<String> commandList) throws SQLException{
-    for(String command: commandList){
+  public void executeCommand(List<CommandObject> commandList) throws Exception, SQLException{
+    for(CommandObject command: commandList){
       executeCommand(command);
     }
+  }
+
+  /* Executes system commands */
+  public void executeCommand(CommandObject command) throws Exception{
+    Timestamp commandTime = getCurrentTime();
+    String commandString = command.getCommandStringWithoutSummary();
+
+    try {
+      executeCommand(commandString, commandTime);
+    } catch (CompilerException e) {
+
+      if (!CommandExecutor.sysCmdWithRecovery.contains(command.getSystemCommand())) {
+        throw new CompilerException("System command failed", e, command);
+      }
+
+      List<ErrMsg> errorMessages = getErrorsList(commandTime);
+
+      if(errorMessages.size() == 0) {
+        if(verbose) logger.error("No error messages found : " + commandString);
+        throw new CompilerException("System command failed", e, command);
+      }
+
+      /* We try to recover from known execution errors */
+      if(verbose) logger.error("Trying recovery command for falied : " + commandString);
+      executeCommand(recoverFromFailure(command, errorMessages));
+
+    } catch (Exception e) {
+      throw new CompilerException("Unexpected exception in target compilation command", e, command);
+    }
+
   }
 
   /* Executes targets compilation commands */
   public void executeCommand(TargetKey key) throws Exception{
     Timestamp commandTime = getCurrentTime();
-    String command = key.getCommandString();
+    String commandString = key.getCommandString();
 
     try {
-      executeCommand(command);
+      executeCommand(commandString, commandTime);
     } catch (CompilerException e) {
-      //if(verbose) showCompilationSpool(commandTime);
       if(verbose) logger.info(showCompilationSpool(commandTime));
       throw new CompilerException("Target compilation failed", e, key);
     } catch (Exception e) {
@@ -54,13 +95,12 @@ public class CommandExecutor {
   }
 
   /* Executes system commands */
-  public void executeCommand(String command) throws CompilerException {
-    Timestamp commandTime = getCurrentTime();
+  public void executeCommand(String commandString, Timestamp commandTime) throws CompilerException {
 
     if (this.CmdExecutionChain.length() > 0) {
       this.CmdExecutionChain.append(" => ");
     }
-    this.CmdExecutionChain.append(command);
+    this.CmdExecutionChain.append(commandString);
 
     /* Dry run just returns before executing the command */
     if(dryRun){
@@ -68,15 +108,15 @@ public class CommandExecutor {
     }
 
     try (Statement cmdStmt = connection.createStatement()) {
-      cmdStmt.execute("CALL QSYS2.QCMDEXC('" + command + "')");
+      cmdStmt.execute("CALL QSYS2.QCMDEXC('" + commandString + "')");
     } catch (SQLException e) {
-      logger.error("\nCommand failed: " + command);
+      logger.error("\nCommand failed: " + commandString);
 
       String joblog = buildJoblogMessagesString(commandTime);
-      throw new CompilerException("Command execution failed", e, command, commandTime, joblog);  // No target here
+      throw new CompilerException("Command execution failed", e, commandString, commandTime, joblog);  // No target here
     }
 
-    logger.info("\nCommand successful: " + command);
+    logger.info("\nCommand successful: " + commandString);
     if(verbose) logger.info(buildJoblogMessagesString(commandTime));
   }
 
@@ -91,6 +131,22 @@ public class CommandExecutor {
       throw new CompilerException("Error retrieving command time", e);
     }
     return currentTime;
+  }
+
+  /* For a system command to have a recovery logic, it need to be in the list sysCmdWithRecovery */
+  public List<CommandObject> recoverFromFailure(CommandObject cmd, List<ErrMsg> errorMessages) {
+    switch (cmd.getSystemCommand()) {
+      case CRTBNDDIR:
+        if (errorMessages.contains(ErrMsg.CPF2112)) { //Object type *BNDDIR already exists.
+          CommandObject previousCommand = new CommandObject(SysCmd.DLTOBJ);
+          previousCommand.put(ParamCmd.OBJ, cmd.get(ParamCmd.BNDDIR));
+          previousCommand.put(ParamCmd.OBJTYPE, ValCmd.BNDDIR);
+          return Arrays.asList(previousCommand, cmd);
+        }
+        break;
+
+    }
+    throw new CompilerException("System command with recovery but no matched found. This should not happen: " + cmd.getCommandStringWithoutSummary());
   }
 
   private String buildJoblogMessagesString(Timestamp commandTime) {
@@ -131,6 +187,33 @@ public class CommandExecutor {
     }
 
     return messages.toString();
+}
+
+  private List<ErrMsg> getErrorsList(Timestamp commandTime) {
+    List<ErrMsg> errorMessages = new ArrayList<>();
+
+    try (Statement stmt = connection.createStatement();
+         ResultSet rsMessages = stmt.executeQuery(
+             "SELECT MESSAGE_ID " +
+             "FROM TABLE(QSYS2.JOBLOG_INFO('*')) " +
+             "WHERE FROM_USER = USER " +
+             "AND MESSAGE_TIMESTAMP > '" + commandTime + "' " +
+             "AND MESSAGE_ID NOT IN ('SQL0443', 'CPC0904', 'CPF2407') " +
+             "AND SEVERITY > 20 " + // Only errors
+             "ORDER BY MESSAGE_TIMESTAMP ASC"
+         )) {
+
+
+        while (rsMessages.next()) {
+          String messageId = rsMessages.getString("MESSAGE_ID").trim();
+          ErrMsg errMsg = ErrMsg.fromString(messageId);
+          errorMessages.add(errMsg);
+        }
+
+    } catch (SQLException e) {
+      throw new CompilerException("Error retrieving joblog", e);
+    }
+  return errorMessages;
 }
 
   public String getExecutionChain() {
