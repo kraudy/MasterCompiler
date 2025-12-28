@@ -70,7 +70,9 @@ public class CompilationPattern {
   );
 
   public enum SourceType { 
-    RPG, RPGLE, SQLRPGLE, CLP, CLLE, SQL, BND, DDS;
+    RPG, RPGLE, SQLRPGLE, CLP, CLLE, SQL, BND, DDS,
+    CMD, MNU, QMQRY
+    ;
 
     public static SourceType fromString(String value) {
       try {
@@ -102,6 +104,8 @@ public class CompilationPattern {
               return DftSrc.QPFSRC.name();
             case LF:
               return DftSrc.QLFSRC.name();
+            case PRTF:
+              return  DftSrc.QPRTFSRC.name();
           }
           
         case SQL:
@@ -114,7 +118,9 @@ public class CompilationPattern {
 
   /* Compiled objects types */
   public enum ObjectType { 
-    PGM, SRVPGM, MODULE, TABLE, LF, INDEX, VIEW, ALIAS, PROCEDURE, FUNCTION, PF, DSPF;
+    PGM, SRVPGM, MODULE, TABLE, LF, INDEX, VIEW, ALIAS, PROCEDURE, FUNCTION, PF, DSPF, PRTF,
+    CMD, MNU, QMQRY
+    ;
     public String toParam(){
       return "*" + this.name();
     }
@@ -122,7 +128,7 @@ public class CompilationPattern {
 
   /* Default source files */
   public enum DftSrc { 
-    QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC 
+    QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC, QPRTFSRC
   }
 
   /* Commands params as enums */
@@ -326,7 +332,24 @@ public class CompilationPattern {
     ddsMap.put(ObjectType.PF, CompCmd.CRTPF);
     ddsMap.put(ObjectType.DSPF, CompCmd.CRTDSPF);
     ddsMap.put(ObjectType.LF, CompCmd.CRTLF);
+    ddsMap.put(ObjectType.PRTF, CompCmd.CRTPRTF);
     typeToCmdMap.put(SourceType.DDS, ddsMap);
+
+    /* Source type: CMD */
+    Map<ObjectType, CompCmd> cmdMap = new EnumMap<>(ObjectType.class);
+    cmdMap.put(ObjectType.CMD, CompCmd.CRTCMD);
+    typeToCmdMap.put(SourceType.CMD, cmdMap);
+
+    /* Source type: MNU */
+    Map<ObjectType, CompCmd> mnuMap = new EnumMap<>(ObjectType.class);
+    mnuMap.put(ObjectType.MNU, CompCmd.CRTCMD);
+    typeToCmdMap.put(SourceType.MNU, mnuMap);
+
+    /* Source type: QMQRY */
+    Map<ObjectType, CompCmd> qmqryMap = new EnumMap<>(ObjectType.class);
+    qmqryMap.put(ObjectType.QMQRY, CompCmd.CRTCMD);
+    typeToCmdMap.put(SourceType.QMQRY, qmqryMap);
+
   }  
 
   /* 
@@ -561,7 +584,7 @@ public class CompilationPattern {
    */
 
   // CRTSRVPGM
-  public static final List<ParamCmd> SrvpgmPattern = Arrays.asList(
+  public static final List<ParamCmd> Bnd_Srvpgm_Pattern = Arrays.asList(
     ParamCmd.SRVPGM,
     ParamCmd.MODULE,
     ParamCmd.EXPORT,  
@@ -589,7 +612,7 @@ public class CompilationPattern {
   );
 
   // CRTBNDRPG
-  public static final List<ParamCmd> ileRpgPgmPattern = Arrays.asList(
+  public static final List<ParamCmd> Rpgle_Pgm_Pattern = Arrays.asList(
     ParamCmd.PGM,       // Program
     ParamCmd.SRCFILE,   // Source file
     ParamCmd.SRCMBR,    // Source member
@@ -642,7 +665,7 @@ public class CompilationPattern {
   );
 
   // CRTBNDCL
-  public static final List<ParamCmd> ileClPgmPattern = Arrays.asList(
+  public static final List<ParamCmd> Clle_Pgm_Pattern = Arrays.asList(
     ParamCmd.PGM,       // Program
     ParamCmd.SRCFILE,   // Source file
     ParamCmd.SRCMBR,    // Source member
@@ -677,7 +700,7 @@ public class CompilationPattern {
   /* Modules */
 
   // CRTRPGMOD
-  public static final List<ParamCmd> RpgModulePattern = Arrays.asList(
+  public static final List<ParamCmd> Rpgle_Mod_Pattern = Arrays.asList(
     ParamCmd.MODULE, 
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR,    // Source member
@@ -722,7 +745,7 @@ public class CompilationPattern {
   );
 
   // CRTCLMOD
-  public static final List<ParamCmd> ClleModulePattern = Arrays.asList(
+  public static final List<ParamCmd> Clle_Mod_Pattern = Arrays.asList(
     ParamCmd.MODULE, 
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR, 
@@ -751,7 +774,7 @@ public class CompilationPattern {
   /* Sql and RPG */
 
   // CRTSQLRPGI
-  public static final List<ParamCmd> SqlRpgPgmPattern = Arrays.asList(
+  public static final List<ParamCmd> SqlRpgle_Pgm_Mod_Pattern = Arrays.asList(
     ParamCmd.OBJ, 
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR, 
@@ -804,7 +827,7 @@ public class CompilationPattern {
   /* OPM */
 
   // CRTRPGPGM
-  public static final List<ParamCmd> opmRpgPgmPattern = Arrays.asList(
+  public static final List<ParamCmd> Rpg_Pgm_Pattern = Arrays.asList(
     ParamCmd.PGM,       // Program
     ParamCmd.SRCFILE,   // Source file
     ParamCmd.SRCMBR,    // Source member
@@ -835,7 +858,7 @@ public class CompilationPattern {
   );
 
   // CRTCLPGM
-  public static final List<ParamCmd> opmClPgmPattern = Arrays.asList(
+  public static final List<ParamCmd> Clp_Pgm_Pattern = Arrays.asList(
     ParamCmd.PGM,       // Program
     ParamCmd.SRCFILE,   // Source file
     ParamCmd.SRCMBR,    // Source member
@@ -860,7 +883,7 @@ public class CompilationPattern {
   /* Sql */
 
   // RUNSQLSTM
-  public static final List<ParamCmd> SqlPattern = Arrays.asList(
+  public static final List<ParamCmd> Sql_Pattern = Arrays.asList(
     ParamCmd.SRCFILE,   // Source file
     ParamCmd.SRCMBR,    // Source member
     ParamCmd.SRCSTMF,   // Source stream file
@@ -901,7 +924,7 @@ public class CompilationPattern {
   /* DDS Files */
 
   // CRTDSPF
-  public static final List<ParamCmd> ddsDspfPattern = Arrays.asList(
+  public static final List<ParamCmd> Dds_Dspf_Pattern = Arrays.asList(
     ParamCmd.FILE,    
     ParamCmd.SRCFILE, 
     ParamCmd.SRCMBR,  
@@ -929,7 +952,7 @@ public class CompilationPattern {
   );
 
   // CRTPF
-  public static final List<ParamCmd> ddsPfPattern = Arrays.asList(
+  public static final List<ParamCmd> Dds_Pf_Pattern = Arrays.asList(
     ParamCmd.FILE,
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR,  
@@ -970,7 +993,7 @@ public class CompilationPattern {
   );
 
   // CRTLF
-  public static final List<ParamCmd> ddsLfPattern = Arrays.asList(
+  public static final List<ParamCmd> Dds_Lf_Pattern = Arrays.asList(
     ParamCmd.FILE,
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR,  
@@ -1001,7 +1024,7 @@ public class CompilationPattern {
   );
 
   // CRTPRTF
-  public static final List<ParamCmd> ddsPrtfPattern = Arrays.asList(
+  public static final List<ParamCmd> Dds_Prtf_Pattern = Arrays.asList(
     ParamCmd.FILE,   
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR, 
@@ -1081,7 +1104,7 @@ public class CompilationPattern {
   );
 
   // CRTCMD
-  public static final List<ParamCmd> CmdPattern = Arrays.asList(
+  public static final List<ParamCmd> Cmd_Pattern = Arrays.asList(
     ParamCmd.CMD,
     ParamCmd.PGM,        
     ParamCmd.SRCFILE,    
@@ -1096,7 +1119,7 @@ public class CompilationPattern {
 
 
   // CRTMNU
-  public static final List<ParamCmd> MnuPattern = Arrays.asList(
+  public static final List<ParamCmd> Mnu_Pattern = Arrays.asList(
     ParamCmd.MENU,   
     ParamCmd.TYPE,   
     ParamCmd.DSPF,   
@@ -1117,7 +1140,7 @@ public class CompilationPattern {
   );
 
   // CRTQMQRY
-  public static final List<ParamCmd> QmqryPattern = Arrays.asList(
+  public static final List<ParamCmd> Qmqry_Pattern = Arrays.asList(
     ParamCmd.QMQRY,
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR,
@@ -1157,28 +1180,28 @@ public class CompilationPattern {
      */ 
 
     /* ILE */
-    commandToPatternMap.put(CompCmd.CRTSRVPGM, SrvpgmPattern);
-    commandToPatternMap.put(CompCmd.CRTBNDRPG, ileRpgPgmPattern);
-    commandToPatternMap.put(CompCmd.CRTBNDCL, ileClPgmPattern);
-    commandToPatternMap.put(CompCmd.CRTRPGMOD, RpgModulePattern);
-    commandToPatternMap.put(CompCmd.CRTCLMOD, ClleModulePattern);
-    commandToPatternMap.put(CompCmd.CRTSQLRPGI, SqlRpgPgmPattern);
+    commandToPatternMap.put(CompCmd.CRTSRVPGM, Bnd_Srvpgm_Pattern);
+    commandToPatternMap.put(CompCmd.CRTBNDRPG, Rpgle_Pgm_Pattern);
+    commandToPatternMap.put(CompCmd.CRTBNDCL, Clle_Pgm_Pattern);
+    commandToPatternMap.put(CompCmd.CRTRPGMOD, Rpgle_Mod_Pattern);
+    commandToPatternMap.put(CompCmd.CRTCLMOD, Clle_Mod_Pattern);
+    commandToPatternMap.put(CompCmd.CRTSQLRPGI, SqlRpgle_Pgm_Mod_Pattern);
     /* OPM */
-    commandToPatternMap.put(CompCmd.CRTRPGPGM, opmRpgPgmPattern);
-    commandToPatternMap.put(CompCmd.CRTCLPGM, opmClPgmPattern);
+    commandToPatternMap.put(CompCmd.CRTRPGPGM, Rpg_Pgm_Pattern);
+    commandToPatternMap.put(CompCmd.CRTCLPGM, Clp_Pgm_Pattern);
     /* SQL */
-    commandToPatternMap.put(CompCmd.RUNSQLSTM, SqlPattern);
+    commandToPatternMap.put(CompCmd.RUNSQLSTM, Sql_Pattern);
     /* DDS */
-    commandToPatternMap.put(CompCmd.CRTDSPF, ddsDspfPattern);
-    commandToPatternMap.put(CompCmd.CRTPF, ddsPfPattern);
-    commandToPatternMap.put(CompCmd.CRTLF, ddsLfPattern);
-    commandToPatternMap.put(CompCmd.CRTPRTF, ddsPrtfPattern);
+    commandToPatternMap.put(CompCmd.CRTDSPF, Dds_Dspf_Pattern);
+    commandToPatternMap.put(CompCmd.CRTPF, Dds_Pf_Pattern);
+    commandToPatternMap.put(CompCmd.CRTLF, Dds_Lf_Pattern);
+    commandToPatternMap.put(CompCmd.CRTPRTF, Dds_Prtf_Pattern);
     /* CMD */
-    commandToPatternMap.put(CompCmd.CRTCMD, CmdPattern);
-    /* MENU */
-    commandToPatternMap.put(CompCmd.CRTMNU, MnuPattern);
+    commandToPatternMap.put(CompCmd.CRTCMD, Cmd_Pattern);
+    /* MNU */
+    commandToPatternMap.put(CompCmd.CRTMNU, Mnu_Pattern);
     /* QMQRY */
-    commandToPatternMap.put(CompCmd.CRTQMQRY, QmqryPattern);
+    commandToPatternMap.put(CompCmd.CRTQMQRY, Qmqry_Pattern);
   }
 
   /* Return compilation command */

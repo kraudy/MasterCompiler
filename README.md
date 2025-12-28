@@ -23,20 +23,9 @@ To compile an object, it must be defined as a unique key of the form **library.n
 
 The **objectType** and **sourceType** part of the target key define the compilation command to be executed.
 
-* mylib.hello.**pgm.rpgle**         => CRTBNDRPG
-* mylib.sqlhello.**pgm.sqlrpgle**   => CRTSQLRPGI
-* mylib.dsphello.**dspf.dds**       => CRTDSPF
-* mylib.tabhello.**table.sql**      => RUNSQLSTM
-* mylib.modhello.**module.rpgle**   => CRTRPGMOD
-* mylib.srvhello.**srvpgm.bnd**     => CRTSRVPGM
+[Target keys doc](./docs/TargetKey.md)
 
-[Object types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L133) 
-
-[Source types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L69) 
-
-[Compilation command from Object type and Sourece types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L239) 
-
-[Param pattern from Compilation command](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L1064) 
+[Compilation Patterns](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L1) 
 
 ---
 
@@ -45,6 +34,8 @@ The **objectType** and **sourceType** part of the target key define the compilat
 Compiling an object often requires other CL commands to be performed on the same job to set up the appropriate environment: Library list, files overrides, binding directories, etc.
 
 We can define all these patterns in a Yaml file.
+
+[Specs doc](./docs/Spec.md)
 
 [Full spec here](./src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
 
