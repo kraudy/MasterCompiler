@@ -13,24 +13,26 @@ Do you like building cool stuff for fun and freedom? Then this project is for yo
 
 This project aims to give the whole IBM i community a standard way to describe the compilation flow of objects and allow easy integration with any DevOps pipeline to be run locally (just upload the JAR file) or remotely in a Docker container.
 
-All you need as a requirement is Java 8.
+Requirements? Java 8.
 
 ---
 
 ## Compilation target?
 
-To compile an object, it must be defined as a unique key of the form **library.name.objectType.sourceType**. The **objectType** and **sourceType** of the target key define the compilation command to be executed.
+To compile an object, it must be defined as a unique key of the form **library.name.objectType.sourceType**. 
 
-* mylib.hello.pgm.rpgle         => CRTBNDRPG
-* mylib.sqlhello.pgm.sqlrpgle   => CRTSQLRPGI
-* mylib.dsphello.dspf.dds       => CRTDSPF
-* mylib.tabhello.table.sql      => RUNSQLSTM
-* mylib.modhello.module.rpgle   => CRTRPGMOD
-* mylib.srvhello.srvpgm.bnd     => CRTSRVPGM
+The **objectType** and **sourceType** part of the target key define the compilation command to be executed.
+
+* mylib.hello.**pgm.rpgle**         => CRTBNDRPG
+* mylib.sqlhello.**pgm.sqlrpgle**   => CRTSQLRPGI
+* mylib.dsphello.**dspf.dds**       => CRTDSPF
+* mylib.tabhello.**table.sql**      => RUNSQLSTM
+* mylib.modhello.**module.rpgle**   => CRTRPGMOD
+* mylib.srvhello.**srvpgm.bnd**     => CRTSRVPGM
 
 [Object types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L133) 
 
-[Sourece types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L69) 
+[Source types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L69) 
 
 [Compilation command from Object type and Sourece types](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L239) 
 
@@ -40,11 +42,16 @@ To compile an object, it must be defined as a unique key of the form **library.n
 
 ## Flow of compilation?
 
-Define a yaml file
+Compiling an object often requires other CL commands to be performed on the same job to set up the appropriate environment: Library list, files overrides, binding directories, etc.
+
+We can define all these patterns in a Yaml file.
 
 [Full spec here](./src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
+
 [Hooks deserializer](./src/main/java/com/github/kraudy/compiler/CommandMapDeserializer.java) 
+
 [Compilation params deserializer](./src/main/java/com/github/kraudy/compiler/ParamMapDeserializer.java) 
+
 [More yaml examples]() 
 
 ```yaml
@@ -55,83 +62,97 @@ before:       # optional | Global pre-compilation system commands
     libl: mylib1 mylib2 
   chgcurlib:              # Set curlib before targets compilation
     CURLIB: mylib1
+  CrtBndDir:              # Lets create a bind dir
+    BNDDIR: BNDHELLO
 
-after: {}     # optional | Global post-compilation system commands
+after:        # optional | Global post-compilation system commands
+  DltObj:                 # After all target are build, we delete the bind dir to have a clean slate
+    OBJ: BNDHELLO
+    OBJTYPE: BndDir
 
 success: {}   # optional | Global on success system commands
 
-failure: {}   # optional | Global on success system commands
+failure: {}   # optional | Global on failure system commands
 
-targets:      # Required | Global on success system commands
+targets:      # Required | Ordered sequence of compilation targets. At leas one target is required in the spec
 
-  # we can specify curlib as the target library. Convenient.
-  curlib.hello.pgm.rgple:  # Required | Compilation target
+  # Firt create the modules. We can specify curlib as the target library. Convenient.
+  "curlib.modhello1.module.rpgle": 
+    params:                # Per-target compilation command params
+      SRCSTMF: /home/sources/hello2.modhello1.module.rpgle
 
-    params:               # Required | Per-target compilation command params
-      # Compilation params
+  *curlib.modhello2.module.rpgle:
+    params:
+      SRCSTMF: /home/sources/modhello2.module.rpgle
+
+  # Create service program with the modules
+  "CurLib.srvhello.srvpgm.bnd":
+    params:
+      SRCSTMF: /home/sources/srvhello.srvpgm.bnd
+      MODULE:
+        - modhello1
+        - modhello2
+
+  # Ile rpgle with binding module
+  curlib.hello.pgm.rgple:  
+
+    before:               # optional | Per-target pre-compilation system commands
+      AddBndDirE:              # Add entry to bnd dir before target compiling
+        BndDir: BNDHELLO
+        Obj: SRVHELLO
+
+    params:              
+      # Target's compilation params
       SRCSTMF: /home/sources/HELLO.RPGLE
       DFTACTGRP: no
       ACTGRP: QILE
       STGMDL: Snglvl      # note how params names are flexible
       OPTION: EVENTF
-      DBGVIEW: source
+      DBGVIEW: *source
       REPLACE: yes
       USRPRF: user
       TGTRLS: V7R5M0
       PRFDTA: nocol
 
-    before: {}            # optional | Per-target pre-compilation system commands
-
     after: {}             # optional | Per-target post-compilation system commands
 
     success: {}           # optional | Per-target on success system commands
 
-    failure: {}           # optional | Per-target on success system commands
-
-  # You can define more targets, each one with its own hooks and params
-  mylib2.sqlhello.pgm.sqlrpgle: 
-
-    #params:                no params, will use defaults
-
-    before: 
-      chgcurlib:          # change cur lib before target compilation
-        CURLIB: mylib2
-    
-    # ignore other hooks
-
-  # A third target with no params and no hooks. Simplest case
-  mylib2.modhello.module.rpgle: {} 
+    failure: {}           # optional | Per-target on failure system commands
 
 ```
 
-Then just call MasterCompiler like this: **java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spect.yaml**
+After defining the spec, just call MasterCompiler with unix style parameters
 
-Pretty cool, right? Well, here is more:
+```
+java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
+```
 
+Pretty cool, right? Well, there is more.
 
-## Automatic migration
+## Source migration
 
-MC encourages this by automatically migrating source members to ifs stream files and stream files to source members for OPM objects. 
+MC encourages git usage by automatically migrating source members to ifs stream files and stream files to source members for OPM objects. 
 
 [Migrator](./src/main/java/com/github/kraudy/compiler/Migrator.java) 
 
-
-## Automatic param inspection
+## Object inspection
 
 MC tries to extract compilation params from existing objects.
 
 [ObjectDescriptor](./src/main/java/com/github/kraudy/compiler/ObjectDescriptor.java) 
 
+## Parameter resolution
 
-## Automatic param resolution
-
-Conflicts between command params are automatically resolved.
+Conflicts between command params are automatically resolved. e.g., If `SRCSTMF` and `SRCFILE` are present, `SRCFILE` is removed to give priority to stream files.
 
 [Resolve conflict](./src/main/java/com/github/kraudy/compiler/ParamMap.java#L153) 
 
-## Automatic param validation
+## Parameter validation
 
-If an invalid param is provided for a command, an exception is thrown.
+* Every command, param, and value is validated during deserialization. 
+* Invalid params for a given command are rejected, and an error is raised. 
+* Param values are automatically formatted if necessary, e.g., yes to *YES, Source to *SOURCE, etc.
 
 [Reject invalid param](./src/main/java/com/github/kraudy/compiler/ParamMap.java#L91) 
 
@@ -148,9 +169,33 @@ If an invalid param is provided for a command, an exception is thrown.
 
 Fully transparent and traceble flow of execution and changes.
 
-* All messages are logs 
-* Exceptions are handled and raised. No context loss. 
-* Each param change is tracked individually
+* All messages and joblog entries are loged 
+* Failed compilation spools are loged.
+* Exceptions are handled and raised. No context loss with full stack trace.
+* Fail early and loud.
+* Each param change is tracked individually with its own history.
 * Each command executed is tracked in a chain of commands
 
-[Argument parser](./src/main/java/com/github/kraudy/compiler/ParamMap.ArgParser) 
+[]() 
+
+## Contributing
+
+"Follow the spirit of the code" What does that mean? If you go through the lines of a well-thought-out code (or any piece of art), you can actually get a glimpse of the character and philosophy of its creators and their goal.
+
+Here is the rule: **You want to reduce complexity, increase readability, and provide functionality.**
+
+Everything we do is a reflection of ourselves; even the world as we know it is a reflection of humanity... but that's another topic.
+
+## Build Master Compiler
+
+clone repo
+```
+git clone git@github.com:kraudy/MasterCompiler.git
+```
+
+compile and run tests
+```
+mvn clean package
+```
+
+That's it.

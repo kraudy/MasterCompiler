@@ -84,7 +84,7 @@ public class MasterCompiler{
     try {
       /* Global before */
       if(!globalSpec.before.isEmpty()){
-        if (verbose) logger.error("Executing global before");
+        if (verbose) logger.info("Executing global before");
         commandExec.executeCommand(globalSpec.before);
       }
 
@@ -95,13 +95,13 @@ public class MasterCompiler{
 
       /* Execute global after */
       if(!globalSpec.after.isEmpty()){
-        if (verbose) logger.error("Executing global after");
+        if (verbose) logger.info("Executing global after");
         commandExec.executeCommand(globalSpec.after);
       }
 
       /* Execute global success */
       if(!globalSpec.success.isEmpty()){
-        if (verbose) logger.error("Executing global success");
+        if (verbose) logger.info("Executing global success");
         commandExec.executeCommand(globalSpec.success);
       }
       
@@ -155,13 +155,13 @@ public class MasterCompiler{
 
         /* Resolve curlib */
         if(key.isCurLib()){
-          if (verbose) logger.error("Resolving curlib");
+          if (verbose) logger.info("Resolving curlib");
           key.setLibrary(getCurLIb());
         }
 
         /* Per target before */
         if(!targetSpec.before.isEmpty()){
-          if (verbose) logger.error("Executing target before");
+          if (verbose) logger.info("Executing target before");
           commandExec.executeCommand(targetSpec.before);
         }
 

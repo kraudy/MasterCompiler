@@ -181,6 +181,10 @@ public class TargetKey {
     return this.ParamCmdSequence.getCommandString(this.compilationCommand);
   }
 
+  public String getCommandStringWithoutSummary(){
+    return this.ParamCmdSequence.getCommandStringWithoutSummary(this.compilationCommand);
+  }
+
   public String put(ParamCmd param, String value) {
     return this.ParamCmdSequence.put(this.compilationCommand, param, value);
   }

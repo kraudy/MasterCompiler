@@ -79,7 +79,7 @@ public class CommandExecutor {
   /* Executes targets compilation commands */
   public void executeCommand(TargetKey key) throws Exception{
     Timestamp commandTime = getCurrentTime();
-    String commandString = key.getCommandString();
+    String commandString = (verbose) ? key.getCommandString() : key.getCommandStringWithoutSummary();
 
     try {
       executeCommand(commandString, commandTime);

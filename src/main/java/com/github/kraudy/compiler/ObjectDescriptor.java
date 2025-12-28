@@ -126,11 +126,11 @@ public class ObjectDescriptor {
                 "AND OBJECT_TYPE = '" + key.getObjectType() + "' "
           )) {
       if (!rsObj.next()) {
-        if(verbose) logger.info(("\nCould not retrieve pgm object compilation info " + key.asString() ));
+        if(verbose) logger.info(("Could not retrieve pgm object compilation info " + key.asString() ));
         return;
       }
 
-      if (verbose) logger.info("\nFound pgm object compilation info '" + key.asString());
+      if (verbose) logger.info("Found pgm object compilation info '" + key.asString());
 
       switch (key.getCompilationCommand()) {
         case CRTBNDRPG:
@@ -191,7 +191,7 @@ public class ObjectDescriptor {
   /* Query BOUND_MODULE_INFO for module-specific fields */
   private void getModuleInfo(TargetKey key) throws SQLException {
     if (!key.isModule()) {
-      if(verbose) logger.info("\n" + key.asString() + " Is not a module");
+      if(verbose) logger.info("" + key.asString() + " Is not a module");
       return;
     }
     try (Statement stmt = connection.createStatement();
@@ -228,11 +228,11 @@ public class ObjectDescriptor {
             "AND MODULE_ATTRIBUTE = '" + key.getSourceType() + "' "
         )) {
       if (!rsMod.next()) {
-        if(verbose) logger.info("\nCould not retrieve module compilation info " + key.asString());
+        if(verbose) logger.info("Could not retrieve module compilation info " + key.asString());
         return;
       }
 
-      if (verbose) logger.info("\nFound module compilation info " + key.asString());
+      if (verbose) logger.info("Found module compilation info " + key.asString());
 
       String modOptimize = rsMod.getString("OPTIMIZE").trim();
       if (!modOptimize.isEmpty()) {
@@ -283,11 +283,11 @@ public class ObjectDescriptor {
                 "COMMAND_NAME = '" + key.getObjectName() + "' "
           )) {
       if (!rsCmdInfo.next()) {
-        if(verbose) logger.info(("\nCould not retrieve command compilation info " + key.asString()));
+        if(verbose) logger.info(("Could not retrieve command compilation info " + key.asString()));
         return;
       }
 
-      if (verbose) logger.info("\nFound command compilation info" + key.asString());
+      if (verbose) logger.info("Found command compilation info" + key.asString());
       
       // -- Missing: REXSRCFILE, REXSRCMBR, REXCMDENV, REXEXITPGM
       String cmd = rsCmdInfo.getString("CMD").trim();
@@ -353,11 +353,11 @@ public class ObjectDescriptor {
                 "AND OBJECT_TYPE = '" + key.getObjectType() + "' "
           )) {
       if (!rsSqlRpgInfo.next()) {
-        if(verbose) logger.info(("\nCould not retrieve sql object compilation info " + key.asString() ));
+        if(verbose) logger.info(("Could not retrieve sql object compilation info " + key.asString() ));
         return;
       }
 
-      if (verbose) logger.info("\nFound sql object compilation info " + key.asString());
+      if (verbose) logger.info("Found sql object compilation info " + key.asString());
 
       key.put(ParamCmd.TEXT, rsSqlRpgInfo.getString("TEXT").trim()); 
       key.put(ParamCmd.USRPRF, rsSqlRpgInfo.getString("USRPRF").trim()); 

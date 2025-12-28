@@ -46,7 +46,7 @@ public class CompilationPattern {
     // Migration
     CPYFRMSTMF, CPYTOSTMF,
     // Objects
-    DLTOBJ,
+    DLTOBJ, CRTDUPOBJ
     ;
 
     public static SysCmd fromString(String value) {
@@ -189,7 +189,10 @@ public class CompilationPattern {
     FROMMBR, STMFOPT, DBFCCSID, STMFCCSID, ENDLINFMT,
 
     // DLTOBJ
-    ASPDEV, RMVMSG
+    ASPDEV, RMVMSG,
+
+    // CRTDUPOBJ
+    FROMLIB, TOLIB, NEWOBJ, TOASPDEV,
     ;
 
     /* Convert string to param enum */
@@ -356,6 +359,17 @@ public class CompilationPattern {
     ParamCmd.OBJTYPE,
     ParamCmd.ASPDEV,
     ParamCmd.RMVMSG
+  );
+
+  // CRTDUPOBJ
+  public static final List<ParamCmd> CrtDupObj_Pattern = Arrays.asList(
+    ParamCmd.OBJ,   
+    ParamCmd.FROMLIB,
+    ParamCmd.OBJTYPE,
+    ParamCmd.TOLIB,   
+    ParamCmd.NEWOBJ,  
+    ParamCmd.ASPDEV,  
+    ParamCmd.TOASPDEV
   );
 
   // OVRDBF
@@ -1115,8 +1129,9 @@ public class CompilationPattern {
     /* Bind dir */
     commandToPatternMap.put(SysCmd.CRTBNDDIR, BndDirPattern);
     commandToPatternMap.put(SysCmd.ADDBNDDIRE, AddBndDirePattern);
-
+    /* Objects */
     commandToPatternMap.put(SysCmd.DLTOBJ, DltObjPattern);
+    commandToPatternMap.put(SysCmd.CRTDUPOBJ, CrtDupObj_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);
