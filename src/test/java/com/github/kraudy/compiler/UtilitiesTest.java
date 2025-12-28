@@ -28,7 +28,6 @@ public class UtilitiesTest {
       BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
 
       assertFalse(spec.targets.isEmpty());
-      // Use lowercase to match YAML key (equals/hashCode now handles field matching)
       TargetKey key = new TargetKey("mylib.hello.pgm.rpgle");
       assertEquals("Hello World", spec.targets.get(key).params.get(ParamCmd.TEXT));
     } finally {
@@ -134,11 +133,11 @@ public class UtilitiesTest {
       BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
 
       assertEquals(2, spec.before.size()); /* 2 commands */
-      assertTrue(spec.before.get(0).getCommandString().contains("CHGLIBL LIBL(mylib1 mylib2)"));
-      assertTrue(spec.before.get(1).getCommandString().contains("CHGCURLIB CURLIB(mylib2)"));
+      assertTrue(spec.before.get(0).equals("CHGLIBL LIBL(mylib1 mylib2)"));
+      assertTrue(spec.before.get(1).equals("CHGCURLIB CURLIB(mylib2)"));
 
       assertEquals(1, spec.after.size()); /* 1 command */
-      assertTrue(spec.after.get(0).getCommandString().contains("CHGLIBL LIBL()"));
+      assertTrue(spec.after.get(0).equals("CHGLIBL LIBL()"));
 
       assertFalse(spec.targets.isEmpty());
     } finally {
@@ -154,6 +153,8 @@ public class UtilitiesTest {
         "    before:\n" +
         "      chgcurlib:\n" +
         "        CURLIB: mylib1\n" +
+        "      chgcurdir:\n" +
+        "        Dir: /home/BIGDAWG\n" +
         "    after:\n" +
         "      chgcurlib:\n" +
         "        CURLIB: mylib2\n" +
@@ -170,17 +171,18 @@ public class UtilitiesTest {
       BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
 
       TargetKey key1 = new TargetKey("mylib1.hello.pgm.rpgle");
-      BuildSpec.TargetSpec ts1 = spec.targets.get(key1);
-      assertNotNull(ts1);
+      BuildSpec.TargetSpec targetSpec = spec.targets.get(key1);
+      assertNotNull(targetSpec);
 
-      assertEquals(1, ts1.before.size()); // 1 command in before
-      assertTrue(ts1.before.get(0).getCommandString().contains("CHGCURLIB CURLIB(mylib1)"));
+      assertEquals(2, targetSpec.before.size()); // 1 command in before
+      assertTrue(targetSpec.before.get(0).equals("CHGCURLIB CURLIB(mylib1)"));
+      assertTrue(targetSpec.before.get(1).equals("CHGCURDIR DIR(''/home/BIGDAWG'')"));
 
-      assertEquals(1, ts1.after.size());  // 1 command in after
-      assertTrue(ts1.after.get(0).getCommandString().contains("CHGCURLIB CURLIB(mylib2)"));
+      assertEquals(1, targetSpec.after.size());  // 1 command in after
+      assertTrue(targetSpec.after.get(0).equals("CHGCURLIB CURLIB(mylib2)"));
 
-      assertEquals("Target specific text", ts1.params.get(ParamCmd.TEXT));
-      assertEquals("/home/sources/HELLO.RPGLE", ts1.params.get(ParamCmd.SRCSTMF));
+      assertEquals("Target specific text", targetSpec.params.get(ParamCmd.TEXT));
+      assertEquals("/home/sources/HELLO.RPGLE", targetSpec.params.get(ParamCmd.SRCSTMF));
 
       TargetKey key2 = new TargetKey("mylib2.empty.pgm.rpgle");
       assertNotNull(spec.targets.get(key2));

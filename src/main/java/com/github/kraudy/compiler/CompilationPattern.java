@@ -46,7 +46,9 @@ public class CompilationPattern {
     // Migration
     CPYFRMSTMF, CPYTOSTMF,
     // Objects
-    DLTOBJ, CRTDUPOBJ
+    DLTOBJ, CRTDUPOBJ,
+    // Stream files
+    CHGCURDIR
     ;
 
     public static SysCmd fromString(String value) {
@@ -193,6 +195,9 @@ public class CompilationPattern {
 
     // CRTDUPOBJ
     FROMLIB, TOLIB, NEWOBJ, TOASPDEV,
+
+    // CHGCURDIR
+    DIR,
     ;
 
     /* Convert string to param enum */
@@ -370,6 +375,11 @@ public class CompilationPattern {
     ParamCmd.NEWOBJ,  
     ParamCmd.ASPDEV,  
     ParamCmd.TOASPDEV
+  );
+
+  // CHGCURDIR
+  public static final List<ParamCmd> ChgCurDir_Pattern = Arrays.asList(
+    ParamCmd.DIR
   );
 
   // OVRDBF
@@ -1118,8 +1128,6 @@ public class CompilationPattern {
     ParamCmd.REPLACE
   );
 
-  //TODO: Add config file support like YAML. This will allow specific patterns to be provided or loaded at runtime.
-
   public static final Map<Command, List<ParamCmd>> commandToPatternMap = new HashMap<>();
 
   static {
@@ -1132,6 +1140,8 @@ public class CompilationPattern {
     /* Objects */
     commandToPatternMap.put(SysCmd.DLTOBJ, DltObjPattern);
     commandToPatternMap.put(SysCmd.CRTDUPOBJ, CrtDupObj_Pattern);
+    /* stream files */
+    commandToPatternMap.put(SysCmd.CHGCURDIR, ChgCurDir_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);

@@ -242,10 +242,21 @@ public class TargetKey {
   }
 
   @Override
-  public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
-    TargetKey targetKey = (TargetKey) o;
+  public boolean equals(Object obj) {
+    if (this == obj) return true;
+    if (obj == null || getClass() != obj.getClass()) return false;
+
+    // Allow comparison with String directly
+    if (obj instanceof String) {
+      String str = (String) obj;
+      return this.asString().toUpperCase().equals(str);
+    }
+
+    /* If the other object is not a TargetKey, return false */
+    if (!(obj instanceof TargetKey)) return false;
+
+    /* Key string comparison */
+    TargetKey targetKey = (TargetKey) obj;
     return this.asString().toUpperCase().equals(targetKey.asString().toUpperCase());
   }
 

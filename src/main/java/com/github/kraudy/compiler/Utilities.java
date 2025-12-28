@@ -209,6 +209,7 @@ public class Utilities {
       case TOMBR:
       case FROMMBR:
       case TOSTMF:
+      case DIR:
         return "''" + value + "''";
     
       case MODULE:

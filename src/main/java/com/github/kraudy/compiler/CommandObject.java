@@ -3,6 +3,7 @@ package com.github.kraudy.compiler;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
@@ -63,6 +64,33 @@ public class CommandObject {
 
   public String asString() {
     return this.systemCommand.name();
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (this == obj) return true;
+    if (obj == null) return false;
+
+    // Allow comparison with String directly
+    if (obj instanceof String) {
+      String str = (String) obj;
+      return getCommandStringWithoutSummary().equals(str);
+    }
+
+    /* If the other object is not a CommandObject, return false */
+    if (!(obj instanceof CommandObject)) return false;
+
+    /* Perform object casting */
+    CommandObject commandObject = (CommandObject) obj;
+
+    // Standard comparison between two CommandObjects
+    return this.systemCommand == commandObject.systemCommand &&
+           getCommandStringWithoutSummary().equals(commandObject.getCommandStringWithoutSummary());
+  }
+
+  @Override
+  public int hashCode() {
+      return Objects.hash(systemCommand, getCommandStringWithoutSummary());
   }
 
 }

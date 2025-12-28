@@ -1,6 +1,10 @@
 # Spec
 
-To define the flow of compilation, we used a yaml based spec. 
+To define the flow of compilation, we use a yaml based spec. Here, you have the flexibility to define global or specific per [compilation target](./TargetKey.md) hooks to be executed before, after, or in case of success or failure during, before, or after compiling any target. This affords a lot of flexibility in a clean manner.
+
+Many targets can be defined inside a spec and set the compilation environment for each one of them and also for the whole flow. All in the same file and readable in one swoop.
+
+Every command and param is validated at deserialization, so if you have wrongly typed params or the wrong param for a command, MC will instantly tell you, following the spirit of fail loud and early. This also helps to keep the code clean since no more syntactic validation is needed and everything is already mapped to Java objects (which are also data structures... heap allocation).
 
 - [Simplest spec](#simplest-spec)
 - [ILE spec](#ile-spec)
@@ -8,14 +12,14 @@ To define the flow of compilation, we used a yaml based spec.
 
 ## Simplest spec
 
-A single compilation target without compilation params or any pre or post compilation hook. MC will try to extract compilation information from the object, it is not found, sensible defaults will be used.
+A single compilation target without compilation params or any pre or post compilation hook. MC will try to extract compilation information from the object. If not found, sensible defaults will be used.
 
 ```yaml
 targets:
   "robkraudy1.hello.pgm.rpgle": {}
 ```
 
-Save the yaml file and call the compiler. Note how we are using `-xv` flags to get the full output.
+Save the yaml file and call the compiler. Note how we are using `{-xv | -x: debug, -v: verbose}` flags to get the full output. And `{-f, --file: Spec file}` for the spec path.
 ```
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
 ```
@@ -71,11 +75,20 @@ Modern ILE programs are usually built of a module, a service program, and a bind
 
 The outer hooks are called **globals**, they are executed before or after any specific target is compiled. Also, every target can also have its **specific** hooks.
 
+Targets and commands are processed in linear order. First we set up the environment, then, compile the modules, create the service program with the modules. In the last target, add the service program to the bind dir, do the compilation, and then delete the bind dir to have a clean slate. Pretty slick.
+
+For `SRCSTMF` params, the full path or the relative one can be specified. This, along with the `curlib` functionality, allows for easy context switching without being tied to a specific compilation instance.
+
+In any case, you can easily change the cur dir with a global hook
+``` yaml
+before:
+  CHGCURDIR:
+    DIR: /home/BIGDAWG
+```
+
 In this spec, first, we set the library list and cur lib, then, create the bind dir. All this is done before processing any target. 
 
 Since we already set the curlib, we can simply specify **curlib** for the targets libraries.
-
-Targets and commands are processed in linear order. First we set up the environment, then, compile the modules, create the service program with the modules. In the last target, add the service program to the bind dir, do the compilation, and then delete the bind dir to have a clean slate. Pretty slick.
 
 ```yaml
 before:
@@ -89,7 +102,7 @@ before:
 targets:  
   "curlib.modhello1.module.rpgle":
     params:
-      SRCSTMF: /home/ROBKRAUDY/builds/rpg_language/chapter_1/qrpglesrc/modhello1.module.rpgle
+      SRCSTMF: builds/rpg_language/chapter_1/qrpglesrc/modhello1.module.rpgle
 
   "*curlib.modhello2.module.rpgle":
     params:
@@ -101,7 +114,7 @@ targets:
       MODULE:
         - modhello1
         - modhello2
-  
+
   curlib.hello5.pgm.rpgle:
     before:
       AddBndDirE:
@@ -112,7 +125,7 @@ targets:
       DltObj: 
         OBJ: BNDHELLO
         OBJTYPE: BndDir
-        
+
     params:
       SRCSTMF: /home/ROBKRAUDY/builds/rpg_language/chapter_2/qrpglesrc/hello5.pgm.rpgle
       OPTION: EVENTF
@@ -121,7 +134,7 @@ targets:
 
 ```
 
-Save the yaml file and call the compiler with the yaml path as parameter. Here, we omitted the -xv flag to get a reduced log.
+Save the yaml file and call the compiler with the yaml path as parameter. Here, we omitted the `-xv` flag to get a reduced log.
 
 ```
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
@@ -155,7 +168,9 @@ In real life, things burn and fall off the cliff so, it would be wise to take th
 
 When an exception occurs, we follow the unix philosophy: fail loud and early. All exceptions are raised and all the context information (if available) is encapsulated to show the full stack and state of things before the error. 
 
-This spec has a default hooks to set default params values for every target in the spec. This will give us an error because MC will look for the source member inside QRPGLESRC (default source pf) and it does not exists.
+This spec has a default hooks to set default params values for every target in the spec. If the params is not valid for a compilation command, it is just ignored.
+
+This example will give us an error because MC will look for the source member inside QRPGLESRC (default source pf) and it does not exists.
 
 ```yaml
 defaults:
@@ -176,7 +191,7 @@ Save the yaml and call the compiler, this time with the debug and verbose flags 
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/ROBKRAUDY/yaml/pgm_rpgle_error.yaml
 ```
 
-Error log. Note how in this log, we have a full view of everything that happened before, during, and after the exception. No context was lost from the moment it occurred to the moment that it bubbled up to the top of the stack for logging. That is very important and valuable functionality.
+Look at that, a beautiful-looking log. Look how we have a full view of everything that happened before, during, and after the exception. No context was lost from the moment it occurred to the moment that it bubbled up to the top of the stack for logging. That is very important and valuable functionality.
 
 ```diff
 +06:46:47.184 [main] INFO  c.g.kraudy.compiler.MasterCompiler - 
