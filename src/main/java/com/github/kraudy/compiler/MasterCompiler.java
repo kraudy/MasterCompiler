@@ -84,7 +84,7 @@ public class MasterCompiler{
     try {
       /* Global before */
       if(!globalSpec.before.isEmpty()){
-        if (verbose) logger.info("Executing global before");
+        if (verbose) logger.info("Executing global before: " + globalSpec.before.size() + "commands found");
         commandExec.executeCommand(globalSpec.before);
       }
 
@@ -95,13 +95,13 @@ public class MasterCompiler{
 
       /* Execute global after */
       if(!globalSpec.after.isEmpty()){
-        if (verbose) logger.info("Executing global after");
+        if (verbose) logger.info("Executing global after: " + globalSpec.after.size() + "commands found");
         commandExec.executeCommand(globalSpec.after);
       }
 
       /* Execute global success */
       if(!globalSpec.success.isEmpty()){
-        if (verbose) logger.info("Executing global success");
+        if (verbose) logger.info("Executing global success: " + globalSpec.success.size() + "commands found");
         commandExec.executeCommand(globalSpec.success);
       }
       
@@ -161,7 +161,7 @@ public class MasterCompiler{
 
         /* Per target before */
         if(!targetSpec.before.isEmpty()){
-          if (verbose) logger.info("Executing target before");
+          if (verbose) logger.info("Executing target before: " + targetSpec.before.size() + "commands found");
           commandExec.executeCommand(targetSpec.before);
         }
 
@@ -182,13 +182,13 @@ public class MasterCompiler{
 
         /* Per target after */
         if(!targetSpec.after.isEmpty()){
-          if (verbose) logger.info("Executing target after");
+          if (verbose) logger.info("Executing target after: " + targetSpec.after.size() + "commands found");
           commandExec.executeCommand(targetSpec.after);
         } 
 
         /* Per target success */
         if(!targetSpec.success.isEmpty()){
-          if (verbose) logger.info("Executing target success");
+          if (verbose) logger.info("Executing target success: " + targetSpec.success.size() + "commands found");
           commandExec.executeCommand(targetSpec.success);
         } 
 
@@ -197,7 +197,7 @@ public class MasterCompiler{
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
-          if (verbose) logger.error("Executing target failure");
+          if (verbose) logger.error("Executing target failure: " + targetSpec.failure.size() + "commands found");
           commandExec.executeCommand(targetSpec.failure);
         } 
 

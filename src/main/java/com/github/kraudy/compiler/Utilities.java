@@ -214,6 +214,7 @@ public class Utilities {
     
       case MODULE:
       case OBJ:
+      case TOFILE:
         String[] list = value.split(" ");
         if(list.length <= 1) {
           if (value.contains("/")) return value;
@@ -240,6 +241,22 @@ public class Utilities {
         /* If not qualified, set to CURLIB */
         if(!value.contains("/")) value = ValCmd.CURLIB.toString() + "/" + value;
         break;
+
+      case CVTOPT:
+        String[] cvtoptList = value.split(" ");
+        if(cvtoptList.length <= 1) {
+          return value; // If just one value, no need to do ValCmd parse because the deserializer already does it.
+        }
+        value = "";
+        /* Do ValCmd parsing */
+        for(String item : cvtoptList){
+          try { value += ValCmd.fromString(item).toString(); }
+          catch (Exception ignored) {
+            value += item;
+          }
+          value += " "; // Add separator.
+        }
+        return value.trim();
     
       default:
         break;

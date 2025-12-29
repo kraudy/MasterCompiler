@@ -49,7 +49,7 @@ public class CommandExecutor {
   /* Executes system commands */
   public void executeCommand(CommandObject command) throws Exception{
     Timestamp commandTime = getCurrentTime();
-    String commandString = command.getCommandStringWithoutSummary();
+    String commandString = (verbose) ? command.getCommandString() : command.getCommandStringWithoutSummary();
 
     try {
       executeCommand(commandString, commandTime);
