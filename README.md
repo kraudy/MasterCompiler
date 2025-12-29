@@ -78,7 +78,7 @@ targets:      # Required | Ordered sequence of compilation targets. At leas one 
         - modhello1
         - modhello2
 
-  # Ile rpgle with binding module
+  # Ile rpgle with binding dir
   curlib.hello.pgm.rgple:  
 
     before:               # optional | Per-target pre-compilation system commands
@@ -91,7 +91,7 @@ targets:      # Required | Ordered sequence of compilation targets. At leas one 
       SRCSTMF: /home/sources/HELLO.RPGLE
       DFTACTGRP: no
       ACTGRP: QILE
-      STGMDL: Snglvl      # note how params names are flexible
+      STGMDL: Snglvl      # note how params names and values are flexible
       OPTION: EVENTF
       DBGVIEW: *source
       REPLACE: yes
@@ -148,7 +148,7 @@ Metadata extraction from compiled objects.
 
 Fully transparent and traceble flow of execution and changes.
 
-[Error docs](./docs/Traceability.md)
+[Traceability docs](./docs/Traceability.md)
 
 ## Contributing
 
