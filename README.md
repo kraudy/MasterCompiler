@@ -19,13 +19,17 @@ Requirements? Java 8.
 
 ## Compilation target?
 
-To compile an object, it must be defined as a unique key of the form **library.name.objectType.sourceType**. 
+To compile an object, it must be defined as a unique key of the form 
+
+* **library.objectName.objectType.sourceType**. 
+
+* **mylib.hello.pgm.rgple** => `CRTBNDRPG`
 
 The **objectType** and **sourceType** part of the target key define the compilation command to be executed.
 
-[Target keys doc](./docs/TargetKey.md)
+[Target keys docs](./docs/TargetKey.md)
 
-[Compilation Patterns](./src/main/java/com/github/kraudy/compiler/CompilationPattern.java#L1) 
+[Compilation Patterns docs](./docs/Params.md) 
 
 ---
 
@@ -36,14 +40,6 @@ Compiling an object often requires other CL commands to be performed on the same
 We can define all these patterns in a Yaml file.
 
 [Specs doc](./docs/Spec.md)
-
-[Full spec here](./src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
-
-[Hooks deserializer](./src/main/java/com/github/kraudy/compiler/CommandMapDeserializer.java) 
-
-[Compilation params deserializer](./src/main/java/com/github/kraudy/compiler/ParamMapDeserializer.java) 
-
-[More yaml examples]() 
 
 ```yaml
 defaults: {}  # optional | Global compilation command params
@@ -125,53 +121,40 @@ Pretty cool, right? Well, there is more.
 
 MC encourages git usage by automatically migrating source members to ifs stream files and stream files to source members for OPM objects. 
 
-[Migrator](./src/main/java/com/github/kraudy/compiler/Migrator.java) 
+[Migrator doc](./docs/Migration.md)
 
 ## Object inspection
 
 MC tries to extract compilation params from existing objects.
 
-[ObjectDescriptor](./src/main/java/com/github/kraudy/compiler/ObjectDescriptor.java) 
+[Object Descriptor doc](./docs/Inspection.md) 
 
-## Parameter resolution
+## Parameter resolution and validation
+
+Params are enum based, this allows for automatic param conflic resolution and validation in O(1) time. Also allows instant validation at deserialization.
 
 Conflicts between command params are automatically resolved. e.g., If `SRCSTMF` and `SRCFILE` are present, `SRCFILE` is removed to give priority to stream files.
 
-[Resolve conflict](./src/main/java/com/github/kraudy/compiler/ParamMap.java#L153) 
+[Params doc](./docs/Params.md)
 
-## Parameter validation
+## CLI
 
-* Every command, param, and value is validated during deserialization. 
-* Invalid params for a given command are rejected, and an error is raised. 
-* Param values are automatically formatted if necessary, e.g., yes to *YES, Source to *SOURCE, etc.
-
-[Reject invalid param](./src/main/java/com/github/kraudy/compiler/ParamMap.java#L91) 
-
-## Unix style CLI
+Unix base Cli
 
 * YAML file route:  `-f | --file /route/cool_spec.yaml`
 * Debug and verbose mode flags:` -x, -v | -xv`
 * Dry run to generate command strings without execution: `--dry-run `
 * Diff run to build only what has changed: `--diff`
 
-[Argument parser](./src/main/java/com/github/kraudy/compiler/ParamMap.ArgParser) 
+[Cli doc](./docs/Cli.md) 
 
 ## Traceability
 
 Fully transparent and traceble flow of execution and changes.
 
-* All messages and joblog entries are loged 
-* Failed compilation spools are loged.
-* Exceptions are handled and raised. No context loss with full stack trace.
-* Fail early and loud.
-* Each param change is tracked individually with its own history.
-* Each command executed is tracked in a chain of commands
-
-[]() 
+[Error docs](./docs/Errors.md)
 
 ## Contributing
-
-"Follow the spirit of the code" What does that mean? If you go through the lines of a well-thought-out code (or any piece of art), you can actually get a glimpse of the character and philosophy of its creators and their goal.
 
 Here is the rule: **You want to reduce complexity, increase readability, and provide functionality.**
 

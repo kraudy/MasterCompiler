@@ -289,7 +289,6 @@ public class ObjectDescriptor {
 
       if (verbose) logger.info("Found command compilation info" + key.asString());
       
-      // -- Missing: REXSRCFILE, REXSRCMBR, REXCMDENV, REXEXITPGM
       String cmd = rsCmdInfo.getString("CMD").trim();
       if(!cmd.isEmpty()) key.put(ParamCmd.CMD, cmd); 
 

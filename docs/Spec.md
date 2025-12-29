@@ -6,6 +6,14 @@ Many targets can be defined inside a spec and set the compilation environment fo
 
 Every command and param is validated at deserialization, so if you have wrongly typed params or the wrong param for a command, MC will instantly tell you, following the spirit of fail loud and early. This also helps to keep the code clean since no more syntactic validation is needed and everything is already mapped to Java objects (which are also data structures... heap allocation).
 
+
+[Spec class](./src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
+
+[Hooks deserializer class](./src/main/java/com/github/kraudy/compiler/CommandMapDeserializer.java) 
+
+[Compilation params deserializer class](./src/main/java/com/github/kraudy/compiler/ParamMapDeserializer.java) 
+
+Examples 
 - [Simplest spec](#simplest-spec)
 - [ILE spec](#ile-spec)
 - [Error spec](#error-spec)
@@ -192,6 +200,8 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/ROBKRAUDY/yaml/pgm_rpgle_
 ```
 
 Look at that, a beautiful-looking log. Look how we have a full view of everything that happened before, during, and after the exception. No context was lost from the moment it occurred to the moment that it bubbled up to the top of the stack for logging. That is very important and valuable functionality.
+
+If an error spool is generated, MC also adds it to the log.
 
 ```diff
 +06:46:47.184 [main] INFO  c.g.kraudy.compiler.MasterCompiler - 
