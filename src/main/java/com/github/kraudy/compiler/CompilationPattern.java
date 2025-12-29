@@ -264,8 +264,8 @@ public class CompilationPattern {
     WSCST,
 
     //CVTOPT
-    DATETIME, VARCHAR , GRAPHIC,
-    
+    DATETIME, VARCHAR , GRAPHIC, PRV, 
+
     ; 
 
     public static ValCmd fromString(String value) {
