@@ -1,5 +1,6 @@
 package com.github.kraudy.compiler;
 
+import java.io.File;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.ResultSet;
@@ -99,7 +100,12 @@ public class Migrator {
   public void migrateMemberToStreamFile(TargetKey key) throws Exception {
     CommandObject cmd = new CommandObject(SysCmd.CPYTOSTMF);
 
-    if(!key.containsStreamFile()) key.setStreamSourceFile(currentUser.getHomeDirectory() + "/" + "sources" + "/" + key.asString());
+    if(!key.containsStreamFile()){
+      String migrationPath = currentUser.getHomeDirectory() + "/" + "sources";
+      File migrationDir = new File(migrationPath);
+      if (!migrationDir.exists()) migrationDir.mkdirs(); // Create dir if it does not exists
+      key.setStreamSourceFile(migrationPath + "/" + key.asString());
+    }
 
     cmd.put(ParamCmd.FROMMBR, key.getMemberPath());
     cmd.put(ParamCmd.TOSTMF, key.getStreamFile());
