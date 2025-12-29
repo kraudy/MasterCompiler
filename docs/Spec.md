@@ -177,3 +177,43 @@ Command successful: CRTBNDRPG PGM(*CURLIB/HELLO5) SRCSTMF(''/home/ROBKRAUDY/buil
 + 06:39:14.569 [main] INFO  c.g.kraudy.compiler.CommandExecutor - 
 Command successful: DLTOBJ OBJ(*LIBL/BNDHELLO) OBJTYPE(*BNDDIR)
 ```
+
+## Multiple keys
+
+If you have a hook like this
+
+```yaml
+before:
+  OvrDbf: 
+    File: CUST
+    ToFile: CUSTOMER
+  OvrDbf: 
+    File: INST
+    ToFile: IWS_INSTAN
+  OvrDbf: 
+    File: SERV
+    ToFile: IWS_SERVIC
+```
+
+Yaml will silently override each OvrDbf since they are the same key and you will only get `OVRDBF FILE(SERV) TOFILE(*LIBL/IWS_SERVIC)` executed.
+
+To solve this, use a list for each command in the hook.
+
+```yaml
+before:
+  - OvrDbf: 
+      File: CUST
+      ToFile: CUSTOMER
+  - OvrDbf: 
+      File: INST
+      ToFile: IWS_INSTAN
+  - OvrDbf: 
+      File: SERV
+      ToFile: IWS_SERVIC
+```
+
+With this change, you will get all the commands executed: 
+
+``` diff
++ OVRDBF FILE(CUST) TOFILE(*LIBL/CUSTOMER) => OVRDBF FILE(INST) TOFILE(*LIBL/IWS_INSTAN) => OVRDBF FILE(SERV) TOFILE(*LIBL/IWS_SERVIC)
+```
