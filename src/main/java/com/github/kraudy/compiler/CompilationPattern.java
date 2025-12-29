@@ -266,6 +266,9 @@ public class CompilationPattern {
     //CVTOPT
     DATETIME, VARCHAR , GRAPHIC, PRV, 
 
+    // CLOSQLCSR
+    ENDACTGRP, ENDMOD,
+
     ; 
 
     public static ValCmd fromString(String value) {
