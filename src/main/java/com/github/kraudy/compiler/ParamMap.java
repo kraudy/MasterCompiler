@@ -196,6 +196,16 @@ public class ParamMap {
         if (this.containsKey(ParamCmd.SRCSTMF)) {
           this.put(cmd, ParamCmd.CVTCCSID, ValCmd.JOB);
         }
+        /* OBJ param is used by other commands like AddBndDirE where *LIBL is valid but not here */
+        if (this.containsKey(ParamCmd.OBJ)) {
+          String obj = get(ParamCmd.OBJ);
+          String[] objList = obj.split("/");
+          try{
+            if (ValCmd.LIBL == ValCmd.fromString(objList[0])){
+              this.put(cmd, ParamCmd.OBJ, ValCmd.CURLIB.toString() + "/" + objList[1]);
+            }
+          } catch (Exception ignore) {}
+        }
         break;
 
       case CRTSRVPGM:

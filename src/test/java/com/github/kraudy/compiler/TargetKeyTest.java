@@ -70,7 +70,7 @@ public class TargetKeyTest {
   void testPgmSqlRgpleCommand() {
     TargetKey key = new TargetKey("MYLIB.SQLHELLO.PGM.SQLRPGLE");
 
-    key.put(ParamCmd.OBJ, "MYLIB/SQLHELLO");
+    key.put(ParamCmd.OBJ, "*LIBL/SQLHELLO");
     key.put(ParamCmd.SRCSTMF, "/home/sources/SQLHELLO.SQLRPGLE");
     key.put(ParamCmd.COMMIT, "*NONE");
     key.put(ParamCmd.OBJTYPE, "*PGM");
@@ -85,7 +85,7 @@ public class TargetKeyTest {
 
     String cmd = key.getCommandString();
     assertEquals(
-      "CRTSQLRPGI OBJ(MYLIB/SQLHELLO) SRCSTMF(''/home/sources/SQLHELLO.SQLRPGLE'') " +
+      "CRTSQLRPGI OBJ(*CURLIB/SQLHELLO) SRCSTMF(''/home/sources/SQLHELLO.SQLRPGLE'') " +
       "COMMIT(*NONE) OBJTYPE(*PGM) TEXT(''Sqlrpgle compilation test'') OPTION(*EVENTF) TGTRLS(V7R5M0) REPLACE(*YES) " +
       "DBGVIEW(*SOURCE) USRPRF(*USER) CVTCCSID(*JOB)", cmd);
   }
