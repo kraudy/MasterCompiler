@@ -204,6 +204,7 @@ public class CompilationPattern {
 
     // CHGCURDIR
     DIR,
+    
     ;
 
     /* Convert string to param enum */
@@ -261,6 +262,10 @@ public class CompilationPattern {
     OUTQ, OVL, PAGDFN, PAGSEG, PDFMAP, PDG, PNLGRP, PSFCFG, QMFORM, QMQRY , QRYDFN, SBSD,
     SCHIDX, SPADCT, SQLPKG, SQLUDT, SQLXSR, SSND, TBL, TIMZON, USRIDX, USRQ, USRSPC, VLDL,
     WSCST,
+
+    //CVTOPT
+    DATETIME, VARCHAR , GRAPHIC,
+    
     ; 
 
     public static ValCmd fromString(String value) {
