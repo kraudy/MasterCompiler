@@ -218,6 +218,15 @@ public class TargetKey {
   }
 
   public String getSourceFile() {
+    String source = get(ParamCmd.SRCFILE);
+    if (!source.isEmpty()){
+      String[] sourceList = source.split("/");
+      if(sourceList.length < 2){
+        this.sourceFile = source;
+      } else {
+        this.sourceFile = sourceList[1]; // Remove lib and only get source name
+      }
+    }
     return this.sourceFile;
   }
 
