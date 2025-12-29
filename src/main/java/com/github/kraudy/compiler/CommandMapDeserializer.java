@@ -25,41 +25,49 @@ public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>
     /* Stores list of system commands to be executed. Mapped from hooks */
     List<CommandObject> paramList = new ArrayList<>();
 
-    ObjectNode node = parser.getCodec().readTree(parser);
+    // Read as generic JsonNode first to avoid premature cast
+    JsonNode rootNode = parser.getCodec().readTree(parser);
 
-    /* Get before or after commands hooks */
-    Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-    while (fields.hasNext()) {
-      /* Get SysCmd entry */
-      Map.Entry<String, JsonNode> entry = fields.next();
+    // Handle both ObjectNode (map) and ArrayNode (list)
+    if (rootNode.isObject()) {
+      processObjectNode((ObjectNode) rootNode, paramList);
+    } else if (rootNode.isArray()) {
+      for (JsonNode element : rootNode) {
+        if (!element.isObject()) throw new IllegalArgumentException("Each list element must be a command object");
 
-      //TODO: For now, only SysCmd commands, but could be expanded to ExecCmd like CALL, etc
-
-      /* Get command */
-      SysCmd sysCmd = SysCmd.fromString(entry.getKey());
-      CommandObject commandObject = new CommandObject(sysCmd);
-
-      JsonNode paramsNode = entry.getValue();
-
-      if (!paramsNode.isObject()) throw new IllegalArgumentException("Parameters for " + sysCmd.name() + " must be param: value");
-
-      /* Gets list of params and values per command */
-      Iterator<Map.Entry<String, JsonNode>> paramFields = paramsNode.fields();
-      while (paramFields.hasNext()) {
-          /* Get next entry */
-          Map.Entry<String, JsonNode> paramEntry = paramFields.next();
-          /* Get ParamCmd from key */
-          ParamCmd paramCmd = ParamCmd.fromString(paramEntry.getKey());
-          /* Get string value */
-          String valueNode = Utilities.nodeToString(paramEntry.getValue());
-
-          commandObject.put(paramCmd, valueNode);
+        processObjectNode((ObjectNode) element, paramList);
       }
-
-      /* Store command's strings to be later executed */
-      paramList.add(commandObject);
+    } else {
+      throw new IllegalArgumentException("Expected object or array for commands");
     }
 
     return paramList;
   }
+
+  private void processObjectNode(ObjectNode objectNode, List<CommandObject> paramList) {
+    /* Get before or after commands hooks */
+    Iterator<Map.Entry<String, JsonNode>> fields = objectNode.fields();
+    while (fields.hasNext()) {
+      Map.Entry<String, JsonNode> entry = fields.next();
+
+      SysCmd sysCmd = SysCmd.fromString(entry.getKey());
+      CommandObject commandObject = new CommandObject(sysCmd);
+
+      JsonNode paramsNode = entry.getValue();
+      if (!paramsNode.isObject()) {
+        throw new IllegalArgumentException("Parameters for " + sysCmd.name() + " must be param: value");
+      }
+
+      Iterator<Map.Entry<String, JsonNode>> paramFields = paramsNode.fields();
+      while (paramFields.hasNext()) {
+        Map.Entry<String, JsonNode> paramEntry = paramFields.next();
+        ParamCmd paramCmd = ParamCmd.fromString(paramEntry.getKey());
+        String valueNode = Utilities.nodeToString(paramEntry.getValue());
+        commandObject.put(paramCmd, valueNode);
+      }
+
+      paramList.add(commandObject);
+    }
+  }
+
 }
