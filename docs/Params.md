@@ -9,3 +9,4 @@ This also permits
 * Every command, param, and value is validated during deserialization. 
 * Invalid params for a given command are rejected, and an error is raised. 
 * Param values are automatically formatted if necessary, e.g., yes to *YES, Source to *SOURCE, etc.
+* Each param change is tracked individually with its own history.

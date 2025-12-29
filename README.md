@@ -18,11 +18,11 @@ Requirements? Java 8.
 
 ---
 
-## Compilation target?
+## Compilation
 
 To compile an object, it must be defined as a unique key of the form 
 
-* **library.objectName.objectType.sourceType**. 
+* **library**.**objectName**.**objectType**.**sourceType**. 
 
 * **mylib.hello.pgm.rgple** => `CRTBNDRPG`
 
@@ -30,15 +30,12 @@ The **objectType** and **sourceType** part of the target key define the compilat
 
 [Target keys docs](./docs/TargetKey.md)
 
-[Compilation Patterns docs](./docs/Params.md) 
+[Compilation Patterns docs](./docs/Patterns.md) 
 
----
 
-## Flow of compilation?
+Besides the compilation itself, an object often requires other CL commands to be performed on the same job to set up the appropriate environment: Library list, files overrides, binding directories, etc.
 
-Compiling an object often requires other CL commands to be performed on the same job to set up the appropriate environment: Library list, files overrides, binding directories, etc.
-
-We can define all these patterns in a Yaml file.
+We can define a **flow of compilation** in a Yaml file.
 
 [Specs doc](./docs/Spec.md)
 
@@ -118,23 +115,9 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
 
 Pretty cool, right? Well, there is more.
 
-## Source migration
-
-MC encourages git usage by automatically migrating source members to ifs stream files and stream files to source members for OPM objects. 
-
-[Migrator doc](./docs/Migration.md)
-
-## Object inspection
-
-MC tries to extract compilation params from existing objects.
-
-[Object Descriptor doc](./docs/Inspection.md) 
-
 ## Parameter resolution and validation
 
-Params are enum based, this allows for automatic param conflic resolution and validation in O(1) time. Also allows instant validation at deserialization.
-
-Conflicts between command params are automatically resolved. e.g., If `SRCSTMF` and `SRCFILE` are present, `SRCFILE` is removed to give priority to stream files.
+Params are enum based, this allows for automatic param conflic resolution and validation in O(1) time along with instant validation at deserialization.
 
 [Params doc](./docs/Params.md)
 
@@ -149,11 +132,23 @@ Unix base Cli
 
 [Cli doc](./docs/Cli.md) 
 
+## Source migration
+
+MC encourages git usage by automatically migrating source members to ifs stream files and stream files to source members for OPM objects. 
+
+[Migrator doc](./docs/Migration.md)
+
+## Object inspection
+
+Metadata extraction from compiled objects.
+
+[Object Descriptor doc](./docs/Inspection.md) 
+
 ## Traceability
 
 Fully transparent and traceble flow of execution and changes.
 
-[Error docs](./docs/Errors.md)
+[Error docs](./docs/Traceability.md)
 
 ## Contributing
 
