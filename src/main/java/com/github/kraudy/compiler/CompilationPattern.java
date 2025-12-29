@@ -37,8 +37,8 @@ public class CompilationPattern {
     DSPPGMREF, DSPOBJD, DSPDBR ,
     // Bind dir related commands
     CRTBNDDIR, ADDBNDDIRE,
-    // 
-    OVRDBF, OVRPRTF,
+    // Overs
+    OVRDBF, OVRPRTF, DLTOVR,
     //
     CHGOBJD, 
     // Source pf
@@ -176,7 +176,7 @@ public class CompilationPattern {
     MENU, TYPE, DSPF, MSGF, CMDLIN, DSPKEY, PRDLIB,
 
     // OVRDBF
-    TOFILE, POSITION, RCDFMTLCK, NBRRCDS, EOFDLY, EXPCHK, INHWRT, SECURE, OVRSCOPE, OPNSCOPE, SEQONLY, DSTDTA,
+    TOFILE, POSITION, RCDFMTLCK, NBRRCDS, EOFDLY, EXPCHK, INHWRT, SECURE, OVRSCOPE, OPNSCOPE, SEQONLY, DSTDTA, LVL,
 
     // OVRPRTF
     SPLFNAME, IGCDTA, IGCEXNCHR, IGCCHRRTT, IGCCPI, IGCSOSI, IGCCDEFNT,
@@ -511,6 +511,12 @@ public class CompilationPattern {
     ParamCmd.OVRSCOPE,
     ParamCmd.SHARE,   
     ParamCmd.OPNSCOPE
+  );
+
+  // DLTOVR
+  public static final List<ParamCmd> DltOvr_Pattern = Arrays.asList(
+    ParamCmd.FILE,
+    ParamCmd.LVL
   );
 
   // CRTSRCPF
@@ -1168,6 +1174,7 @@ public class CompilationPattern {
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);
+    commandToPatternMap.put(SysCmd.DLTOVR, DltOvr_Pattern);
     /* Source pf */
     commandToPatternMap.put(SysCmd.CRTSRCPF, CrtSrcPfPattern);
     commandToPatternMap.put(SysCmd.ADDPFM, AddPfmPattern);
