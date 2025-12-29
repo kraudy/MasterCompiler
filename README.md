@@ -1,5 +1,6 @@
-
+<div align="center">
 <img src="./images/Master%20Compiler.jpg" alt="Master Compiler logo" style="display: block; margin: 0 auto; width: 40%; max-width: 800px; height: auto; object-fit: cover; aspect-ratio: 1 / 1;">
+</div>
 
 # Master Compiler
 
