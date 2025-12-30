@@ -1,8 +1,10 @@
 # Traceability
 
-In real life, things burn and fall off the cliff so, it would be wise to take it into account. When that happens, we need to have the necessary useful information to know where things went sideway. 
+In real life, things burn and fall off the cliff so, it would be wise to take it into account. 
 
-MC implements a custom Exception [CompilerException](../src/main/java/com/github/kraudy/compiler/CompilerException.java) that allows for a full stack trace without loss of context when an error occurs
+When the rubber meets the road, we need to have the necessary useful information to know where things went sideway. 
+
+**MC** implements a custom Exception [CompilerException](../src/main/java/com/github/kraudy/compiler/CompilerException.java) that allows for a full stack trace without loss of context when an error occurs.
 
 * All messages and joblog entries are loged 
 * Failed compilation spools are loged.
@@ -10,9 +12,9 @@ MC implements a custom Exception [CompilerException](../src/main/java/com/github
 * Fail early and loud.
 * Each command executed is tracked in a chain of commands
 
-When an exception occurs, we follow the unix philosophy: fail loud and early. All exceptions are raised and all the context information (if available) is encapsulated to show the full stack and state of things before the error. 
+When an exception occurs, we follow the unix philosophy: *fail loud and early*. All exceptions are raised and all the context information (if available) is encapsulated to show the full stack and state of things before the error. 
 
-This example will give us an error because MC will look for the source member inside QRPGLESRC (default source pf) and it does not exists.
+This example will give us an error because **MC** will look for the source member inside QRPGLESRC (default source pf) and it does not exists.
 
 ```yaml
 targets:
@@ -22,15 +24,11 @@ targets:
       SRCFILE: "ROBKRAUDY1/PRACTICAS"
 ```
 
-Save the yaml and call the compiler, this time with the debug and verbose flags `-xv`
+Now, look at that beautiful log. Note how we have a full view of everything that happened before, during, and after the exception. 
 
-```
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/ROBKRAUDY/yaml/pgm_rpgle_error.yaml
-```
+No context was lost from the moment it occurred to the moment that it bubbled up to the top of the stack for logging. That is very important and valuable functionality.
 
-Look at that, a beautiful-looking log. Look how we have a full view of everything that happened before, during, and after the exception. No context was lost from the moment it occurred to the moment that it bubbled up to the top of the stack for logging. That is very important and valuable functionality.
-
-If an error spool is generated, MC also adds it to the log.
+If an error spool is generated, **MC** also adds it to the log.
 
 ```diff
 +06:46:47.184 [main] INFO  c.g.kraudy.compiler.MasterCompiler - 

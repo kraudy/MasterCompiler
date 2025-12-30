@@ -1,11 +1,12 @@
 # Spec
 
-To define the flow of compilation, we use a yaml based spec. Here, you have the flexibility to define global or specific per [compilation target](./TargetKey.md) hooks to be executed before, after, or in case of success or failure during, before, or after compiling any target. This affords a lot of flexibility in a clean manner.
+To define a **compilation flow**, we use a yaml based spec. 
 
-Many targets can be defined inside a spec and set the compilation environment for each one of them and also for the whole flow. All in the same file and readable in one swoop.
+This affords you a lot of flexibility in a clean manner to define global or specific per [compilation target](./TargetKey.md) hooks to be executed before, after, or in case of success or failure during, before, or after compiling any target.
 
-Every command and param is validated at deserialization, so if you have wrongly typed params or the wrong param for a command, MC will instantly tell you, following the spirit of fail loud and early. This also helps to keep the code clean since no more syntactic validation is needed and everything is already mapped to Java objects (which are also data structures... heap allocation).
+Many targets can be defined inside a spec and set the compilation environment for each one of them or for the whole flow. All in the same file and readable in one swoop.
 
+Every command and param is validated at deserialization, so if you have wrongly typed params or the wrong param for a command, **MC** will instantly tell you, following the spirit of *fail loud and early*. This also helps to keep the code clean since no more syntactic validation is needed and everything is already mapped to Java objects (which are also data structures... heap allocation).
 
 [Spec class](../src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
 
@@ -51,15 +52,15 @@ Examples
 
 ## Simplest spec
 
-A single compilation target without compilation params or any pre or post compilation hook. MC will try to extract compilation information from the object. If not found, sensible defaults will be used.
+A single compilation target without compilation params or any pre or post compilation hook. **MC** will try to extract compilation information from the object. If not found, sensible defaults will be used.
 
 ```yaml
 targets:
   "robkraudy1.hello.pgm.rpgle": {}
 ```
 
-Save the yaml file and call the compiler. Note how we are using `{-xv | -x: debug, -v: verbose}` flags to get the full output. And `{-f, --file: Spec file}` for the spec path.
-```
+Call **MC**. Note how we are using `{-xv | -x: debug, -v: verbose}` flags to get the full output. And `{-f, --file: Spec file}` for the spec path.
+```bash
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
 ```
 
@@ -118,14 +119,14 @@ Targets and commands are processed in linear order. First we set up the environm
 
 For `SRCSTMF` params, the full path or the relative one can be specified. This, along with the `curlib` functionality, allows for easy context switching without being tied to a specific compilation instance.
 
-In any case, you can easily change the cur dir with a global hook
+In any case, the cur dir can an easily be changed with a hook
 ``` yaml
 before:
   CHGCURDIR:
     DIR: /home/BIGDAWG
 ```
 
-You can also define a global default hook to set default params values for every target in the spec. If the params is not valid for a compilation command, it is just ignored.
+Global default hook to set default params values for every target in the spec can also be defined. If the params is not valid for a compilation command, it is just ignored.
 
 ```yaml
 defaults:
@@ -210,7 +211,7 @@ Command successful: CRTBNDRPG PGM(*CURLIB/HELLO5) SRCSTMF(''/home/ROBKRAUDY/buil
 Command successful: DLTOBJ OBJ(*LIBL/BNDHELLO) OBJTYPE(*BNDDIR)
 ```
 
-## Multiple keys
+## Duplicated commands
 
 If you have a hook like this
 
@@ -227,7 +228,7 @@ before:
     ToFile: IWS_SERVIC
 ```
 
-Yaml will silently override each OvrDbf since they are the same key and you will only get `OVRDBF FILE(SERV) TOFILE(*LIBL/IWS_SERVIC)` executed.
+Yaml will silently override each `OvrDbf` since they are the same json key and you will only get `OVRDBF FILE(SERV) TOFILE(*LIBL/IWS_SERVIC)` executed.
 
 To solve this, use a list for each command in the hook.
 
@@ -249,3 +250,5 @@ With this change, you will get all the commands executed:
 ``` diff
 + OVRDBF FILE(CUST) TOFILE(*LIBL/CUSTOMER) => OVRDBF FILE(INST) TOFILE(*LIBL/IWS_INSTAN) => OVRDBF FILE(SERV) TOFILE(*LIBL/IWS_SERVIC)
 ```
+
+I'm sure this can be improved.

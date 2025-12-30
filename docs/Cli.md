@@ -2,29 +2,19 @@
 
 Master compiler follows unix philosophi in various parts of its design. One of them is the CLI param validation.
 
-All params are validated at the start, so you don't have to insist later on interactive promopts. 
+* All params are validated at the start, so you don't have to insist later on interactive promopts. 
+* Params format follow the short, long syntax
+* Short params can be combined
 
-Params format follow the short, long syntax
-
-Short params can be combined
-
-The only required param is the speck path {-f, --file} 
-
-Debug and verbose log output {-x, -v, -xv}
-
-Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. {--dry-run}
-
-Allows for differentiated build based on last source change compared to object creations using the flag {--diff}
-
-[Argument parser blass](../src/main/java/com/github/kraudy/compiler/ParamMap.ArgParser) 
+[Argument parser class](../src/main/java/com/github/kraudy/compiler/ArgParser.java) 
 
 ## Parameters
 
-* YAML file route:  `-f | --file /route/cool_spec.yaml`
-* Debug and verbose mode flags:` -x, -v | -xv`
-* Dry run to generate command strings without execution: `--dry-run `
-* Diff run to build only what has changed: `--diff`
-* Omit automatic migration: `--no-migrate`
+* Spec path. The only required param.  `{-f, --file} `
+* Debug and verbose log output `{-x, -v, -xv}`
+* Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. `*{--dry-run}`
+* No migrate flag ommits souce files migration `{--no-migrate}`
+* Differentiated build based on last source change compared to object creations `{--diff}`
 
 ## Params permutation
 
@@ -60,4 +50,9 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.ya
 Add diff build
 ```bash
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --diff
+```
+
+Add no migrate
+```bash
+java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --no-migrate
 ```

@@ -1,14 +1,14 @@
 # Migration
 
-What's the biggest problem for modern version control on the IBM i? Its object system; which is also what makes the system so robust, integrated, and efficient. What a conundrum.
+What's the biggest problem for modern version control on the IBM i? 
 
-Specifically, the source members are unique tables (partitioned tables) that only exist on the IBM i operating system. Luckily there is also the PASE IFS file system.
+Its object system; which is also what makes the system so robust, integrated, and efficient. What a conundrum.
 
-MC pushes for all the source files to be stored in the IFS, where tools for version control like Git can be used.
+Source members are unique tables (partitioned tables) that only exist on the IBM i operating system. Luckily there is also the PASE IFS file system.
+
+**MC** pushes for all the source files to be stored in the IFS, where tools for version control like Git can be used.
 
 Automatic migration of source members is performed. For OPM object, the reversed migration is done. If there is any conflict between params, MC does the resolution under the hood, and the changes are shown in the params history. Every change made to a param is tracked individually.
-
-If you want to migrate large code bases in sublinear time, I made this other tool that you may find useful: [SourceMigrator](https://github.com/kraudy/SourceMigrator)
 
 [Migrator class](../src/main/java/com/github/kraudy/compiler/Migrator.java) 
 
@@ -31,3 +31,7 @@ Command successful: CPYFRMSTMF FROMSTMF(''/home/ROBKRAUDY/sources/ROBKRAUDY1/PRA
 +3:55:08.548 [main] INFO c.g.kraudy.compiler.CommandExecutor - 
 Command successful: CRTRPGPGM PGM(*CURLIB/BRICKR) SRCFILE(ROBKRAUDY1/QRPGSRC) SRCMBR(BRICKR) TEXT(''Brick-a-Spell'') OPTION(*LSTDBG) GENOPT(*LIST) REPLACE(*YES) TGTRLS(*CURRENT) USRPRF(*USER)
 ```
+
+## Extra
+
+If you want to migrate large code bases in sublinear time, I made this other tool that you may find useful: [SourceMigrator](https://github.com/kraudy/SourceMigrator)

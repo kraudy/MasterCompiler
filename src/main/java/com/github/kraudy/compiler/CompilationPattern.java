@@ -218,8 +218,6 @@ public class CompilationPattern {
 
     /* Convert param enum to string */
     public String paramString(String val){
-      //if (val == null) return "";
-
       return " " + this.name() + "(" + val + ")";
     }
     

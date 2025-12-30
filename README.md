@@ -31,7 +31,7 @@ Java 8.
 
 ## Object Compilation
 
-To compile an object, it must be defined as a **target key** of the form 
+To compile an object, it must be defined as a **target key** of the form: **mylib.hello.pgm.rgple**.
 
 | Target key | Library | Object name | Object type | Source type |
 |----------|----------|----------|----------|----------|
@@ -56,7 +56,7 @@ Besides the compilation itself, an object often requires other CL commands to be
 * Files overrides
 * Binding directories, etc.
 
-**MC** calls this a **flow of compilation**. Which can be easily defined in a Yaml spec file.
+**MC** calls this a **compilation flow**. Which can be easily defined in a Yaml spec file.
 
 [Specs doc](./docs/Spec.md)
 
