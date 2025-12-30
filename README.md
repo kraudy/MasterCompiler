@@ -49,6 +49,7 @@ The **ObjectType** and **SourceType** part of the **Target key** defines the com
 
 [Compilation Patterns docs](./docs/Patterns.md) 
 
+## Compilation Flow
 
 Besides the compilation itself, an object often requires other CL commands to be performed on the same job to set up the appropriate environment:
 
