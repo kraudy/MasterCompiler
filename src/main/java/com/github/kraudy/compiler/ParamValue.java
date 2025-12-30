@@ -24,7 +24,7 @@ public class ParamValue {
 
     // Getters
     public String get() {
-      return current; // if null, returns null, dah.
+      return current; // if null, returns null
     }
 
     public String put(String value) {
@@ -63,7 +63,10 @@ public class ParamValue {
     }
 
     public boolean wasRemoved() {
-      return "[REMOVED]".equals(getLastChange());
+      if (history.isEmpty()) return false;
+      String current = get();
+      if (current == null) return true;
+      return false;
     }
 
     public boolean wasInit() {

@@ -10,7 +10,7 @@ Automatic migration of source members is performed. For OPM object, the reversed
 
 If you want to migrate large code bases in sublinear time, I made this other tool that you may find useful: [SourceMigrator](https://github.com/kraudy/SourceMigrator)
 
-[Migrator class](./src/main/java/com/github/kraudy/compiler/Migrator.java) 
+[Migrator class](../src/main/java/com/github/kraudy/compiler/Migrator.java) 
 
 Here is the log of a source member migration.
 

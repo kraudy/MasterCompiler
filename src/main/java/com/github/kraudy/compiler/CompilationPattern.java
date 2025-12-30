@@ -230,6 +230,9 @@ public class CompilationPattern {
     CPF2112,  //Object type *BNDDIR already exists.
     CPF5D10,  //Not able to insert binding directory into library.
     CPF5D0B,  //Binding directory was not created
+
+    RNS9380,  // CCSID 1208 of stream file not valid for TGTCCSID(*SRC)
+    RNS9339,  // Could not open stream file
     ; 
 
     public static ErrMsg fromString(String value) {
@@ -793,7 +796,6 @@ public class CompilationPattern {
     ParamCmd.SRCFILE,
     ParamCmd.SRCMBR, 
     ParamCmd.SRCSTMF,
-
     ParamCmd.COMMIT,  
     ParamCmd.RDB,     
     ParamCmd.OBJTYPE, 

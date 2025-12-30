@@ -16,7 +16,7 @@ Dry run execution allows to run the compiler without executing any commands, it 
 
 Allows for differentiated build based on last source change compared to object creations using the flag {--diff}
 
-[Argument parser blass](./src/main/java/com/github/kraudy/compiler/ParamMap.ArgParser) 
+[Argument parser blass](../src/main/java/com/github/kraudy/compiler/ParamMap.ArgParser) 
 
 ## Parameters
 
@@ -24,6 +24,7 @@ Allows for differentiated build based on last source change compared to object c
 * Debug and verbose mode flags:` -x, -v | -xv`
 * Dry run to generate command strings without execution: `--dry-run `
 * Diff run to build only what has changed: `--diff`
+* Omit automatic migration: `--no-migrate`
 
 ## Params permutation
 

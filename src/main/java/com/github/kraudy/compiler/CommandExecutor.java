@@ -13,6 +13,8 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.kraudy.compiler.CompilationPattern.Command;
+import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
@@ -27,8 +29,8 @@ public class CommandExecutor {
   private final boolean dryRun;
   private final StringBuilder CmdExecutionChain = new StringBuilder();
 
-  /* System commands with a recovery command in case of failure */
-  private static final List<SysCmd> sysCmdWithRecovery = Arrays.asList(
+  /* Commands with a recovery in case of failure */
+  private static final List<SysCmd> cmdWithRecovery = Arrays.asList(
     SysCmd.CRTBNDDIR
   );
 
@@ -55,7 +57,7 @@ public class CommandExecutor {
       executeCommand(commandString, commandTime);
     } catch (CompilerException e) {
 
-      if (!CommandExecutor.sysCmdWithRecovery.contains(command.getSystemCommand())) {
+      if (!CommandExecutor.cmdWithRecovery.contains(command.getSystemCommand())) {
         throw new CompilerException("System command failed", e, command);
       }
 
@@ -84,8 +86,21 @@ public class CommandExecutor {
     try {
       executeCommand(commandString, commandTime);
     } catch (CompilerException e) {
-      if(verbose) logger.info(showCompilationSpool(commandTime));
-      throw new CompilerException("Target compilation failed", e, key);
+      List<ErrMsg> errorMessages = getErrorsList(commandTime);
+
+      if(errorMessages.size() == 0) {
+        if(verbose) logger.error("No error messages found : " + commandString);
+        throw new CompilerException("Target compilation failed", e, key);
+      }
+
+      if (!recoverFromFailure(key, errorMessages)){
+        if(verbose) logger.info(showCompilationSpool(commandTime));
+        throw new CompilerException("Target compilation failed", e, key);
+      }
+
+      /* Try again */
+      executeCommand(key);
+      
     } catch (Exception e) {
       throw new CompilerException("Unexpected exception in target compilation command", e, key);
     }
@@ -133,7 +148,7 @@ public class CommandExecutor {
     return currentTime;
   }
 
-  /* For a system command to have a recovery logic, it need to be in the list sysCmdWithRecovery */
+  /* For a system command to have a recovery logic, it need to be in the list cmdWithRecovery */
   public List<CommandObject> recoverFromFailure(CommandObject cmd, List<ErrMsg> errorMessages) {
     switch (cmd.getSystemCommand()) {
       case CRTBNDDIR:
@@ -147,6 +162,32 @@ public class CommandExecutor {
 
     }
     throw new CompilerException("System command with recovery but no matched found. This should not happen: " + cmd.getCommandStringWithoutSummary());
+  }
+
+  /* For target key compilation recovery */
+  public boolean recoverFromFailure(TargetKey key, List<ErrMsg> errorMessages) {
+    /* We try to recover from known execution errors */
+    if(verbose) logger.error("Trying recovery command for falied : " + key.getCommandStringWithoutSummary());
+
+    switch (key.getCompilationCommand()) {
+      case CRTSQLRPGI:
+      case CRTBNDRPG:
+      case CRTBNDCL:
+      case CRTRPGMOD:
+      case CRTCLMOD:
+      case RUNSQLSTM:
+        if (errorMessages.contains(ErrMsg.RNS9380)) { // CCSID 1208 of stream file not valid for TGTCCSID(*SRC)
+          logger.info("If the RNS9380 is not resolved, we reccommend using the flag --no-migrate to ommit migration");
+          key.put(ParamCmd.SRCFILE, key.getQualifiedLiblSourceFile());
+          key.put(ParamCmd.SRCMBR, key.getObjectName());
+          key.removeStreamFile();
+        }
+        return true;
+
+    }
+
+    if(verbose) logger.error("Could not recover from failed compilation command");
+    return false;
   }
 
   private String buildJoblogMessagesString(Timestamp commandTime) {
@@ -206,8 +247,10 @@ public class CommandExecutor {
 
         while (rsMessages.next()) {
           String messageId = rsMessages.getString("MESSAGE_ID").trim();
-          ErrMsg errMsg = ErrMsg.fromString(messageId);
-          errorMessages.add(errMsg);
+          try{
+            ErrMsg errMsg = ErrMsg.fromString(messageId);
+            errorMessages.add(errMsg);
+          } catch (Exception ignore) {} /* UnKnown messages are ignored */
         }
 
     } catch (SQLException e) {

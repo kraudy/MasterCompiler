@@ -136,6 +136,8 @@ Unix base Cli
 
 MC encourages git usage by automatically migrating source members to ifs stream files and stream files to source members for OPM objects. 
 
+Can be disabled with flag `--no-migrate`
+
 [Migrator doc](./docs/Migration.md)
 
 ## Object inspection

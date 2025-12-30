@@ -7,11 +7,11 @@ Many targets can be defined inside a spec and set the compilation environment fo
 Every command and param is validated at deserialization, so if you have wrongly typed params or the wrong param for a command, MC will instantly tell you, following the spirit of fail loud and early. This also helps to keep the code clean since no more syntactic validation is needed and everything is already mapped to Java objects (which are also data structures... heap allocation).
 
 
-[Spec class](./src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
+[Spec class](../src/main/java/com/github/kraudy/compiler/BuildSpec.java) 
 
-[Hooks deserializer class](./src/main/java/com/github/kraudy/compiler/CommandMapDeserializer.java) 
+[Hooks deserializer class](../src/main/java/com/github/kraudy/compiler/CommandMapDeserializer.java) 
 
-[Compilation params deserializer class](./src/main/java/com/github/kraudy/compiler/ParamMapDeserializer.java) 
+[Compilation params deserializer class](../src/main/java/com/github/kraudy/compiler/ParamMapDeserializer.java) 
 
 Examples 
 - [Simplest spec](#simplest-spec)

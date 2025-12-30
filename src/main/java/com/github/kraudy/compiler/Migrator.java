@@ -51,6 +51,9 @@ public class Migrator {
           if(verbose) logger.info("Migrating source member to stream file");
           migrateMemberToStreamFile(key);
           key.put(ParamCmd.SRCSTMF, key.getStreamFile());
+
+          key.removeSourceFile();
+          key.removeMember();
         }
         break;
 
@@ -73,6 +76,8 @@ public class Migrator {
           migrateStreamFileToMember(key);
           key.put(ParamCmd.SRCFILE, key.getQualifiedSourceFile());
           key.put(ParamCmd.SRCMBR, key.getObjectName());
+
+          key.removeStreamFile();
         }
         break;
     }

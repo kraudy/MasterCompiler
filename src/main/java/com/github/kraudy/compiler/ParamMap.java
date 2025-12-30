@@ -31,7 +31,9 @@ public class ParamMap {
   }
 
   public boolean containsKey(ParamCmd param) {
-    return this.paramMap.containsKey(param);
+    if (!this.paramMap.containsKey(param)) return false;
+    ParamValue pv = this.paramMap.get(param);
+    return !pv.wasRemoved();
   }
 
   public Set<ParamCmd> keySet(){
@@ -47,7 +49,9 @@ public class ParamMap {
   public String get(ParamCmd param) {
     ParamValue pv = this.paramMap.get(param);
     if (pv == null) return "";
-    return pv.get();
+    String current = pv.get();
+    if (current == null) return "";
+    return current;
   }
 
   public List<ParamCmd> getPattern(Command cmd) {
@@ -130,7 +134,11 @@ public class ParamMap {
     for (ParamCmd param : compilationPattern) {
       ParamValue pv = this.paramMap.get(param);
       if (pv == null) continue;
-      sb.append(param.paramString(pv.get()));
+      String value = pv.get();
+      if (value == null) continue;
+      if (value.isEmpty()) continue;
+      sb.append(param.paramString(value));
+      //sb.append(param.paramString(pv.get()));
     }
 
     return sb.toString();
@@ -179,6 +187,10 @@ public class ParamMap {
         if (this.containsKey(ParamCmd.SRCSTMF)) {
           this.put(cmd, ParamCmd.TGTCCSID, ValCmd.JOB);
         }
+        /* If  TGTCCSID is present and no stream file, remove it*/
+        if (this.containsKey(ParamCmd.TGTCCSID) && !this.containsKey(ParamCmd.SRCSTMF)) {
+          this.remove(ParamCmd.TGTCCSID);
+        }
         break;
 
       default: 
@@ -195,6 +207,10 @@ public class ParamMap {
       case CRTSQLRPGI:
         if (this.containsKey(ParamCmd.SRCSTMF)) {
           this.put(cmd, ParamCmd.CVTCCSID, ValCmd.JOB);
+        }
+        /* If  CVTCCSID is present and no stream file, remove it*/
+        if (this.containsKey(ParamCmd.CVTCCSID) && !this.containsKey(ParamCmd.SRCSTMF)) {
+          this.remove(ParamCmd.CVTCCSID);
         }
         /* OBJ param is used by other commands like AddBndDirE where *LIBL is valid but not here */
         if (this.containsKey(ParamCmd.OBJ)) {

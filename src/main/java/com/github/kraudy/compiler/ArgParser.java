@@ -20,6 +20,7 @@ public class ArgParser {
     validOptions.put("file", "yamlFile");
 
     validOptions.put("dry-run", "dryRun");
+    validOptions.put("no-migrate", "noMigrate");
 
     validOptions.put("x", "debug");
 
@@ -30,7 +31,7 @@ public class ArgParser {
   }
 
   private static final List<String> booleanOptions = Arrays.asList(
-    "dryRun", "debug", "verbose", "diff"
+    "dryRun", "debug", "verbose", "diff", "noMigrate"
   );
 
   public ArgParser(String[] args) {
@@ -126,6 +127,10 @@ public class ArgParser {
     return (boolean) options.getOrDefault("diff", false);
   }
 
+  public boolean noMigrate() {
+    return (boolean) options.getOrDefault("noMigrate", false);
+}
+
   
 
   // Print usage (call on error)
@@ -136,6 +141,7 @@ public class ArgParser {
     sb.append("  -f, --file     YAML build file (required)").append("\n");
     sb.append("  --diff         Only build changed objects").append("\n");
     sb.append("  --dry-run      Show commands without executing").append("\n");
+    sb.append("  --no-migrate   Disable automatic source migration").append("\n");
     sb.append("  -x,            Debug mode").append("\n");
     sb.append("  -v,            Verbose output");
 

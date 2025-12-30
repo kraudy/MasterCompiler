@@ -102,11 +102,15 @@ public class TargetKey {
   }
 
   public String getQualifiedSourceFile(){
-    return this.library + "/" + this.sourceFile;
+    return this.library + "/" + getSourceFile();
+  }
+
+  public String getQualifiedLiblSourceFile(){
+    return ValCmd.LIBL.toString() + "/" + getSourceFile();
   }
 
   public String getQualifiedTemporarySourceFile(){
-    return "QTEMP" + "/" + this.sourceFile;
+    return "QTEMP" + "/" + getSourceFile();
   }
 
   public boolean containsKey(ParamCmd param) {
@@ -114,6 +118,10 @@ public class TargetKey {
   }
 
   public boolean containsStreamFile() {
+    String sourceStreamFile = get(ParamCmd.SRCSTMF);
+    if (!sourceStreamFile.isEmpty()){
+      this.sourceStmf = sourceStreamFile;
+    }
     return this.sourceStmf != null;
   }
 
@@ -185,6 +193,40 @@ public class TargetKey {
     return this.ParamCmdSequence.getCommandStringWithoutSummary(this.compilationCommand);
   }
 
+  public String remove(ParamCmd param) {
+    return this.ParamCmdSequence.remove(param);
+  }
+
+  public String removeSourceFile() {
+    String source = get(ParamCmd.SRCFILE);
+    if (!source.isEmpty()){
+      String[] sourceList = source.split("/");
+      if(sourceList.length < 2){
+        this.sourceFile = source;
+      } else {
+        this.sourceFile = sourceList[1]; // Remove lib and only get source name
+      }
+    }
+
+    return this.ParamCmdSequence.remove(ParamCmd.SRCFILE);
+  }
+
+  public String removeStreamFile() {
+    String sourceStreamFile = get(ParamCmd.SRCSTMF);
+    if (!sourceStreamFile.isEmpty()){
+      this.sourceStmf = sourceStreamFile;
+    }
+    return this.ParamCmdSequence.remove(ParamCmd.SRCSTMF);
+  }
+
+  public String removeMember() {
+    String member = get(ParamCmd.SRCMBR);
+    if (!member.isEmpty()){
+      this.sourceName = member;
+    }
+    return this.ParamCmdSequence.remove(ParamCmd.SRCMBR);
+  }
+
   public String put(ParamCmd param, String value) {
     return this.ParamCmdSequence.put(this.compilationCommand, param, value);
   }
@@ -198,6 +240,9 @@ public class TargetKey {
   }
 
   public String getStreamFile() {
+    String sourceStreamFile = get(ParamCmd.SRCSTMF);
+    if (sourceStreamFile.isEmpty()) return this.sourceStmf;
+    this.sourceStmf = sourceStreamFile;
     return this.sourceStmf;
   }
 
@@ -219,18 +264,21 @@ public class TargetKey {
 
   public String getSourceFile() {
     String source = get(ParamCmd.SRCFILE);
-    if (!source.isEmpty()){
-      String[] sourceList = source.split("/");
-      if(sourceList.length < 2){
-        this.sourceFile = source;
-      } else {
-        this.sourceFile = sourceList[1]; // Remove lib and only get source name
-      }
+    if (source.isEmpty()) return this.sourceFile;
+
+    String[] sourceList = source.split("/");
+    if(sourceList.length < 2){
+      this.sourceFile = source;
+    } else {
+      this.sourceFile = sourceList[1]; // Remove lib and only get source name
     }
     return this.sourceFile;
   }
 
   public String getSourceName() {
+    String member = get(ParamCmd.SRCMBR);
+    if (member.isEmpty()) return this.sourceName;
+    this.sourceName = member;
     return this.sourceName;
   }
 

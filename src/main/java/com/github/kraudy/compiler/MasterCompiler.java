@@ -37,7 +37,7 @@ public class MasterCompiler{
   private boolean debug = false;    // Debug flag
   private boolean verbose = false;  // Verbose output flag
   private boolean diff = false;     // Diff build flag
-
+  private boolean noMigrate = false;  // Source migration
 
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
@@ -56,7 +56,7 @@ public class MasterCompiler{
 
   }
 
-  public MasterCompiler(AS400 system, BuildSpec globalSpec, boolean dryRun, boolean debug, boolean verbose, boolean diff) throws Exception {
+  public MasterCompiler(AS400 system, BuildSpec globalSpec, boolean dryRun, boolean debug, boolean verbose, boolean diff, boolean noMigrate) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
 
     /* Set params */
@@ -65,6 +65,7 @@ public class MasterCompiler{
     this.debug = debug;
     this.verbose = verbose;
     this.diff = diff;
+    this.noMigrate = noMigrate;
   }
 
   public void build() {
@@ -73,7 +74,7 @@ public class MasterCompiler{
     commandExec = new CommandExecutor(connection, debug, verbose, dryRun);
 
     /* Init migrator */
-    migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
+    if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
 
     /* Init source descriptor */
     sourceDes = new SourceDescriptor(connection, debug, verbose);
@@ -175,7 +176,7 @@ public class MasterCompiler{
         key.putAll(targetSpec.params);
 
         /* Migrate source file */
-        migrator.migrateSource(key);
+        if (!noMigrate) migrator.migrateSource(key);
 
         /* Execute compilation command */
         commandExec.executeCommand(key);
@@ -283,7 +284,8 @@ public class MasterCompiler{
             parser.isDryRun(),
             parser.isDebug(),
             parser.isVerbose(),
-            parser.isDiff()
+            parser.isDiff(),
+            parser.noMigrate()
         );
       compiler.build();
 
