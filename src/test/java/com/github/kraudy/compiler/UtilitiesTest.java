@@ -146,6 +146,42 @@ public class UtilitiesTest {
   }
 
   @Test
+  void testDeserializeYaml_DuplicatedKeys_Hooks() throws IOException {
+    String yamlContent = 
+        "before:\n" +
+        "  - OvrDbf:\n" +
+        "      File: CUST\n" +
+        "      ToFile: CUSTOMER\n" +
+        "      Share: yes\n" +
+        "  - OvrDbf:\n" +
+        "      File: INST\n" +
+        "      ToFile: INSTANCE\n" +
+        "  - OvrDbf:\n" +
+        "      File: SERV\n" +
+        "      ToFile: SERVICE\n" +
+        "\n" +
+        "targets:\n" +
+        "  mylib2.hello.pgm.rpgle: {}\n";
+
+    Path tempYaml = Files.createTempFile("test", ".yaml");
+    Files.write(tempYaml, yamlContent.getBytes());
+
+    try {
+      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
+
+      assertEquals(3, spec.before.size()); /* 3 commands */
+      assertEquals("OVRDBF FILE(CUST) TOFILE(*LIBL/CUSTOMER) SHARE(*YES)", spec.before.get(0).getCommandString());
+      assertEquals("OVRDBF FILE(INST) TOFILE(*LIBL/INSTANCE)", spec.before.get(1).getCommandString());
+      assertEquals("OVRDBF FILE(SERV) TOFILE(*LIBL/SERVICE)", spec.before.get(2).getCommandString());
+
+
+      assertFalse(spec.targets.isEmpty());
+    } finally {
+      Files.deleteIfExists(tempYaml);
+    }
+  }
+
+  @Test
   void testDeserializeYaml_TargetSpecificHooksAndParams() throws IOException {
     String yamlContent = 
         "targets:\n" +
