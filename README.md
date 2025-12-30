@@ -14,34 +14,53 @@ Do you like building cool stuff for fun and freedom? Then this project is for yo
 
 MasterCompiler (**MC**) aims to give the whole IBM i community a standard way to describe the compilation flow of objects and allow easy integration with any DevOps pipeline to be run locally (just upload the JAR file) or remotely in a Docker container.
 
-Requirements? Java 8.
+---
+
+### Requirements 
+
+Java 8.
 
 ---
 
-## Compilation
+### Build 
 
-To compile an object, it must be defined as a unique key of the form 
+* `git clone git@github.com:kraudy/MasterCompiler.git`
+* `mvn clean package`. 
 
-* **library**.**objectName**.**objectType**.**sourceType**. 
+---
 
-* **mylib.hello.pgm.rgple** => `CRTBNDRPG`
+## Object Compilation
 
-The **objectType** and **sourceType** part of the target key define the compilation command to be executed.
+To compile an object, it must be defined as a **target key** of the form 
+
+| Target key | Library | Object name | Object type | Source type |
+|----------|----------|----------|----------|----------|
+| **mylib.hello.pgm.rgple** | **MYLIB** | **HELLO** | `PGM` | `RPGLE`
+
+
+The **ObjectType** and **SourceType** part of the **Target key** defines the compilation command to be executed.
+
+| Object type | Source type | Compilation command | 
+|----------|----------|----------|
+| `PGM` | `RPGLE` | `CRTBNDRPG`
+
 
 [Target keys docs](./docs/TargetKey.md)
 
 [Compilation Patterns docs](./docs/Patterns.md) 
 
 
-Besides the compilation itself, an object often requires other CL commands to be performed on the same job to set up the appropriate environment: Library list, files overrides, binding directories, etc.
+Besides the compilation itself, an object often requires other CL commands to be performed on the same job to set up the appropriate environment:
 
-We can define a **flow of compilation** in a Yaml file.
+* Library list
+* Files overrides
+* Binding directories, etc.
+
+**MC** calls this a **flow of compilation**. Which can be easily defined in a Yaml spec file.
 
 [Specs doc](./docs/Spec.md)
 
 ```yaml
-defaults: {}  # optional | Global compilation command params
-
 before:       # optional | Global pre-compilation system commands
   chglibl:                # Set library list before targets compilation
     libl: mylib1 mylib2 
@@ -49,15 +68,6 @@ before:       # optional | Global pre-compilation system commands
     CURLIB: mylib1
   CrtBndDir:              # Lets create a bind dir
     BNDDIR: BNDHELLO
-
-after:        # optional | Global post-compilation system commands
-  DltObj:                 # After all target are build, we delete the bind dir to have a clean slate
-    OBJ: BNDHELLO
-    OBJTYPE: BndDir
-
-success: {}   # optional | Global on success system commands
-
-failure: {}   # optional | Global on failure system commands
 
 targets:      # Required | Ordered sequence of compilation targets. At leas one target is required in the spec
 
@@ -99,38 +109,31 @@ targets:      # Required | Ordered sequence of compilation targets. At leas one 
       TGTRLS: V7R5M0
       PRFDTA: nocol
 
-    after: {}             # optional | Per-target post-compilation system commands
-
-    success: {}           # optional | Per-target on success system commands
-
-    failure: {}           # optional | Per-target on failure system commands
-
+after:        # optional | Global post-compilation system commands
+  DltObj:                 # After all target are build, we delete the bind dir to have a clean slate
+    OBJ: BNDHELLO
+    OBJTYPE: BndDir
 ```
 
-After defining the spec, just call MasterCompiler with unix style parameters
+After defining the spec, just call **MasterCompiler** with unix style parameters
 
-```
+```bash
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
 ```
 
-Pretty cool, right? Well, there is more.
+# Cli 
+
+Unix base style Cli with short and long parameters.
+
+The spec route is always required `{-f, --file | /route/cool_spec.yaml}`
+
+[Cli doc](./docs/Cli.md) 
 
 ## Parameter resolution and validation
 
 Params are enum based, this allows for automatic param conflic resolution and validation in O(1) time along with instant validation at deserialization.
 
 [Params doc](./docs/Params.md)
-
-## CLI
-
-Unix base Cli
-
-* YAML file route:  `-f | --file /route/cool_spec.yaml`
-* Debug and verbose mode flags:` -x, -v | -xv`
-* Dry run to generate command strings without execution: `--dry-run `
-* Diff run to build only what has changed: `--diff`
-
-[Cli doc](./docs/Cli.md) 
 
 ## Source migration
 
@@ -142,7 +145,7 @@ Can be disabled with flag `--no-migrate`
 
 ## Object inspection
 
-Metadata extraction from compiled objects.
+If available, metadata is extracted from compiled objects to infer compilation params.
 
 [Object Descriptor doc](./docs/Inspection.md) 
 
@@ -156,18 +159,4 @@ Fully transparent and traceble flow of execution and changes.
 
 Here is the rule: **You want to reduce complexity, increase readability, and provide functionality.**
 
-Everything we do is a reflection of ourselves; even the world as we know it is a reflection of humanity... but that's another topic.
-
-## Build Master Compiler
-
-clone repo
-```
-git clone git@github.com:kraudy/MasterCompiler.git
-```
-
-compile and run tests
-```
-mvn clean package
-```
-
-That's it.
+Everything we do is a reflection of ourselves; even the world as we know it is a reflection of humanity... But that's a talk for another time.

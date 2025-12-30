@@ -13,6 +13,38 @@ Every command and param is validated at deserialization, so if you have wrongly 
 
 [Compilation params deserializer class](../src/main/java/com/github/kraudy/compiler/ParamMapDeserializer.java) 
 
+Full spec template:
+
+```yaml
+defaults: {}  # optional | Global compilation command params
+
+before: {}    # optional | Global pre-compilation system commands
+
+after: {}     # optional | Global post-compilation system commands
+
+success: {}   # optional | Global on success system commands
+
+failure: {}   # optional | Global on failure system commands
+
+targets:      # Required | Ordered sequence of compilation targets. At leas one target is required in the spec
+
+  # Ile rpgle key
+  curlib.hello.pgm.rgple:  
+
+    before: {}            # optional | Per-target pre-compilation system commands
+
+    params: {}            # optional | Target's compilation params
+
+    after: {}             # optional | Per-target post-compilation system commands
+
+    success: {}           # optional | Per-target on success system commands
+
+    failure: {}           # optional | Per-target on failure system commands
+
+  curlib.hello.module.rgple:  {} # A second compilation target
+
+```
+
 Examples 
 - [Simplest spec](#simplest-spec)
 - [ILE spec](#ile-spec)
