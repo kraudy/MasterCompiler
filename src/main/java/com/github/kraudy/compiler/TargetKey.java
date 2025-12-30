@@ -1,9 +1,14 @@
 package com.github.kraudy.compiler;
 
 import java.sql.Timestamp;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.github.kraudy.compiler.CompilationPattern.Command;
 import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
@@ -15,6 +20,8 @@ import com.github.kraudy.compiler.CompilationPattern.ValCmd;
  * A new object is created per each target defined in the spec (Yaml file)
  */
 public class TargetKey {
+  private static final Logger logger = LoggerFactory.getLogger(TargetKey.class);
+
   private String library;              // Target object library
   private String objectName;           // Target object name
   private ObjectType objectType;       // Target object type
@@ -169,6 +176,7 @@ public class TargetKey {
   }
 
   public void putAll(Map<ParamCmd, String> params) {
+    if (params == null) return;
     /* 
      * If the object is OPM, extract the SRCSTMF param before it is rejected and store its value.
      * This will help us later to do the migration from stream file to source member since OPM commands don't support SRCSTMF.
@@ -178,7 +186,18 @@ public class TargetKey {
         setStreamSourceFile(params.get(ParamCmd.SRCSTMF));
       }
     }
-    this.ParamCmdSequence.putAll(this.compilationCommand, params);
+
+    params.forEach((param, value) -> {
+      /* 
+       *  This validation is performed because the map was populated without its compilation command and invalid params are just rejected.
+       *  No error is thrown. This is useful for default params and alike.
+       */
+      if (!Utilities.validateCommandParam(this.getCompilationCommand(), param)) {
+        logger.info("\nRejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
+        return;
+      }
+      put(param, value);
+    });
   }
 
   public String get(ParamCmd param) {
@@ -186,6 +205,8 @@ public class TargetKey {
   }
 
   public String getCommandString(){
+    Utilities.ResolveConflicts(this);
+    getChangesSummary();
     return this.ParamCmdSequence.getCommandString(this.compilationCommand);
   }
 
@@ -228,11 +249,22 @@ public class TargetKey {
   }
 
   public String put(ParamCmd param, String value) {
-    return this.ParamCmdSequence.put(this.compilationCommand, param, value);
+    /* At this point there should be no invalid command params. If present, an exception is thrown */
+    if (!Utilities.validateCommandParam(this.compilationCommand, param)) {
+      throw new IllegalArgumentException("Parameters " + param.name() + " not valid for command " + getCompilationCommandName());
+    }
+
+    return this.ParamCmdSequence.put(param, value);
   }
 
   public String put(ParamCmd param, ValCmd value) {
-    return this.ParamCmdSequence.put(this.compilationCommand, param, value);
+    return put(param, value.toString());
+  }
+
+  public void getChangesSummary() {
+    List<ParamCmd> compilationPattern = CompilationPattern.getCommandPattern(this.compilationCommand);
+
+    this.ParamCmdSequence.getChangesSummary(compilationPattern, getCompilationCommandName());
   }
 
   public String asString() {
@@ -292,6 +324,10 @@ public class TargetKey {
 
   public CompCmd getCompilationCommand() {
     return this.compilationCommand;
+  }
+
+  public String getCompilationCommandName() {
+    return this.compilationCommand.name();
   }
 
   public ParamMap getParamMap() {

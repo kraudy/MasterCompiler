@@ -272,6 +272,88 @@ public class Utilities {
     return value;
   }
 
+  public static void ResolveConflicts(TargetKey key){
+    switch (key.getCompilationCommand()){
+      case CRTBNDRPG:
+      case CRTBNDCL:
+      case CRTRPGMOD:
+      case CRTCLMOD:
+        if (key.containsKey(ParamCmd.SRCSTMF)) {
+          key.put(ParamCmd.TGTCCSID, ValCmd.JOB);
+        }
+        /* If  TGTCCSID is present and no stream file, remove it*/
+        if (key.containsKey(ParamCmd.TGTCCSID) && !key.containsKey(ParamCmd.SRCSTMF)) {
+          key.remove(ParamCmd.TGTCCSID);
+        }
+        break;
+
+      default: 
+        break;
+    }
+
+    switch (key.getCompilationCommand()){
+      case CRTBNDRPG:
+        if (!key.containsKey(ParamCmd.DFTACTGRP)) {
+          key.remove(ParamCmd.STGMDL); 
+        }
+        break;
+
+      case CRTSQLRPGI:
+        if (key.containsKey(ParamCmd.SRCSTMF)) {
+          key.put(ParamCmd.CVTCCSID, ValCmd.JOB);
+        }
+        /* If  CVTCCSID is present and no stream file, remove it*/
+        if (key.containsKey(ParamCmd.CVTCCSID) && !key.containsKey(ParamCmd.SRCSTMF)) {
+          key.remove(ParamCmd.CVTCCSID);
+        }
+        /* OBJ param is used by other commands like AddBndDirE where *LIBL is valid but not here */
+        if (key.containsKey(ParamCmd.OBJ)) {
+          String obj = key.get(ParamCmd.OBJ);
+          String[] objList = obj.split("/");
+          try{
+            if (ValCmd.LIBL == ValCmd.fromString(objList[0])){
+              key.put(ParamCmd.OBJ, ValCmd.CURLIB.toString() + "/" + objList[1]);
+            }
+          } catch (Exception ignore) {}
+        }
+        break;
+
+      case CRTSRVPGM:
+        if (key.containsKey(ParamCmd.SRCSTMF) && 
+            key.containsKey(ParamCmd.EXPORT)) {
+          key.remove(ParamCmd.EXPORT); 
+        }
+        break;
+
+      default: 
+        break;
+    }
+
+    /* Migration logic */
+    switch (key.getCompilationCommand()){
+      case CRTRPGMOD:
+      case CRTBNDRPG:
+      case CRTBNDCL:
+      case CRTSQLRPGI:
+      case CRTSRVPGM:
+      case RUNSQLSTM:
+        if(key.containsKey(ParamCmd.SRCSTMF) &&
+            key.containsKey(ParamCmd.SRCFILE)){
+          key.remove(ParamCmd.SRCFILE); 
+          key.remove(ParamCmd.SRCMBR); 
+        }
+        break;
+
+      default:
+          break;
+    }
+  }
+
+  public static void ResolveConflicts(CommandObject commandObject){
+    return;
+  }
+
+
   /* Validates param against command pattern */
   public static boolean validateCommandParam(Command cmd, ParamCmd param) {
     if (!CompilationPattern.getCommandPattern(cmd).contains(param)) {

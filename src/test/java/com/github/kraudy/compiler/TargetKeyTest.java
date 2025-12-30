@@ -2,11 +2,13 @@ package com.github.kraudy.compiler;
 
 import org.junit.jupiter.api.Test;
 
+import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.sql.Timestamp;
+import java.util.Map;
 
 public class TargetKeyTest {
   @Test
@@ -158,6 +160,99 @@ public class TargetKeyTest {
       "CRTSRVPGM SRVPGM(MYLIB/SRVHELLO) MODULE(*LIBL/MODHELLO1 *LIBL/MODHELLO2) SRCSTMF(''/home/sources/SRVHELLO.BND'') " +
       "BNDSRVPGM(*NONE) OPTION(*EVENTF) REPLACE(*YES) TGTRLS(V7R5M0)", cmd);
   }
+
+  /*
+   * Resolution tests
+   */
+
+  @Test
+  void testResolve_EXPORT_SRCSTMF_Conflicts() {
+    TargetKey key = new TargetKey("MYLIB.SRVHELLO.SRVPGM.BND");
+
+    key.put(ParamCmd.SRCSTMF, "/ifs/source.bnd");
+    key.put(ParamCmd.EXPORT, "ALL");
+
+    String cmd = key.getCommandString();
+
+    assertEquals("", key.get(ParamCmd.EXPORT)); // Removed due to conflict with SRCSTMF
+    assertEquals("''/ifs/source.bnd''", key.get(ParamCmd.SRCSTMF));
+  }
+
+  @Test
+  void testResolve_CVTCCSID_SRCSTMF_Conflicts() {
+    TargetKey key = new TargetKey("MYLIB.SQLHELLO.pgm.sqlrpgle");
+
+    key.put(ParamCmd.SRCSTMF, "/ifs/source.bnd");
+    key.put(ParamCmd.CVTCCSID, "Job");
+
+    key.remove(ParamCmd.SRCSTMF);
+
+    String cmd = key.getCommandString();
+
+    assertEquals("", key.get(ParamCmd.SRCSTMF)); // Removed, expect empty
+    assertEquals("", key.get(ParamCmd.CVTCCSID)); // Removed due to missing SRCSTMF
+  }
+
+  @Test
+  void testResolve_TGTCCSID_SRCSTMF_Conflicts() {
+    TargetKey key = new TargetKey("MYLIB.RPGHELLO.pgm.rpgle");
+
+    key.put(ParamCmd.SRCSTMF, "/ifs/source.bnd");
+    key.put(ParamCmd.TGTCCSID, "Job");
+
+    key.remove(ParamCmd.SRCSTMF);
+
+    key.getCommandString(); // Just get the command to resolve conflicts
+
+    assertEquals("", key.get(ParamCmd.SRCSTMF)); // Removed, expect empty
+    assertEquals("", key.get(ParamCmd.TGTCCSID)); // Removed due to missing SRCSTMF
+  }
+
+  @Test
+  void testResolve_SRCSTMF_SRCFILE_Conflicts() {
+    TargetKey key = new TargetKey("MYLIB.RPGHELLO.pgm.rpgle");
+
+    key.put(ParamCmd.SRCFILE, "MYLIB/QRPGLESRC");
+    key.put(ParamCmd.SRCMBR, "HELLO");
+    key.put(ParamCmd.SRCSTMF, "/home/sources/HELLO.rpgle");
+
+    String cmd = key.getCommandString();
+
+    assertEquals("", key.get(ParamCmd.SRCFILE)); // Removed due to conflict with SRCSTMF
+    assertEquals("", key.get(ParamCmd.SRCMBR)); // Removed due to conflict with SRCSTMF
+    assertEquals("''/home/sources/HELLO.rpgle''", key.get(ParamCmd.SRCSTMF));
+  }
+
+  @Test
+  void testResolveSourceCcsidConflicts() {
+    TargetKey key = new TargetKey("MYLIB.RPGHELLO.pgm.rpgle");
+
+    key.put(ParamCmd.SRCSTMF, "/home/sources/HELLO.rpgle");
+
+    String cmd = key.getCommandString();
+
+    assertEquals("*JOB", key.get(ParamCmd.TGTCCSID)); // Add missing param
+    assertEquals("''/home/sources/HELLO.rpgle''", key.get(ParamCmd.SRCSTMF)); 
+  }
+
+  @Test
+  void testPutAllWithValidation() {
+    TargetKey key = new TargetKey("MYLIB.RPGHELLO.module.rpgle");
+
+    Map<ParamCmd, String> params = Map.of(
+      ParamCmd.TEXT, "Test",
+      ParamCmd.OPTIMIZE, "40",  // Valid for CRTRPGMOD
+      ParamCmd.CMD, "invalid"
+    );
+    key.putAll(params);
+
+    // Invalid param (e.g., for CRTRPGMOD) should be rejected silently in putAll
+    assertEquals("", key.get(ParamCmd.CMD)); // Not added
+  }
+
+  /*
+   * Exception tests
+   */
 
   @Test
   void testInvalidKeyThrowsException() {

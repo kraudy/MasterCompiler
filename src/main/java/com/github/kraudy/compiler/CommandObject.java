@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
@@ -15,6 +18,8 @@ import com.github.kraudy.compiler.CompilationPattern.ValCmd;
  * A new object is created per each target command defined in the spec (Yaml file)
  */
 public class CommandObject {
+  private static final Logger logger = LoggerFactory.getLogger(CommandObject.class);
+
   private SysCmd systemCommand;       // System command
   private ParamMap ParamCmdSequence;  // System command's Param:Value 
   private String commandString;       // System coammnd's formed string
@@ -27,7 +32,20 @@ public class CommandObject {
   }
 
   public void putAll(Map<ParamCmd, String> params) {
-    this.ParamCmdSequence.putAll(this.systemCommand, params);
+    if (params == null) return;
+
+    params.forEach((param, value) -> {
+      /* 
+       *  This validation is performed because the map was populated without its compilation command and invalid params are just rejected.
+       *  No error is thrown. This is useful for default params and alike.
+       */
+      if (!Utilities.validateCommandParam(this.getSystemCommand(), param)) {
+        logger.info("\nRejected: Parameter " + param.name() + " not valid for command " + getSystemCommandName());
+        return;
+      }
+      put(param, value);
+    });
+
   }
 
   public String get(ParamCmd param) {
@@ -35,9 +53,8 @@ public class CommandObject {
   }
 
   public String getCommandString(){
-    if (this.commandString != null) return this.commandString;
-    this.commandString = this.ParamCmdSequence.getCommandString(this.systemCommand);
-    return this.commandString;
+    Utilities.ResolveConflicts(this);
+    return this.ParamCmdSequence.getCommandString(this.systemCommand);
   }
 
   public String getCommandStringWithoutSummary(){
@@ -46,12 +63,23 @@ public class CommandObject {
     return this.commandString;
   }
 
+  public void getChangesSummary() {
+    List<ParamCmd> compilationPattern = CompilationPattern.getCommandPattern(this.systemCommand);
+
+    this.ParamCmdSequence.getChangesSummary(compilationPattern, getSystemCommandName());
+  }
+
   public String put(ParamCmd param, String value) {
-    return this.ParamCmdSequence.put(this.systemCommand, param, value);
+    /* At this point there should be no invalid command params. If present, an exception is thrown */
+    if (!Utilities.validateCommandParam(this.systemCommand, param)) {
+      throw new IllegalArgumentException("Parameters " + param.name() + " not valid for command " + getSystemCommandName());
+    }
+
+    return this.ParamCmdSequence.put(param, value);
   }
 
   public String put(ParamCmd param, ValCmd value) {
-    return this.ParamCmdSequence.put(this.systemCommand, param, value);
+    return put(param, value.toString());
   }
 
   public SysCmd getSystemCommand() {

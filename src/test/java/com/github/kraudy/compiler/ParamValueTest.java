@@ -13,7 +13,7 @@ public class ParamValueTest {
 
     assertNull(pv.get());
     assertEquals(0, pv.getCount()); // No history
-    assertTrue(pv.getHistory().isEmpty());
+    assertEquals("[]", pv.getHistory()); // No history
     assertNull(pv.getLastChange());
     assertNull(pv.getPrevious()); // count < 1
   }
@@ -26,7 +26,7 @@ public class ParamValueTest {
 
     assertEquals("first", previous); // Returns previous value
     assertEquals("second", pv.get());
-    assertEquals(List.of("[INIT]", "first", "second"), pv.getHistory());
+    assertEquals("[[INIT], first, second]", pv.getHistory());
     assertEquals("second", pv.getLastChange());
     assertEquals("first", pv.getPrevious());
   }
@@ -41,7 +41,7 @@ public class ParamValueTest {
 
     assertEquals("two", prev3);
     assertEquals("four", pv.get());
-    assertEquals(List.of("[INIT]", "one", "two", "three", "four"), pv.getHistory());
+    assertEquals("[[INIT], one, two, three, four]", pv.getHistory());
     assertEquals("three", pv.getPrevious());
     assertEquals("one", pv.getFirst());
   }
@@ -55,7 +55,7 @@ public class ParamValueTest {
 
     assertEquals("newvalue", previous);
     assertNull(pv.get());
-    assertEquals(List.of("[INIT]", "value", "newvalue", "[REMOVED]"), pv.getHistory());
+    assertEquals("[[INIT], value, newvalue, [REMOVED]]", pv.getHistory());
     assertEquals("[REMOVED]", pv.getLastChange());
     assertEquals("newvalue", pv.getPrevious());
     assertTrue(pv.wasRemoved());
@@ -74,7 +74,7 @@ public class ParamValueTest {
 
     assertEquals("[REMOVED]", previous); // Check previous [REMOVED]
     assertEquals("after-remove", pv.get()); // Assert new value
-    assertEquals(List.of("[INIT]", "initial", "[REMOVED]", "after-remove"), pv.getHistory()); // Check history list
+    assertEquals("[[INIT], initial, [REMOVED], after-remove]", pv.getHistory()); // Check history list
   }
 
   @Test

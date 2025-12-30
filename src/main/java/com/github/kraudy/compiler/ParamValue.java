@@ -50,8 +50,20 @@ public class ParamValue {
       return getPrevious();
     }
 
-    public List<String> getHistory() {
-      return new ArrayList<String>(history);  // Return copy to prevent external mutation
+    public String getHistory() {
+       if (history.isEmpty()) {
+            return "[]";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        for (int i = 0; i < history.size(); i++) {
+            String entry = history.get(i);
+            if (i > 0) sb.append(", ");
+            sb.append(entry);
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     public Integer getCount() {

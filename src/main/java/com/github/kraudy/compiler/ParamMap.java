@@ -54,6 +54,12 @@ public class ParamMap {
     return current;
   }
 
+  public String getHistory(ParamCmd param) {
+    ParamValue pv = this.paramMap.get(param);
+    if (pv == null) return "";
+    return pv.getHistory();
+  }
+
   public List<ParamCmd> getPattern(Command cmd) {
     return CompilationPattern.commandToPatternMap.getOrDefault(cmd, Collections.emptyList());
   }
@@ -66,35 +72,12 @@ public class ParamMap {
     return pv.remove();
   }
 
-  public void putAll(Command cmd, Map<ParamCmd, String> params) {
-    if (params == null) return;
-
-    params.forEach((param, value) -> {
-      /* 
-       *  This validation is performed because the map was populated without its compilation command and invalid params are just rejected.
-       *  No error is thrown. This is useful for default params and alike.
-       */
-      if (!Utilities.validateCommandParam(cmd, param)) {
-        logger.info("\nRejected: Parameter " + param.name() + " not valid for command " + cmd.name());
-        return;
-      }
-      put(cmd, param, value);
-    });
-
+  public String put(ParamCmd param, ValCmd value) {
+    return put(param, value.toString());
   }
 
-  public String put(Command cmd, ParamCmd param, ValCmd value) {
-    return put(cmd, param, value.toString());
-  }
-
-  public String put(Command cmd, ParamCmd param, String value) {
-
+  public String put(ParamCmd param, String value) {
     value = Utilities.validateParamValue(param, value);
-
-    /* At this point there should be no invalid command params. If present, an exception is thrown */
-    if (!Utilities.validateCommandParam(cmd, param)) {
-      throw new IllegalArgumentException("Parameters " + param.name() + " not valid for command " + cmd.name());
-    }
 
     ParamValue pv = this.paramMap.get(param);
 
@@ -123,7 +106,6 @@ public class ParamMap {
   
   /* Here we need the command to ResolveConflincts */
   public String getCommandString(Command cmd){
-    ResolveConflicts(cmd);
     getChangesSummary(cmd);
 
     List<ParamCmd> compilationPattern = getPattern(cmd);
@@ -138,7 +120,6 @@ public class ParamMap {
       if (value == null) continue;
       if (value.isEmpty()) continue;
       sb.append(param.paramString(value));
-      //sb.append(param.paramString(pv.get()));
     }
 
     return sb.toString();
@@ -147,7 +128,6 @@ public class ParamMap {
 
   /* Here we need the command to ResolveConflincts */
   public String getCommandStringWithoutSummary(Command cmd){
-    ResolveConflicts(cmd);
 
     List<ParamCmd> compilationPattern = getPattern(cmd);
     StringBuilder sb = new StringBuilder(); 
@@ -164,98 +144,15 @@ public class ParamMap {
 
   }
 
-  public void ResolveConflicts(Command cmd){
-    if (cmd instanceof CompCmd) {
-      CompCmd compCmd  = (CompCmd) cmd;
-      ResolveConflicts(compCmd);
-      return;
+  public void getChangesSummary(List<ParamCmd> compilationPattern, String commandName) {
+    StringBuilder history = new StringBuilder();
+    history.append("\nCommand " + commandName + " summary\n");
+
+    for (ParamCmd param : compilationPattern) {
+      String value = get(param);
+      if (value.isEmpty()) continue;
+      history.append(param.name() + ":" + getHistory(param)).append("\n");
     }
-    if (cmd instanceof SysCmd) {
-      SysCmd sysCmd  = (SysCmd) cmd;
-      ResolveConflicts(sysCmd);
-      return;
-    }
-  }
-
-  public void ResolveConflicts(CompCmd cmd){
-
-    switch (cmd){
-      case CRTBNDRPG:
-      case CRTBNDCL:
-      case CRTRPGMOD:
-      case CRTCLMOD:
-        if (this.containsKey(ParamCmd.SRCSTMF)) {
-          this.put(cmd, ParamCmd.TGTCCSID, ValCmd.JOB);
-        }
-        /* If  TGTCCSID is present and no stream file, remove it*/
-        if (this.containsKey(ParamCmd.TGTCCSID) && !this.containsKey(ParamCmd.SRCSTMF)) {
-          this.remove(ParamCmd.TGTCCSID);
-        }
-        break;
-
-      default: 
-        break;
-    }
-
-    switch (cmd){
-      case CRTBNDRPG:
-        if (!this.containsKey(ParamCmd.DFTACTGRP)) {
-          this.remove(ParamCmd.STGMDL); 
-        }
-        break;
-
-      case CRTSQLRPGI:
-        if (this.containsKey(ParamCmd.SRCSTMF)) {
-          this.put(cmd, ParamCmd.CVTCCSID, ValCmd.JOB);
-        }
-        /* If  CVTCCSID is present and no stream file, remove it*/
-        if (this.containsKey(ParamCmd.CVTCCSID) && !this.containsKey(ParamCmd.SRCSTMF)) {
-          this.remove(ParamCmd.CVTCCSID);
-        }
-        /* OBJ param is used by other commands like AddBndDirE where *LIBL is valid but not here */
-        if (this.containsKey(ParamCmd.OBJ)) {
-          String obj = get(ParamCmd.OBJ);
-          String[] objList = obj.split("/");
-          try{
-            if (ValCmd.LIBL == ValCmd.fromString(objList[0])){
-              this.put(cmd, ParamCmd.OBJ, ValCmd.CURLIB.toString() + "/" + objList[1]);
-            }
-          } catch (Exception ignore) {}
-        }
-        break;
-
-      case CRTSRVPGM:
-        if (this.containsKey(ParamCmd.SRCSTMF) && 
-            this.containsKey(ParamCmd.EXPORT)) {
-          this.remove(ParamCmd.EXPORT); 
-        }
-        break;
-
-      default: 
-        break;
-    }
-
-    /* Migration logic */
-    switch (cmd){
-      case CRTRPGMOD:
-      case CRTBNDRPG:
-      case CRTBNDCL:
-      case CRTSQLRPGI:
-      case CRTSRVPGM:
-      case RUNSQLSTM:
-        if(this.containsKey(ParamCmd.SRCSTMF) &&
-            this.containsKey(ParamCmd.SRCFILE)){
-          this.remove(ParamCmd.SRCFILE); 
-          this.remove(ParamCmd.SRCMBR); 
-        }
-        break;
-
-      default:
-          break;
-    }
-  }
-
-  public void ResolveConflicts(SysCmd cmd){
-    return;
+    logger.info(history.toString());
   }
 }
