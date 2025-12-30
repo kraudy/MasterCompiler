@@ -270,7 +270,7 @@ public class CompilationPattern {
     DATETIME, VARCHAR , GRAPHIC, PRV, 
 
     // CLOSQLCSR
-    ENDACTGRP, ENDMOD,
+    ENDACTGRP, ENDMOD, CALLER
 
     ; 
 
