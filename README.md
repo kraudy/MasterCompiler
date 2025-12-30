@@ -35,14 +35,14 @@ To compile an object, it must be defined as a **target key** of the form: **myli
 
 | Target key | Library | Object name | Object type | Source type |
 |----------|----------|----------|----------|----------|
-| **mylib.hello.pgm.rgple** | **MYLIB** | **HELLO** | `PGM` | `RPGLE`
+| **mylib.hello.pgm.rgple** | **MYLIB** | **HELLO** | `PGM` | `RPGLE` |
 
 
 The **ObjectType** and **SourceType** part of the **Target key** defines the compilation command to be executed.
 
 | Object type | Source type | Compilation command | 
 |----------|----------|----------|
-| `PGM` | `RPGLE` | `CRTBNDRPG`
+| `PGM` | `RPGLE` | `CRTBNDRPG` |
 
 
 [Target keys docs](./docs/TargetKey.md)
