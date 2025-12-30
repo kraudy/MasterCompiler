@@ -12,7 +12,7 @@ Do you like building cool stuff for fun and freedom? Then this project is for yo
 
 ---
 
-This project aims to give the whole IBM i community a standard way to describe the compilation flow of objects and allow easy integration with any DevOps pipeline to be run locally (just upload the JAR file) or remotely in a Docker container.
+MasterCompiler (**MC**) aims to give the whole IBM i community a standard way to describe the compilation flow of objects and allow easy integration with any DevOps pipeline to be run locally (just upload the JAR file) or remotely in a Docker container.
 
 Requirements? Java 8.
 
