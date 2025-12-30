@@ -176,6 +176,14 @@ public class Utilities {
   public static String nodeToString(JsonNode node) {
     if (node.isNull()) throw new RuntimeException("Node value can not be null");
 
+    if (node.isBoolean()) {
+      if (node.asBoolean()) {
+        return ValCmd.YES.toString();
+      } else {
+        return ValCmd.NO.toString();
+      }
+    }
+
     /* Convert list to space separated string */
     if (node.isArray()) {
         List<String> elements = new ArrayList<>();
