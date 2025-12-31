@@ -58,11 +58,11 @@ public class StreamCompilationIT {
   }
 
   @Test
-  void testCompileFromStreamFile() throws Exception {
+  void test_Unit_Compile_Pgm_Rpgle_Streamfile() throws Exception {
     TargetKey key = new TargetKey("curlib.HELLO.pgm.rpgle");
 
     /* Get source */
-    String rpgleSource = TestHelpers.loadResourceAsString("sources/rpgle/hello.rpgle");
+    String rpgleSource = TestHelpers.loadResourceAsString("sources/rpgle/hello.pgm.rpgle");
 
     String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
 
@@ -80,7 +80,70 @@ public class StreamCompilationIT {
     key.setStreamSourceFile(path);
 
     /* Get spec */
-    String yamlContent = TestHelpers.loadResourceAsString("yaml/integration/integration.rpgle.yaml")
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/integration/unit/hello.pgm.rpgle.yaml")
+        .replace("${CURLIB}", curlib)
+        .replace("${OBJECT_NAME}", key.getObjectName())
+        .replace("${SRCSTMF}", path);
+
+    // Create temp YAML file
+    Path tempYaml = Files.createTempFile("test", ".yaml");
+    Files.write(tempYaml, yamlContent.getBytes());
+
+    /* Now, compile! */
+    try {
+      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
+
+      MasterCompiler compiler = new MasterCompiler(
+        system,
+        connection,
+        spec,
+        false,  // dryRun
+        true,  // debug
+        true,   // verbose - helpful for debugging test failures
+        false,  // diff
+        false   // noMigrate
+      );
+
+      // This should compile the program
+      compiler.build();
+
+      /* Check if no errors were found */
+      assertFalse(compiler.foundCompilationError());
+
+    } finally {
+      /* Remove files */
+      Files.deleteIfExists(tempYaml);
+
+      if (ifsFile.exists()) {
+        ifsFile.delete();
+      }
+    }
+  }
+
+  @Test
+  void test_Unit_Compile_Module_Rpgle_Streamfile() throws Exception {
+    TargetKey key = new TargetKey("curlib.HELLO.module.rpgle");
+
+    /* Get source */
+    String rpgleSource = TestHelpers.loadResourceAsString("sources/rpgle/hello.module.rpgle");
+
+    String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
+
+    this.ifsFile = new IFSFile(system, path);
+
+    boolean created = this.ifsFile.createNewFile();
+
+    IFSFileWriter writer = new IFSFileWriter(this.ifsFile, false);
+    // Write the source string (handles conversion to file's CCSID)
+    writer.write(rpgleSource);
+    // Flush and close (close() also flushes)
+    writer.close();
+
+    /* Set stream file path */
+    key.setStreamSourceFile(path);
+
+    /* Get spec */
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/integration/unit/hello.module.rpgle.yaml")
         .replace("${CURLIB}", curlib)
         .replace("${OBJECT_NAME}", key.getObjectName())
         .replace("${SRCSTMF}", path);
