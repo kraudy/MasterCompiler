@@ -27,6 +27,22 @@ Java 8.
 * `git clone git@github.com:kraudy/MasterCompiler.git`
 * `mvn clean package`. 
 
+### Test
+
+Full remote test on real hardware on any server with zero proprietary tools, zero licensing and zero cost.
+
+Create a `.env` file like this
+
+```bash
+IBMI_HOSTNAME=PUB400.COM
+IBMI_USERNAME=BIGBOY
+IBMI_PASSWORD=BIGIRON
+```
+
+Then, watch a thing of beauty.
+
+* `mvn clean verify -Pintegration`
+
 ---
 
 ## Object Compilation
