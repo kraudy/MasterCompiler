@@ -1,0 +1,14 @@
+before:
+  chglibl:
+    LIBL: ${CURLIB}
+
+after:
+  dltobj:
+    OBJ: ${OBJECT_NAME}
+    OBJTYPE: Pgm
+
+targets:
+  curlib.HELLO.pgm.rpgle:
+    params:
+      TEXT: Hello from integration test
+      SRCSTMF: ${SRCSTMF}

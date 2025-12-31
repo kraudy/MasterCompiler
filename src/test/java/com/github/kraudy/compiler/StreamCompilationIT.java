@@ -9,6 +9,8 @@ import com.ibm.as400.access.User;
 import io.github.theprez.dotenv_ibmi.IBMiDotEnv;
 import org.junit.jupiter.api.*;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -59,15 +61,8 @@ public class StreamCompilationIT {
   void testCompileFromStreamFile() throws Exception {
     TargetKey key = new TargetKey("curlib.HELLO.pgm.rpgle");
 
-    /* Create source */
-    String rpgleSource = 
-      "**free\n" +
-      "ctl-opt dftactgrp(*no);\n" +
-      "\n" +
-      "dsply 'Hello from stream file compilation test!';\n" +
-      "*inlr = *on;\n" +
-      "return;\n"
-      ;
+    /* Get source */
+    String rpgleSource = TesteHelpers.loadResourceAsString("sources/rpgle/hello.rpgle");
 
     String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
 
@@ -84,21 +79,11 @@ public class StreamCompilationIT {
     /* Set stream file path */
     key.setStreamSourceFile(path);
 
-    /* Create spec */
-    String yamlContent = 
-      "before:\n" +
-        "  chglibl:\n" +
-        "    LIBL: " + curlib + "\n" +
-      "after:\n" +
-        "  DltObj:\n" +
-        "    OBJ: " + key.getObjectName() + "\n" +
-        "    OBJTYPE: pgm\n" +
-      "targets:\n" +
-      "  " + key.asString() + ":\n" +
-      "    params:\n" +
-      "      TEXT: Hello World\n" +
-      "      SRCSTMF: " + key.getStreamFile() + "\n"
-      ;
+    /* Get spec */
+    String yamlContent = TesteHelpers.loadResourceAsString("yaml/integration/integration.rpgle.yaml")
+        .replace("${CURLIB}", curlib)
+        .replace("${OBJECT_NAME}", key.getObjectName())
+        .replace("${SRCSTMF}", path);
 
     // Create temp YAML file
     Path tempYaml = Files.createTempFile("test", ".yaml");
@@ -128,7 +113,7 @@ public class StreamCompilationIT {
     } finally {
       /* Remove files */
       Files.deleteIfExists(tempYaml);
-      
+
       if (ifsFile.exists()) {
         ifsFile.delete();
       }
