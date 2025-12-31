@@ -181,10 +181,8 @@ public class TargetKey {
      * If the object is OPM, extract the SRCSTMF param before it is rejected and store its value.
      * This will help us later to do the migration from stream file to source member since OPM commands don't support SRCSTMF.
      */
-    if (this.isOpm){
-      if(params.containsKey(ParamCmd.SRCSTMF)){
-        setStreamSourceFile(params.get(ParamCmd.SRCSTMF));
-      }
+    if(params.containsKey(ParamCmd.SRCSTMF)){
+      setStreamSourceFile(params.get(ParamCmd.SRCSTMF));
     }
 
     params.forEach((param, value) -> {

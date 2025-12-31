@@ -13,8 +13,6 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.github.kraudy.compiler.CompilationPattern.Command;
-import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
@@ -86,20 +84,8 @@ public class CommandExecutor {
     try {
       executeCommand(commandString, commandTime);
     } catch (CompilerException e) {
-      List<ErrMsg> errorMessages = getErrorsList(commandTime);
-
-      if(errorMessages.size() == 0) {
-        if(verbose) logger.error("No error messages found : " + commandString);
-        throw new CompilerException("Target compilation failed", e, key);
-      }
-
-      if (!recoverFromFailure(key, errorMessages)){
-        if(verbose) logger.info(showCompilationSpool(commandTime));
-        throw new CompilerException("Target compilation failed", e, key);
-      }
-
-      /* Try again */
-      executeCommand(key);
+      if(verbose) logger.info(showCompilationSpool(commandTime));
+      throw new CompilerException("Target compilation failed", e, key);
       
     } catch (Exception e) {
       throw new CompilerException("Unexpected exception in target compilation command", e, key);

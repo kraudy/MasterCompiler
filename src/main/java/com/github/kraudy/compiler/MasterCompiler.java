@@ -56,6 +56,18 @@ public class MasterCompiler{
 
   }
 
+  public MasterCompiler(AS400 system, Connection connection, BuildSpec globalSpec, boolean dryRun, boolean debug, boolean verbose, boolean diff, boolean noMigrate) throws Exception {
+    this(system, connection);
+
+    /* Set params */
+    this.globalSpec = globalSpec;
+    this.dryRun = dryRun;
+    this.debug = debug;
+    this.verbose = verbose;
+    this.diff = diff;
+    this.noMigrate = noMigrate;
+  }
+
   public MasterCompiler(AS400 system, BuildSpec globalSpec, boolean dryRun, boolean debug, boolean verbose, boolean diff, boolean noMigrate) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
 
