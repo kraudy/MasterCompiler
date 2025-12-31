@@ -94,6 +94,10 @@ public class CommandObject {
     return this.systemCommand.name();
   }
 
+  public boolean containsKey(ParamCmd param) {
+    return this.ParamCmdSequence.containsKey(param);
+  }
+
   @Override
   public boolean equals(Object obj) {
     if (this == obj) return true;

@@ -34,12 +34,12 @@ Full remote test on real hardware on any server with zero proprietary tools, zer
 Create a `.env` file like this
 
 ```bash
-IBMI_HOSTNAME=PUB400.COM
+IBMI_HOSTNAME=BIGIRON.COM
 IBMI_USERNAME=BIGBOY
-IBMI_PASSWORD=BIGIRON
+IBMI_PASSWORD=BIGMONEY
 ```
 
-Then, watch a thing of beauty.
+Then, run the integration test to watch a thing of beauty.
 
 * `mvn clean verify -Pintegration`
 

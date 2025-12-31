@@ -39,6 +39,8 @@ public class MasterCompiler{
   private boolean diff = false;     // Diff build flag
   private boolean noMigrate = false;  // Source migration
 
+  private boolean compilationError = false;
+
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
   }
@@ -107,6 +109,7 @@ public class MasterCompiler{
       }
       
     } catch (CompilerException e){
+      compilationError = true;
       if (verbose) logger.error("Compilation failed");
 
       /* Get full compiler exception context */
@@ -123,6 +126,7 @@ public class MasterCompiler{
       }
 
     } catch (Exception e) {
+      compilationError = true;
       /* Unhandled Exception. Fail loudly */
       logger.error("Unhandled Exception. Fail loudly", e);
 
@@ -193,6 +197,7 @@ public class MasterCompiler{
         } 
 
       } catch (CompilerException e){
+        compilationError = true;
         if (verbose) logger.error("Target compilation failed: " + key.asString());
 
         /* Per target failure */
@@ -204,6 +209,7 @@ public class MasterCompiler{
         throw e; // Raise
 
       } catch (Exception e){
+        compilationError = true;
         if (verbose) logger.error("Unhandled exception in Target: " + key.asString());
 
         throw e; // Raise
@@ -213,7 +219,11 @@ public class MasterCompiler{
       }
     }
 
-  }  
+  }
+
+  public boolean foundCompilationError(){
+    return this.compilationError;
+  }
 
   private String showLibraryList() throws SQLException{
     StringBuilder sb = new StringBuilder();;

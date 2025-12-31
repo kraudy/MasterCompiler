@@ -12,6 +12,9 @@ import org.junit.jupiter.api.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -21,7 +24,8 @@ public class StreamCompilationIT {
   static private AS400 system;
   static private Connection connection;
   static private User currentUser;
-  static IFSFile ifsFile;
+  static private String curlib;
+  private IFSFile ifsFile;
 
   @BeforeAll
   static void setupSystem() throws Exception {
@@ -29,6 +33,20 @@ public class StreamCompilationIT {
     connection = new AS400JDBCDataSource(system).getConnection();
     currentUser = new User(system, system.getUserId());
     currentUser.loadUserInformation();
+
+    try(Statement stmt = connection.createStatement();
+        ResultSet rsCurLib = stmt.executeQuery(
+          "SELECT TRIM(SCHEMA_NAME) As SCHEMA_NAME FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT'" 
+        )){
+      if (!rsCurLib.next()) {
+        throw new CompilerException("Error retrieving current library");
+      }
+      curlib = rsCurLib.getString("SCHEMA_NAME");
+
+    } catch (SQLException e){
+      throw new CompilerException("Error retrieving current library", e);
+    }
+
   }
 
   @AfterAll
@@ -62,13 +80,19 @@ public class StreamCompilationIT {
     writer.write(rpgleSource);
     // Flush and close (close() also flushes)
     writer.close();
-    
 
     /* Set stream file path */
     key.setStreamSourceFile(path);
 
     /* Create spec */
     String yamlContent = 
+      "before:\n" +
+        "  chglibl:\n" +
+        "    LIBL: " + curlib + "\n" +
+      "after:\n" +
+        "  DltObj:\n" +
+        "    OBJ: " + key.getObjectName() + "\n" +
+        "    OBJTYPE: pgm\n" +
       "targets:\n" +
       "  " + key.asString() + ":\n" +
       "    params:\n" +
@@ -98,13 +122,13 @@ public class StreamCompilationIT {
       // This should compile the program
       compiler.build();
 
-      /* If no errors, this should execute */
-      assertTrue(true);
+      /* Check if no errors were found */
+      assertFalse(compiler.foundCompilationError());
 
     } finally {
       /* Remove files */
       Files.deleteIfExists(tempYaml);
-      //Files.deleteIfExists(tempSource);
+      
       if (ifsFile.exists()) {
         ifsFile.delete();
       }
