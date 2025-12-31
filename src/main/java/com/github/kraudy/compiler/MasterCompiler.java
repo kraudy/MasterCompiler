@@ -68,18 +68,6 @@ public class MasterCompiler{
     this.noMigrate = noMigrate;
   }
 
-  public MasterCompiler(AS400 system, BuildSpec globalSpec, boolean dryRun, boolean debug, boolean verbose, boolean diff, boolean noMigrate) throws Exception {
-    this(system, new AS400JDBCDataSource(system).getConnection());
-
-    /* Set params */
-    this.globalSpec = globalSpec;
-    this.dryRun = dryRun;
-    this.debug = debug;
-    this.verbose = verbose;
-    this.diff = diff;
-    this.noMigrate = noMigrate;
-  }
-
   public void build() {
 
     /* Init command executor */
@@ -142,7 +130,6 @@ public class MasterCompiler{
       /* Show chain of commands */
       if (verbose) logger.info("\nChain of commands: {}", commandExec.getExecutionChain());
 
-      cleanup();
     }
 
   }
@@ -267,31 +254,21 @@ public class MasterCompiler{
     }
   }
 
-  private void cleanup(){
-    try {
-      if (connection != null && !connection.isClosed()) {
-        connection.close();
-      }
-      if (system != null) {
-        system.disconnectAllServices();
-      }
-
-    } catch (SQLException e) {
-      logger.error("Error cleaning up", e);
-    }
-  }
-
   public static void main(String... args ){
     AS400 system = null;
     MasterCompiler compiler = null;
+    Connection connection = null;
     try {
       ArgParser parser = new ArgParser(args);
       //TODO: This should be able to run locally in debug mode.
       if (args.length == 0) throw new IllegalArgumentException("Params are required");
         
       system = IBMiDotEnv.getNewSystemConnection(true); // Get system
+      connection = new AS400JDBCDataSource(system).getConnection();
+
       compiler = new MasterCompiler(
             system,
+            connection,
             parser.getSpecFromYamlFile(),
             parser.isDryRun(),
             parser.isDebug(),
@@ -308,8 +285,20 @@ public class MasterCompiler{
     } catch (CompilerException e){
       logger.error(e.getFullContext());
 
-    }catch (Exception e) {
+    } catch (Exception e) {
       logger.error("Unhandled  exception", e);
+    } finally {
+       try {
+        if (connection != null && !connection.isClosed()) {
+          connection.close();
+        }
+        if (system != null) {
+          system.disconnectAllServices();
+        }
+
+      } catch (SQLException e) {
+        logger.error("Error cleaning up", e);
+      }
     }
   }
 }

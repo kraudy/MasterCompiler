@@ -16,6 +16,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.10.3</junit.version> <!-- Last JUnit 5 version supporting Java 8 -->
     <surefire.version>3.2.5</surefire.version> <!-- Surefire for JUnit 5 + Java 8 support -->
+    <failsafe.version>3.2.5</failsafe.version>
   </properties>
 
   <dependencies>
@@ -88,6 +89,25 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>${surefire.version}</version>
+        <configuration>
+          <!-- Exclude tests tagged with @Tag("integration") -->
+          <excludedGroups>integration</excludedGroups>
+        </configuration>
+      </plugin>
+
+      <!-- Failsafe: runs integration tests (slower, external system needed) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>${failsafe.version}</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
 
       <!-- Maven Shade Plugin for creating an executable JAR with dependencies -->
@@ -113,6 +133,38 @@
       </plugin>
     </plugins>
   </build>
+
+  <!-- Profile to activate integration tests -->
+  <profiles>
+    <profile>
+      <id>integration</id>
+      <activation>
+        <property>
+          <name>integration</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <!-- Only include tests tagged with "integration" -->
+              <groups>integration</groups>
+            </configuration>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 
   <developers>
     <developer>

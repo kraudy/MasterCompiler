@@ -15,28 +15,26 @@ import java.sql.Connection;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-//@Tag("integration")
-//@DisplayName("Full Compilation Integration Test using IFS Stream File")
-public class StreamCompilation {
-  private AS400 system;
-  private Connection connection;
-  private User currentUser;
-  IFSFile ifsFile;
+@Tag("integration")
+@DisplayName("Full Compilation Integration Test using IFS Stream File")
+public class StreamCompilationIT {
+  static private AS400 system;
+  static private Connection connection;
+  static private User currentUser;
+  static IFSFile ifsFile;
 
-  //@BeforeAll
-  @BeforeEach
-  void setupSystem() throws Exception {
+  @BeforeAll
+  static void setupSystem() throws Exception {
     system = IBMiDotEnv.getNewSystemConnection(true);
     connection = new AS400JDBCDataSource(system).getConnection();
-    this.currentUser = new User(system, system.getUserId());
-    this.currentUser.loadUserInformation();
+    currentUser = new User(system, system.getUserId());
+    currentUser.loadUserInformation();
   }
 
-  //@AfterAll
-  @AfterEach
-  void teardown() throws Exception {
-      if (connection != null) connection.close();
-      if (system != null) system.disconnectAllServices();
+  @AfterAll
+  static void teardown() throws Exception {
+    if (connection != null) connection.close();
+    if (system != null) system.disconnectAllServices();
   }
 
   @Test
@@ -55,11 +53,11 @@ public class StreamCompilation {
 
     String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
 
-    this.ifsFile = new IFSFile(this.system, path);
+    this.ifsFile = new IFSFile(system, path);
 
     boolean created = this.ifsFile.createNewFile();
 
-    IFSFileWriter writer = new IFSFileWriter(this.ifsFile, false);  // or new IFSFileWriter(ifsFile, 1208, false);
+    IFSFileWriter writer = new IFSFileWriter(this.ifsFile, false);
     // Write the source string (handles conversion to file's CCSID)
     writer.write(rpgleSource);
     // Flush and close (close() also flushes)
