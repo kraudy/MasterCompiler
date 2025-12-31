@@ -1,0 +1,8 @@
+# Test params key with list of values
+targets:
+  "mylib2.srvhello.srvpgm.bnd":
+    params:
+      SRCSTMF: /home/sources/SRVHELLO.BND
+      MODULE:
+        - MHELLO
+        - MBYE

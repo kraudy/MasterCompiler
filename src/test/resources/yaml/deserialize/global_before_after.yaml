@@ -1,0 +1,12 @@
+before:
+  chglibl:
+    LIBL: mylib1 mylib2
+  chgcurlib:
+    CURLIB: mylib2
+
+after:
+  chglibl:
+    LIBL: ""
+
+targets:
+  mylib2.hello.pgm.rpgle: {}

@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
-public class TesteHelpers {
+public class TestHelpers {
  
   /**
    * Loads a resource file from src/test/resources as a String.
@@ -15,7 +15,7 @@ public class TesteHelpers {
    * @throws NullPointerException If the resource is not found
    */
   public static String loadResourceAsString(String path) throws IOException {
-      InputStream is = TesteHelpers.class.getClassLoader().getResourceAsStream(path);
+      InputStream is = TestHelpers.class.getClassLoader().getResourceAsStream(path);
       if (is == null) {
           throw new IllegalArgumentException("Resource not found: " + path);
       }

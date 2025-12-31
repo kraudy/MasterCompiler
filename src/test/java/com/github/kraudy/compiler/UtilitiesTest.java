@@ -37,10 +37,10 @@ public class UtilitiesTest {
   }
 
   @Test
-  void testDeserializeYaml_KeyMatching() throws IOException {
+  void testDeserializeYaml_Simplest() throws IOException {
     String yamlContent = 
-      "targets:\n" +
-      "  mylib.hello.pgm.rpgle: {}\n";
+        "targets:\n" +
+        "  mylib.hello.pgm.rpgle: {}\n";
 
     // Create temp YAML file
     Path tempYaml = Files.createTempFile("test", ".yaml");
@@ -82,14 +82,7 @@ public class UtilitiesTest {
 
   @Test
   void testDeserializeYaml_GlobalDefaults() throws IOException {
-    String yamlContent = 
-      "defaults:\n" +
-      "  tgtrls: V7R5M0\n" +
-      "  dbgview: Source\n" +
-      "  replace: *Yes\n" +
-      "\n" +
-      "targets:\n" +
-      "  mylib.hello.pgm.rpgle: {}\n";
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/defaults.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());
@@ -111,20 +104,8 @@ public class UtilitiesTest {
   }
 
   @Test
-  void testDeserializeYaml_GlobalBeforeAndAfterHooks() throws IOException {
-    String yamlContent = 
-        "before:\n" +
-        "  chglibl:\n" +
-        "    LIBL: mylib1 mylib2\n" +
-        "  chgcurlib:\n" +
-        "    CURLIB: mylib2\n" +
-        "\n" +
-        "after:\n" +
-        "  chglibl:\n" +
-        "    LIBL: \"\"\n" +
-        "\n" +
-        "targets:\n" +
-        "  mylib2.hello.pgm.rpgle: {}\n";
+  void testDeserializeYaml_ChgLibL_GlobalBeforeAndAfterHooks() throws IOException {
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/global_before_after.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());
@@ -147,21 +128,7 @@ public class UtilitiesTest {
 
   @Test
   void testDeserializeYaml_DuplicatedKeys_Hooks() throws IOException {
-    String yamlContent = 
-        "before:\n" +
-        "  - OvrDbf:\n" +
-        "      File: CUST\n" +
-        "      ToFile: CUSTOMER\n" +
-        "      Share: yes\n" +
-        "  - OvrDbf:\n" +
-        "      File: INST\n" +
-        "      ToFile: INSTANCE\n" +
-        "  - OvrDbf:\n" +
-        "      File: SERV\n" +
-        "      ToFile: SERVICE\n" +
-        "\n" +
-        "targets:\n" +
-        "  mylib2.hello.pgm.rpgle: {}\n";
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/duplicated_keys.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());
@@ -183,22 +150,7 @@ public class UtilitiesTest {
 
   @Test
   void testDeserializeYaml_TargetSpecificHooksAndParams() throws IOException {
-    String yamlContent = 
-        "targets:\n" +
-        "  \"mylib1.hello.pgm.rpgle\":\n" +
-        "    before:\n" +
-        "      chgcurlib:\n" +
-        "        CURLIB: mylib1\n" +
-        "      chgcurdir:\n" +
-        "        Dir: /home/BIGDAWG\n" +
-        "    after:\n" +
-        "      chgcurlib:\n" +
-        "        CURLIB: mylib2\n" +
-        "    params:\n" +
-        "      TEXT: Target specific text\n" +
-        "      SRCSTMF: /home/sources/HELLO.RPGLE\n" +
-        "\n" +
-        "  mylib2.empty.pgm.rpgle: {}\n";
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/target_before_after.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());
@@ -232,14 +184,7 @@ public class UtilitiesTest {
 
   @Test
   void testDeserializeYaml_ListInParams() throws IOException {
-    String yamlContent = 
-        "targets:\n" +
-        "  \"mylib2.srvhello.srvpgm.bnd\":\n" +
-        "    params:\n" +
-        "      SRCSTMF: /home/sources/SRVHELLO.BND\n" +
-        "      MODULE:\n" +
-        "        - MHELLO\n" +
-        "        - MBYE\n";
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/params_list.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());
@@ -260,17 +205,7 @@ public class UtilitiesTest {
 
   @Test
   void testDeserializeYaml_OverrideDefaultsInTarget() throws IOException {
-    String yamlContent = 
-        "defaults:\n" +
-        "  tgtrls: V7R5M0\n" +
-        "  dbgview: *SOURCE\n" +
-        "  replace: *YES\n" +
-        "\n" +
-        "targets:\n" +
-        "  \"mylib1.BASIC4002.pgm.rpgle\":\n" +
-        "    params:\n" +
-        "      TEXT: Overridden text\n" +
-        "      SRCFILE: mylib1/sources\n";
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/defaults_override.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());
@@ -294,12 +229,7 @@ public class UtilitiesTest {
 
   @Test
   void testDeserializeYaml_MultipleTargetsAndEmptyOnes() throws IOException {
-    String yamlContent = 
-        "targets:\n" +
-        "  \"mylib2.SQLHELLO.pgm.sqlrpgle\": {}\n" +
-        "  \"mylib2.dsphello.dspf.dds\": {}\n" +
-        "  \"mylib2.tabhello.table.sql\": {}\n" +
-        "  \"mylib2.modhello.module.rpgle\": {}\n";
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/multiple_keys.yaml");
 
     Path tempYaml = Files.createTempFile("test", ".yaml");
     Files.write(tempYaml, yamlContent.getBytes());

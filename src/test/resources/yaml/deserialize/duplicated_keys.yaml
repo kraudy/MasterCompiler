@@ -1,0 +1,14 @@
+before:
+  - OvrDbf:
+      File: CUST
+      ToFile: CUSTOMER
+      Share: yes
+  - OvrDbf:
+      File: INST
+      ToFile: INSTANCE
+  - OvrDbf:
+      File: SERV
+      ToFile: SERVICE
+
+targets:
+  mylib2.hello.pgm.rpgle: {}

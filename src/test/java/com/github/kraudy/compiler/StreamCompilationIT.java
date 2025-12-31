@@ -62,7 +62,7 @@ public class StreamCompilationIT {
     TargetKey key = new TargetKey("curlib.HELLO.pgm.rpgle");
 
     /* Get source */
-    String rpgleSource = TesteHelpers.loadResourceAsString("sources/rpgle/hello.rpgle");
+    String rpgleSource = TestHelpers.loadResourceAsString("sources/rpgle/hello.rpgle");
 
     String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
 
@@ -80,7 +80,7 @@ public class StreamCompilationIT {
     key.setStreamSourceFile(path);
 
     /* Get spec */
-    String yamlContent = TesteHelpers.loadResourceAsString("yaml/integration/integration.rpgle.yaml")
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/integration/integration.rpgle.yaml")
         .replace("${CURLIB}", curlib)
         .replace("${OBJECT_NAME}", key.getObjectName())
         .replace("${SRCSTMF}", path);

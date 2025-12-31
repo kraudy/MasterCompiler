@@ -1,0 +1,6 @@
+# Test: Multiple targets
+targets:
+  mylib2.SQLHELLO.pgm.sqlrpgle: {}
+  mylib2.dsphello.dspf.dds: {}
+  mylib2.tabhello.table.sql: {}
+  mylib2.modhello.module.rpgle: {}

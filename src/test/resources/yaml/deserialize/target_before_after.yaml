@@ -1,0 +1,15 @@
+targets: 
+  "mylib1.hello.pgm.rpgle": 
+    before: 
+      chgcurlib: 
+        CURLIB: mylib1 
+      chgcurdir: 
+        Dir: /home/BIGDAWG 
+    after: 
+      chgcurlib: 
+        CURLIB: mylib2 
+    params: 
+      TEXT: Target specific text 
+      SRCSTMF: /home/sources/HELLO.RPGLE 
+ 
+  mylib2.empty.pgm.rpgle: {}

@@ -1,0 +1,11 @@
+# Test: Overrides param specifics with defaults
+defaults:
+  tgtrls: V7R5M0
+  dbgview: SOURce
+  replace: *YES
+
+targets:
+  mylib1.BASIC4002.pgm.rpgle:
+    params:
+      TEXT: Overridden text
+      SRCFILE: mylib1/sources

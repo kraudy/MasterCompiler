@@ -1,0 +1,7 @@
+defaults:
+  tgtrls: V7R5M0
+  dbgview: Source
+  replace: Yes
+      
+targets:
+  mylib.hello.pgm.rpgle: {}
