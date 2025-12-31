@@ -58,128 +58,86 @@ public class StreamCompilationIT {
   }
 
   @Test
-  void test_Unit_Compile_Pgm_Rpgle_Streamfile() throws Exception {
-    TargetKey key = new TargetKey("curlib.HELLO.pgm.rpgle");
-
-    /* Get source */
-    String rpgleSource = TestHelpers.loadResourceAsString("sources/rpgle/hello.pgm.rpgle");
-
-    String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
-
-    this.ifsFile = new IFSFile(system, path);
-
-    boolean created = this.ifsFile.createNewFile();
-
-    IFSFileWriter writer = new IFSFileWriter(this.ifsFile, false);
-    // Write the source string (handles conversion to file's CCSID)
-    writer.write(rpgleSource);
-    // Flush and close (close() also flushes)
-    writer.close();
-
-    /* Set stream file path */
-    key.setStreamSourceFile(path);
-
-    /* Get spec */
-    String yamlContent = TestHelpers.loadResourceAsString("yaml/integration/unit/hello.pgm.rpgle.yaml")
-        .replace("${CURLIB}", curlib)
-        .replace("${OBJECT_NAME}", key.getObjectName())
-        .replace("${SRCSTMF}", path);
-
-    // Create temp YAML file
-    Path tempYaml = Files.createTempFile("test", ".yaml");
-    Files.write(tempYaml, yamlContent.getBytes());
-
-    /* Now, compile! */
-    try {
-      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
-
-      MasterCompiler compiler = new MasterCompiler(
-        system,
-        connection,
-        spec,
-        false,  // dryRun
-        true,  // debug
-        true,   // verbose - helpful for debugging test failures
-        false,  // diff
-        false   // noMigrate
+    void test_Unit_Compile_Pgm_Rpgle_Streamfile() throws Exception {
+      compileFromStreamFile(
+          "curlib.HELLO.pgm.rpgle",
+          "sources/rpgle/hello.pgm.rpgle",
+          "yaml/integration/unit/hello.pgm.rpgle.yaml"
       );
-
-      // This should compile the program
-      compiler.build();
-
-      /* Check if no errors were found */
-      assertFalse(compiler.foundCompilationError());
-
-    } finally {
-      /* Remove files */
-      Files.deleteIfExists(tempYaml);
-
-      if (ifsFile.exists()) {
-        ifsFile.delete();
-      }
     }
-  }
 
   @Test
   void test_Unit_Compile_Module_Rpgle_Streamfile() throws Exception {
-    TargetKey key = new TargetKey("curlib.HELLO.module.rpgle");
+    compileFromStreamFile(
+        "curlib.HELLO.module.rpgle",
+        "sources/rpgle/hello.module.rpgle",
+        "yaml/integration/unit/hello.module.rpgle.yaml"
+    );
 
-    /* Get source */
-    String rpgleSource = TestHelpers.loadResourceAsString("sources/rpgle/hello.module.rpgle");
+    compileFromStreamFile(
+        "curlib.bye.module.rpgle",
+        "sources/rpgle/bye.module.rpgle",
+        "yaml/integration/unit/bye.module.rpgle.yaml"
+    );
+  }
 
-    String path = currentUser.getHomeDirectory() + "/" + System.currentTimeMillis() + key.getObjectName() + "." + key.getSourceType();
+  private void compileFromStreamFile(
+          String targetKeyStr,
+          String sourceResourcePath,
+          String yamlResourcePath) throws Exception {
 
-    this.ifsFile = new IFSFile(system, path);
+    TargetKey key = new TargetKey(targetKeyStr);
 
-    boolean created = this.ifsFile.createNewFile();
+    // Load source
+    String sourceCode = TestHelpers.loadResourceAsString(sourceResourcePath);
 
-    IFSFileWriter writer = new IFSFileWriter(this.ifsFile, false);
-    // Write the source string (handles conversion to file's CCSID)
-    writer.write(rpgleSource);
-    // Flush and close (close() also flushes)
-    writer.close();
+    // Create unique IFS path
+    String ifsPath = currentUser.getHomeDirectory() + "/" +
+                      System.currentTimeMillis() + "_" + key.getObjectName() + "." + key.getSourceType();
 
-    /* Set stream file path */
-    key.setStreamSourceFile(path);
+    IFSFile ifsFile = new IFSFile(system, ifsPath);
+    ifsFile.createNewFile();
 
-    /* Get spec */
-    String yamlContent = TestHelpers.loadResourceAsString("yaml/integration/unit/hello.module.rpgle.yaml")
-        .replace("${CURLIB}", curlib)
-        .replace("${OBJECT_NAME}", key.getObjectName())
-        .replace("${SRCSTMF}", path);
+    try (IFSFileWriter writer = new IFSFileWriter(ifsFile, false)) {
+        writer.write(sourceCode);
+    }
 
-    // Create temp YAML file
-    Path tempYaml = Files.createTempFile("test", ".yaml");
-    Files.write(tempYaml, yamlContent.getBytes());
+    // Set stream file in key
+    key.setStreamSourceFile(ifsPath);
 
-    /* Now, compile! */
+    // Load and customize YAML
+    String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath)
+            .replace("${CURLIB}", curlib)
+            .replace("${OBJECT_NAME}", key.getObjectName())
+            .replace("${SRCSTMF}", ifsPath);
+
+    Path tempYaml = Files.createTempFile("test-", ".yaml");
+    Files.writeString(tempYaml, yamlContent);
+
     try {
-      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
+        BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
 
-      MasterCompiler compiler = new MasterCompiler(
-        system,
-        connection,
-        spec,
-        false,  // dryRun
-        true,  // debug
-        true,   // verbose - helpful for debugging test failures
-        false,  // diff
-        false   // noMigrate
-      );
+        MasterCompiler compiler = new MasterCompiler(
+                system,
+                connection,
+                spec,
+                false,  // dryRun
+                true,   // debug
+                true,   // verbose
+                false,  // diff
+                false   // noMigrate
+        );
 
-      // This should compile the program
-      compiler.build();
+        compiler.build();
 
-      /* Check if no errors were found */
-      assertFalse(compiler.foundCompilationError());
+        assertFalse(compiler.foundCompilationError(),
+                "Compilation should succeed for " + targetKeyStr);
 
     } finally {
-      /* Remove files */
-      Files.deleteIfExists(tempYaml);
-
-      if (ifsFile.exists()) {
-        ifsFile.delete();
-      }
+        Files.deleteIfExists(tempYaml);
+        if (ifsFile.exists()) {
+            ifsFile.delete();
+        }
     }
   }
 

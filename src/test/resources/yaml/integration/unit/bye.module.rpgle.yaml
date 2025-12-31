@@ -1,0 +1,14 @@
+# Simple module creation
+before:
+  chglibl:
+    LIBL: ${CURLIB}
+
+after:
+  dltobj:
+    OBJ: ${OBJECT_NAME}
+    OBJTYPE: Module
+
+targets:  
+  "curlib.bye.module.rpgle":
+    params:
+      SRCSTMF: ${SRCSTMF}
