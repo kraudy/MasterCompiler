@@ -21,6 +21,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -33,6 +34,7 @@ public class StreamCompilationIT {
   static private Connection connection;
   static private User currentUser;
   static private String curlib;
+  static private CommandExecutor commandExecutor;
   private IFSFile ifsFile;
 
   @BeforeAll
@@ -41,6 +43,7 @@ public class StreamCompilationIT {
     connection = new AS400JDBCDataSource(system).getConnection();
     currentUser = new User(system, system.getUserId());
     currentUser.loadUserInformation();
+    commandExecutor = new CommandExecutor(connection, false, false, false);
 
     try(Statement stmt = connection.createStatement();
         ResultSet rsCurLib = stmt.executeQuery(
@@ -90,21 +93,19 @@ public class StreamCompilationIT {
   @Test
   void test_Multi_Target_With_Predefined_Params_And_Empty_Targets() throws Exception {
     /* Load sources per key */
-    //TODO: Make this a list of TargetKeys and set the source with String setResourcePath; // Used to store source for test.
-    Map<String, String> sourcesByTarget = Map.of(
-        "curlib.hello.module.rpgle",   "sources/rpgle/hello.module.rpgle",
-        "curlib.bye.module.rpgle",     "sources/rpgle/bye.module.rpgle",
-        "curlib.hello.pgm.rpgle",      "sources/rpgle/hello.pgm.rpgle"
+    Map<TargetKey, String> keyMap = Map.of(
+        new TargetKey("curlib.hello.module.rpgle"),   "sources/rpgle/hello.module.rpgle",
+        new TargetKey("curlib.bye.module.rpgle"),     "sources/rpgle/bye.module.rpgle",
+        new TargetKey("curlib.hello.pgm.rpgle"),      "sources/rpgle/hello.pgm.rpgle"
     );
 
     compileMultiTargetYaml(
         "yaml/integration/multi/multi.hello.pgm.rpgle.yaml",
-        sourcesByTarget
+        keyMap
     );
   }
 
-  private void compileMultiTargetYaml(String yamlResourcePath,
-                                    Map<String, String> sourceResourceByTarget) throws Exception {
+  private void compileMultiTargetYaml(String yamlResourcePath, Map<TargetKey, String> keyMap) throws Exception {
     // 1. Load and deserialize the base YAML
     String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath)
               .replace("${CURLIB}", curlib);
@@ -124,32 +125,26 @@ public class StreamCompilationIT {
         TargetKey key = entry.getKey();
         BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-        //TODO: Improve this. Add methos isContained() to TargetKey that does this lookup and uses its internal equals override
-        String targetKeyStr = key.asString().toLowerCase(); // normalize for lookup
+        // Get resource path
+        String sourceCode = TestHelpers.loadResourceAsString(keyMap.get(key));
 
-        // Only process targets that need a stream file
-        if (sourceResourceByTarget.containsKey(targetKeyStr)) {
-          String sourceResource = sourceResourceByTarget.get(targetKeyStr);
-          String sourceCode = TestHelpers.loadResourceAsString(sourceResource);
+        // Create unique IFS path
+        String ifsPath = currentUser.getHomeDirectory() + "/" +
+                System.currentTimeMillis() + "_" + key.asFileName();
 
-          // Create unique IFS path
-          String ifsPath = currentUser.getHomeDirectory() + "/" +
-                  System.currentTimeMillis() + "_" + key.asFileName();
-
-          /* Create source on remote server */
-          IFSFile ifsFile = new IFSFile(system, ifsPath);
-          ifsFile.createNewFile();
-          try (IFSFileWriter writer = new IFSFileWriter(ifsFile, false)) {
-            writer.write(sourceCode);
-          }
-
-          // Inject into the target's params
-          targetSpec.params.put(ParamCmd.SRCSTMF, ifsPath);
-
-          /* Track paths and objects for deletion */
-          ifsPathsToDelete.add(ifsPath);
-          objectsToDelete.add(key);
+        /* Create source on remote server */
+        IFSFile ifsFile = new IFSFile(system, ifsPath);
+        ifsFile.createNewFile();
+        try (IFSFileWriter writer = new IFSFileWriter(ifsFile, false)) {
+          writer.write(sourceCode);
         }
+
+        /* Inject into the target's params. This even works for opm or any other object */
+        targetSpec.params.put(ParamCmd.SRCSTMF, ifsPath);
+
+        /* Track paths and objects for deletion */
+        ifsPathsToDelete.add(ifsPath);
+        objectsToDelete.add(key);
 
         // You can also inject other dynamic params here, e.g.:
         // targetSpec.params.put(ParamCmd.TEXT, "Integration test - " + key.getObjectName());
@@ -165,25 +160,24 @@ public class StreamCompilationIT {
       assertFalse(compiler.foundCompilationError(), "Multi-target compilation failed");
 
     } finally {
-        // 5. Cleanup
-        Files.deleteIfExists(tempYaml);
+      // 5. Cleanup
+      Files.deleteIfExists(tempYaml);
 
-        // Delete IFS files
-        for (String path : ifsPathsToDelete) {
-            IFSFile file = new IFSFile(system, path);
-            if (file.exists()) file.delete();
-        }
+      // Delete IFS files
+      for (String path : ifsPathsToDelete) {
+        IFSFile file = new IFSFile(system, path);
+        if (file.exists()) file.delete();
+      }
 
-        // Delete compiled objects (optional but nice)
-        for (TargetKey key : objectsToDelete) {
-            try {
-                CommandObject dlt = new CommandObject(SysCmd.DLTOBJ);
-                dlt.put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB));
-                dlt.put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
-                new CommandExecutor(connection, false, false, false)
-                        .executeCommand(dlt);
-            } catch (Exception ignored) {}
-        }
+      // Delete compiled objects (optional but nice)
+      for (TargetKey key : objectsToDelete) {
+        try {
+          CommandObject dlt = new CommandObject(SysCmd.DLTOBJ);
+          dlt.put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB));
+          dlt.put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
+          commandExecutor.executeCommand(dlt);
+        } catch (Exception ignored) {}  // This prevents breaking the loop
+      }
     }
   }
 

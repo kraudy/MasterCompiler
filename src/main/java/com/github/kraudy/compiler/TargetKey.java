@@ -88,8 +88,15 @@ public class TargetKey {
     this.library = library;
   }
 
-  public void setStreamSourceFile(String sourcePath){
+  //TODO: Refacto methods to be like this one. It will make the code cooler.
+  public TargetKey setStreamSourceFile(String sourcePath){
     this.sourceStmf = sourcePath;
+    /* Try to set  SRCSTMF, if not valid just ignore*/
+    try {
+      put(ParamCmd.SRCSTMF, this.sourceStmf);  
+    } catch (Exception ignore) {}
+
+    return this;
   }
 
   public void setLastEdit(Timestamp lastSourceEdit){
@@ -186,15 +193,12 @@ public class TargetKey {
     }
 
     params.forEach((param, value) -> {
-      /* 
-       *  This validation is performed because the map was populated without its compilation command and invalid params are just rejected.
-       *  No error is thrown. This is useful for default params and alike.
-       */
-      if (!Utilities.validateCommandParam(this.getCompilationCommand(), param)) {
+      try {
+        put(param, value);
+      } catch (Exception ignore) {
+        /* Invalid params are just ignored. This is useful because this map has not been previously validated */
         logger.info("\nRejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
-        return;
       }
-      put(param, value);
     });
   }
 
