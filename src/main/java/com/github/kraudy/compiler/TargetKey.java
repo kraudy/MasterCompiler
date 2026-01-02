@@ -269,6 +269,10 @@ public class TargetKey {
     return library + "." + objectName + "." + objectType.name() + "." + sourceType.name();
   }
 
+  public String asFileName() {
+    return getObjectName() + "." + getSourceType();
+  }
+
   public String getStreamFile() {
     String sourceStreamFile = get(ParamCmd.SRCSTMF);
     if (sourceStreamFile.isEmpty()) return this.sourceStmf;
