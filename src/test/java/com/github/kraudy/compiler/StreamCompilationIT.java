@@ -67,27 +67,30 @@ public class StreamCompilationIT {
   }
 
   @Test
-    void test_Unit_Compile_Pgm_Rpgle_Streamfile() throws Exception {
-      compileFromStreamFile(
-          "curlib.HELLO.pgm.rpgle",
-          "sources/rpgle/hello.pgm.rpgle",
-          "yaml/integration/unit/hello.pgm.rpgle.yaml"
-      );
-    }
+  void test_Unit_Compile_Pgm_Rpgle_Streamfile() throws Exception {
+    Map<TargetKey, String> keyMap = Map.of(
+        new TargetKey("curlib.HELLO.pgm.rpgle"),   "sources/rpgle/hello.pgm.rpgle"
+    );
+
+    compileMultiTargetYaml(
+        "yaml/integration/unit/hello.pgm.rpgle.yaml",
+        keyMap
+    );
+
+  }
 
   @Test
   void test_Unit_Compile_Module_Rpgle_Streamfile() throws Exception {
-    compileFromStreamFile(
-        "curlib.HELLO.module.rpgle",
-        "sources/rpgle/hello.module.rpgle",
-        "yaml/integration/unit/hello.module.rpgle.yaml"
+    Map<TargetKey, String> keyMap = Map.of(
+        new TargetKey("curlib.HELLO.module.rpgle"),   "sources/rpgle/hello.module.rpgle",
+        new TargetKey("curlib.bye.module.rpgle"),   "sources/rpgle/bye.module.rpgle"
     );
 
-    compileFromStreamFile(
-        "curlib.bye.module.rpgle",
-        "sources/rpgle/bye.module.rpgle",
-        "yaml/integration/unit/bye.module.rpgle.yaml"
+    compileMultiTargetYaml(
+        "yaml/integration/unit/hello.module.rpgle.yaml",
+        keyMap
     );
+
   }
 
   @Test
@@ -146,7 +149,6 @@ public class StreamCompilationIT {
         ifsPathsToDelete.add(ifsPath);
         objectsToDelete.add(key);
 
-        // You can also inject other dynamic params here, e.g.:
         // targetSpec.params.put(ParamCmd.TEXT, "Integration test - " + key.getObjectName());
       }
 
@@ -178,66 +180,6 @@ public class StreamCompilationIT {
           commandExecutor.executeCommand(dlt);
         } catch (Exception ignored) {}  // This prevents breaking the loop
       }
-    }
-  }
-
-  private void compileFromStreamFile(
-          String targetKeyStr,
-          String sourceResourcePath,
-          String yamlResourcePath) throws Exception {
-
-    TargetKey key = new TargetKey(targetKeyStr);
-
-    // Load source
-    String sourceCode = TestHelpers.loadResourceAsString(sourceResourcePath);
-
-    // Create unique IFS path
-    String ifsPath = currentUser.getHomeDirectory() + "/" +
-                      System.currentTimeMillis() + "_" + key.getObjectName() + "." + key.getSourceType();
-
-    IFSFile ifsFile = new IFSFile(system, ifsPath);
-    ifsFile.createNewFile();
-
-    try (IFSFileWriter writer = new IFSFileWriter(ifsFile, false)) {
-        writer.write(sourceCode);
-    }
-
-    // Set stream file in key
-    key.setStreamSourceFile(ifsPath);
-
-    // Load and customize YAML
-    String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath)
-            .replace("${CURLIB}", curlib)
-            .replace("${OBJECT_NAME}", key.getObjectName())
-            .replace("${SRCSTMF}", ifsPath);
-
-    Path tempYaml = Files.createTempFile("test-", ".yaml");
-    Files.writeString(tempYaml, yamlContent);
-
-    try {
-        BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
-
-        MasterCompiler compiler = new MasterCompiler(
-                system,
-                connection,
-                spec,
-                false,  // dryRun
-                true,   // debug
-                true,   // verbose
-                false,  // diff
-                false   // noMigrate
-        );
-
-        compiler.build();
-
-        assertFalse(compiler.foundCompilationError(),
-                "Compilation should succeed for " + targetKeyStr);
-
-    } finally {
-        Files.deleteIfExists(tempYaml);
-        if (ifsFile.exists()) {
-            ifsFile.delete();
-        }
     }
   }
 
