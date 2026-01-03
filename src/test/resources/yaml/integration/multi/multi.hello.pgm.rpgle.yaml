@@ -3,12 +3,17 @@ before:
     BNDDIR: BNDHELLO
 
 targets:  
-  "curlib.hello.module.rpgle": {}
+  "curlib.hello.module.rpgle":
+    params:
+      SRCSTMF: sources/rpgle/hello.module.rpgle
 
-  curlib.bye.module.rpgle: {}
+  curlib.bye.module.rpgle:
+    params:
+      SRCSTMF: sources/rpgle/bye.module.rpgle
 
   "curlib.srvhello.srvpgm.bnd":
     params:
+      SRCSTMF: sources/rpgle/srvhello.srvpgm.bnd
       MODULE:
         - HELLO
         - BYE
@@ -20,6 +25,7 @@ targets:
         Obj: SRVHELLO
 
     params:
+      SRCSTMF: sources/rpgle/hello.pgm.rpgle
       TEXT: Hello from integration test
 
 after: 

@@ -1,0 +1,14 @@
+# Global defaults for ILE/IFS consistency
+defaults:
+  TGTRLS: CURRENT
+  DBGVIEW: ALL
+  OPTION: EVENTF
+  REPLACE: YES
+  TGTCCSID: JOB
+
+
+targets:
+  # Modules first (RPGLE sources in QRPGLESRC → *MODULE)
+  curlib.ADDnum.pgm.rpgle:
+    params:
+      SRCSTMF: ${IFS_ROOT}/QRPGLESRC/ADD.RPGLE

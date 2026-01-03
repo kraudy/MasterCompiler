@@ -69,23 +69,14 @@ public class StreamCompilationIT {
   }
 
   @Test
-  void test_Full_Ile_Compilation_Flow() throws Exception {
-    /* Load sources per key */
-    Map<TargetKey, String> keyMap = Map.of(
-        new TargetKey("curlib.hello.module.rpgle"),   "sources/rpgle/hello.module.rpgle",
-        new TargetKey("curlib.bye.module.rpgle"),     "sources/rpgle/bye.module.rpgle",
-        new TargetKey("curlib.srvhello.srvpgm.bnd"),   "sources/rpgle/srvhello.srvpgm.bnd",
-        new TargetKey("curlib.hello.pgm.rpgle"),      "sources/rpgle/hello.pgm.rpgle"
-
-    );
+  void test_Full_Ile_Compilation_Flow() throws Exception {    
 
     masterCompilerTest(
-        "yaml/integration/multi/multi.hello.pgm.rpgle.yaml",
-        keyMap
+        "yaml/integration/multi/multi.hello.pgm.rpgle.yaml"
     );
   }
 
-  private void masterCompilerTest(String yamlResourcePath, Map<TargetKey, String> keyMap) throws Exception {
+  private void masterCompilerTest(String yamlResourcePath) throws Exception {
     // 1. Load and deserialize the base YAML
     String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath);
 
@@ -98,31 +89,40 @@ public class StreamCompilationIT {
     List<String> ifsPathsToDelete = new ArrayList<>();
     List<TargetKey> objectsToDelete = new ArrayList<>();
 
+    String testFolder = currentUser.getHomeDirectory() + "/" + "test_" + System.currentTimeMillis();
+
     try {
       // 3. Iterate over targets and inject dynamic values
       for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : spec.targets.entrySet()) {
         TargetKey key = entry.getKey();
         BuildSpec.TargetSpec targetSpec = entry.getValue();
 
+        /* Get source stream file */
+        String relativeSrc = targetSpec.params.get(ParamCmd.SRCSTMF);
         // Get resource path
-        String sourceCode = TestHelpers.loadResourceAsString(keyMap.get(key));
+        String sourceCode = TestHelpers.loadResourceAsString(relativeSrc);
 
-        // Create unique IFS path
-        String ifsPath = currentUser.getHomeDirectory() + "/" +
-                System.currentTimeMillis() + "_" + key.asFileName();
+        /* Append home dir + timestamp for file */
+        String remotePath = testFolder + "/" + relativeSrc;
+
+        // Create parent directories recursively
+        IFSFile parentDir = new IFSFile(system, new IFSFile(system, remotePath).getParent());
+        if (!parentDir.exists()) {
+          parentDir.mkdirs();  // This creates the full chain (e.g., sources/rpgle)
+        }
 
         /* Create source on remote server */
-        IFSFile ifsFile = new IFSFile(system, ifsPath);
-        ifsFile.createNewFile();
-        try (IFSFileWriter writer = new IFSFileWriter(ifsFile, false)) {
+        IFSFile remoteFile = new IFSFile(system, remotePath);
+        remoteFile.createNewFile();
+        try (IFSFileWriter writer = new IFSFileWriter(remoteFile, false)) {
           writer.write(sourceCode);
         }
 
         /* Inject into the target's params. This even works for opm or any other object */
-        targetSpec.params.put(ParamCmd.SRCSTMF, ifsPath);
+        targetSpec.params.put(ParamCmd.SRCSTMF, remotePath);  // Replace with absolute
 
-        /* Track paths and objects for deletion */
-        ifsPathsToDelete.add(ifsPath);
+        ifsPathsToDelete.add(remotePath);
+
         objectsToDelete.add(key);
 
         // targetSpec.params.put(ParamCmd.TEXT, "Integration test - " + key.getObjectName());
@@ -147,6 +147,12 @@ public class StreamCompilationIT {
         IFSFile file = new IFSFile(system, path);
         if (file.exists()) file.delete();
       }
+
+      CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
+        .put(ParamCmd.DIR, testFolder)
+        .put(ParamCmd.SUBTREE, ValCmd.ALL);
+
+      commandExecutor.executeCommand(rmvDir);
 
       // Delete compiled objects (optional but nice)
       for (TargetKey key : objectsToDelete) {

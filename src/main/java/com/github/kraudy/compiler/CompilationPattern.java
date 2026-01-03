@@ -48,7 +48,7 @@ public class CompilationPattern {
     // Objects
     DLTOBJ, CRTDUPOBJ,
     // Stream files
-    CHGCURDIR
+    CHGCURDIR, RMVDIR
     ;
 
     public static SysCmd fromString(String value) {
@@ -203,7 +203,10 @@ public class CompilationPattern {
     FROMLIB, TOLIB, NEWOBJ, TOASPDEV,
 
     // CHGCURDIR
-    DIR,
+    DIR, 
+
+    // RMVDIR
+    SUBTREE, RMVLNK, 
     
     ;
 
@@ -412,6 +415,13 @@ public class CompilationPattern {
   // CHGCURDIR
   public static final List<ParamCmd> ChgCurDir_Pattern = Arrays.asList(
     ParamCmd.DIR
+  );
+
+  // RMVDIR
+  public static final List<ParamCmd> RmvDir_Pattern = Arrays.asList(
+    ParamCmd.DIR,
+    ParamCmd.SUBTREE,
+    ParamCmd.RMVLNK
   );
 
   // OVRDBF
@@ -1179,6 +1189,7 @@ public class CompilationPattern {
     commandToPatternMap.put(SysCmd.CRTDUPOBJ, CrtDupObj_Pattern);
     /* stream files */
     commandToPatternMap.put(SysCmd.CHGCURDIR, ChgCurDir_Pattern);
+    commandToPatternMap.put(SysCmd.RMVDIR, RmvDir_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);
