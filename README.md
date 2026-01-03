@@ -43,6 +43,8 @@ Then, run the integration test to watch a thing of beauty.
 
 * `mvn clean verify -Pintegration`
 
+[Tests doc](./docs/Tests.md)
+
 ---
 
 ## Object Compilation
