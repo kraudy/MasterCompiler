@@ -99,12 +99,14 @@ public class TargetKey {
     return this;
   }
 
-  public void setLastEdit(Timestamp lastSourceEdit){
+  public TargetKey setLastEdit(Timestamp lastSourceEdit){
     this.lastSourceEdit = lastSourceEdit;
+    return this;
   }
 
-  public void setLastBuild(Timestamp lastBuild){
+  public TargetKey setLastBuild(Timestamp lastBuild){
     this.lastBuild = lastBuild;
+    return this;
   }
 
   public String getQualifiedObject(){
@@ -182,8 +184,8 @@ public class TargetKey {
     return " (source last edit: " + this.lastSourceEdit + ", object last build: " + this.lastBuild + ")";
   }
 
-  public void putAll(Map<ParamCmd, String> params) {
-    if (params == null) return;
+  public TargetKey putAll(Map<ParamCmd, String> params) {
+    if (params == null) return this;
     /* 
      * If the object is OPM, extract the SRCSTMF param before it is rejected and store its value.
      * This will help us later to do the migration from stream file to source member since OPM commands don't support SRCSTMF.
@@ -200,6 +202,8 @@ public class TargetKey {
         logger.info("\nRejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
       }
     });
+
+    return this;
   }
 
   public String get(ParamCmd param) {
@@ -207,20 +211,26 @@ public class TargetKey {
   }
 
   public String getCommandString(){
-    Utilities.ResolveConflicts(this);
+    ResolveConflicts();
     getChangesSummary();
     return this.ParamCmdSequence.getCommandString(this.compilationCommand);
+  }
+
+  public TargetKey ResolveConflicts() {
+    Utilities.ResolveConflicts(this);
+    return this;
   }
 
   public String getCommandStringWithoutSummary(){
     return this.ParamCmdSequence.getCommandStringWithoutSummary(this.compilationCommand);
   }
 
-  public String remove(ParamCmd param) {
-    return this.ParamCmdSequence.remove(param);
+  public TargetKey remove(ParamCmd param) {
+    this.ParamCmdSequence.remove(param);
+    return this;
   }
 
-  public String removeSourceFile() {
+  public TargetKey removeSourceFile() {
     String source = get(ParamCmd.SRCFILE);
     if (!source.isEmpty()){
       String[] sourceList = source.split("/");
@@ -231,35 +241,44 @@ public class TargetKey {
       }
     }
 
-    return this.ParamCmdSequence.remove(ParamCmd.SRCFILE);
+    this.ParamCmdSequence.remove(ParamCmd.SRCFILE);
+
+    return this;
   }
 
-  public String removeStreamFile() {
+  public TargetKey removeStreamFile() {
     String sourceStreamFile = get(ParamCmd.SRCSTMF);
     if (!sourceStreamFile.isEmpty()){
       this.sourceStmf = sourceStreamFile;
     }
-    return this.ParamCmdSequence.remove(ParamCmd.SRCSTMF);
+
+    this.ParamCmdSequence.remove(ParamCmd.SRCSTMF);
+
+    return this;
   }
 
-  public String removeMember() {
+  public TargetKey removeMember() {
     String member = get(ParamCmd.SRCMBR);
     if (!member.isEmpty()){
       this.sourceName = member;
     }
-    return this.ParamCmdSequence.remove(ParamCmd.SRCMBR);
+    this.ParamCmdSequence.remove(ParamCmd.SRCMBR);
+
+    return this;
   }
 
-  public String put(ParamCmd param, String value) {
+  public TargetKey put(ParamCmd param, String value) {
     /* At this point there should be no invalid command params. If present, an exception is thrown */
     if (!Utilities.validateCommandParam(this.compilationCommand, param)) {
       throw new IllegalArgumentException("Parameters " + param.name() + " not valid for command " + getCompilationCommandName());
     }
 
-    return this.ParamCmdSequence.put(param, value);
+    this.ParamCmdSequence.put(param, value);
+
+    return this;
   }
 
-  public String put(ParamCmd param, ValCmd value) {
+  public TargetKey put(ParamCmd param, ValCmd value) {
     return put(param, value.toString());
   }
 

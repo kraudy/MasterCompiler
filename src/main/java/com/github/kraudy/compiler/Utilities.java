@@ -43,19 +43,19 @@ public class Utilities {
       case CRTRPGMOD:
       case CRTCLMOD:
       case RUNSQLSTM:
-        targetKey.put(ParamCmd.SRCFILE, targetKey.getQualifiedSourceFile());
-        targetKey.put(ParamCmd.SRCMBR, targetKey.getSourceName());
+        targetKey.put(ParamCmd.SRCFILE, targetKey.getQualifiedSourceFile())
+          .put(ParamCmd.SRCMBR, targetKey.getSourceName());
         break;
     }
 
     /* Set default values */
     switch (targetKey.getCompilationCommand()) {
       case CRTSQLRPGI:
-        targetKey.put(ParamCmd.OBJ, targetKey.getQualifiedObject());
-        targetKey.put(ParamCmd.OBJ, targetKey.getQualifiedObject(ValCmd.CURLIB));
-        targetKey.put(ParamCmd.OBJTYPE, targetKey.getObjectType());
-        targetKey.put(ParamCmd.COMMIT, ValCmd.NONE);
-        targetKey.put(ParamCmd.DBGVIEW, ValCmd.SOURCE);
+        targetKey.put(ParamCmd.OBJ, targetKey.getQualifiedObject())
+          .put(ParamCmd.OBJ, targetKey.getQualifiedObject(ValCmd.CURLIB))
+          .put(ParamCmd.OBJTYPE, targetKey.getObjectType())
+          .put(ParamCmd.COMMIT, ValCmd.NONE)
+          .put(ParamCmd.DBGVIEW, ValCmd.SOURCE);
         break;
     
       case CRTBNDRPG:
@@ -63,37 +63,37 @@ public class Utilities {
         targetKey.put(ParamCmd.DBGVIEW, ValCmd.ALL);
       case CRTRPGPGM:
       case CRTCLPGM:
-        targetKey.put(ParamCmd.PGM, targetKey.getQualifiedObject());
-        targetKey.put(ParamCmd.PGM, targetKey.getQualifiedObject(ValCmd.CURLIB));
+        targetKey.put(ParamCmd.PGM, targetKey.getQualifiedObject())
+          .put(ParamCmd.PGM, targetKey.getQualifiedObject(ValCmd.CURLIB));
         break;
 
       case CRTDSPF:
       case CRTPF:
       case CRTLF:
-        targetKey.put(ParamCmd.FILE, targetKey.getQualifiedObject());
-        targetKey.put(ParamCmd.FILE, targetKey.getQualifiedObject(ValCmd.CURLIB));
+        targetKey.put(ParamCmd.FILE, targetKey.getQualifiedObject())
+          .put(ParamCmd.FILE, targetKey.getQualifiedObject(ValCmd.CURLIB));
         break;
       
       case CRTSRVPGM:
-        targetKey.put(ParamCmd.SRVPGM, targetKey.getQualifiedObject());
-        targetKey.put(ParamCmd.SRVPGM, targetKey.getQualifiedObject(ValCmd.CURLIB));
-        targetKey.put(ParamCmd.MODULE, targetKey.getQualifiedObject());
-        targetKey.put(ParamCmd.MODULE, targetKey.getQualifiedObject(ValCmd.LIBL));
-        targetKey.put(ParamCmd.BNDSRVPGM, ValCmd.NONE);
-        targetKey.put(ParamCmd.EXPORT, ValCmd.ALL);
+        targetKey.put(ParamCmd.SRVPGM, targetKey.getQualifiedObject())
+          .put(ParamCmd.SRVPGM, targetKey.getQualifiedObject(ValCmd.CURLIB))
+          .put(ParamCmd.MODULE, targetKey.getQualifiedObject())
+          .put(ParamCmd.MODULE, targetKey.getQualifiedObject(ValCmd.LIBL))
+          .put(ParamCmd.BNDSRVPGM, ValCmd.NONE)
+          .put(ParamCmd.EXPORT, ValCmd.ALL);
         break;
 
       case CRTRPGMOD:
       case CRTCLMOD:
-        targetKey.put(ParamCmd.DBGVIEW, ValCmd.ALL);
-        targetKey.put(ParamCmd.MODULE, targetKey.getQualifiedObject());
-        targetKey.put(ParamCmd.MODULE, targetKey.getQualifiedObject(ValCmd.CURLIB));
+        targetKey.put(ParamCmd.DBGVIEW, ValCmd.ALL)
+          .put(ParamCmd.MODULE, targetKey.getQualifiedObject())
+          .put(ParamCmd.MODULE, targetKey.getQualifiedObject(ValCmd.CURLIB));
         break;
 
       case RUNSQLSTM:
-        targetKey.put(ParamCmd.COMMIT, ValCmd.NONE);
-        targetKey.put(ParamCmd.DBGVIEW, ValCmd.SOURCE);
-        targetKey.put(ParamCmd.OPTION, ValCmd.LIST);
+        targetKey.put(ParamCmd.COMMIT, ValCmd.NONE)
+          .put(ParamCmd.DBGVIEW, ValCmd.SOURCE)
+          .put(ParamCmd.OPTION, ValCmd.LIST);
         break;
 
       default:
@@ -137,8 +137,8 @@ public class Utilities {
     switch (targetKey.getCompilationCommand()) {
       case CRTRPGPGM:
       case CRTCLPGM:
-        targetKey.put(ParamCmd.OPTION, ValCmd.LSTDBG);
-        targetKey.put(ParamCmd.GENOPT, ValCmd.LIST);
+        targetKey.put(ParamCmd.OPTION, ValCmd.LSTDBG)
+          .put(ParamCmd.GENOPT, ValCmd.LIST);
         break;
     }
 

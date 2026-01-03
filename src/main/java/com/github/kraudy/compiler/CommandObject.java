@@ -69,16 +69,18 @@ public class CommandObject {
     this.ParamCmdSequence.getChangesSummary(compilationPattern, getSystemCommandName());
   }
 
-  public String put(ParamCmd param, String value) {
+  public CommandObject put(ParamCmd param, String value) {
     /* At this point there should be no invalid command params. If present, an exception is thrown */
     if (!Utilities.validateCommandParam(this.systemCommand, param)) {
       throw new IllegalArgumentException("Parameters " + param.name() + " not valid for command " + getSystemCommandName());
     }
 
-    return this.ParamCmdSequence.put(param, value);
+    this.ParamCmdSequence.put(param, value);
+
+    return this;
   }
 
-  public String put(ParamCmd param, ValCmd value) {
+  public CommandObject put(ParamCmd param, ValCmd value) {
     return put(param, value.toString());
   }
 

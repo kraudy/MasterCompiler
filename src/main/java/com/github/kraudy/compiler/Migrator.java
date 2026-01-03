@@ -50,10 +50,10 @@ public class Migrator {
           key.containsKey(ParamCmd.SRCFILE)) {
           if(verbose) logger.info("Migrating source member to stream file");
           migrateMemberToStreamFile(key);
-          key.put(ParamCmd.SRCSTMF, key.getStreamFile());
 
-          key.removeSourceFile();
-          key.removeMember();
+          key.put(ParamCmd.SRCSTMF, key.getStreamFile())
+            .removeSourceFile()
+            .removeMember();
         }
         break;
 
@@ -74,29 +74,26 @@ public class Migrator {
           if (!sourcePfExists(key)) createSourcePf(key);
           if (!sourceMemberExists(key)) createSourceMember(key);
           migrateStreamFileToMember(key);
-          key.put(ParamCmd.SRCFILE, key.getQualifiedSourceFile());
-          key.put(ParamCmd.SRCMBR, key.getObjectName());
-
-          key.removeStreamFile();
+          key.put(ParamCmd.SRCFILE, key.getQualifiedSourceFile())
+            .put(ParamCmd.SRCMBR, key.getObjectName())
+            .removeStreamFile();
         }
         break;
     }
   }
 
   public void createSourcePf(TargetKey key) throws Exception {
-    CommandObject cmd = new CommandObject(SysCmd.CRTSRCPF);
-
-    cmd.put(ParamCmd.FILE, key.getQualifiedSourceFile());
+    CommandObject cmd = new CommandObject(SysCmd.CRTSRCPF)
+      .put(ParamCmd.FILE, key.getQualifiedSourceFile());
     
     commandExec.executeCommand(cmd);
   }
 
   public void createSourceMember(TargetKey key) throws Exception {
-    CommandObject cmd = new CommandObject(SysCmd.ADDPFM);
-
-    cmd.put(ParamCmd.FILE, key.getQualifiedSourceFile());
-    cmd.put(ParamCmd.MBR, key.getSourceName());
-    cmd.put(ParamCmd.SRCTYPE, key.getSourceType());
+    CommandObject cmd = new CommandObject(SysCmd.ADDPFM)
+      .put(ParamCmd.FILE, key.getQualifiedSourceFile())
+      .put(ParamCmd.MBR, key.getSourceName())
+      .put(ParamCmd.SRCTYPE, key.getSourceType());
 
     commandExec.executeCommand(cmd);
 
@@ -112,23 +109,22 @@ public class Migrator {
       key.setStreamSourceFile(migrationPath + "/" + key.asString());
     }
 
-    cmd.put(ParamCmd.FROMMBR, key.getMemberPath());
-    cmd.put(ParamCmd.TOSTMF, key.getStreamFile());
-    cmd.put(ParamCmd.STMFOPT, "*REPLACE");
-    cmd.put(ParamCmd.STMFCCSID, MasterCompiler.UTF8_CCSID);
-    cmd.put(ParamCmd.ENDLINFMT, "*LF");
+    cmd.put(ParamCmd.FROMMBR, key.getMemberPath())
+      .put(ParamCmd.TOSTMF, key.getStreamFile())
+      .put(ParamCmd.STMFOPT, "*REPLACE")
+      .put(ParamCmd.STMFCCSID, MasterCompiler.UTF8_CCSID)
+      .put(ParamCmd.ENDLINFMT, "*LF");
 
     commandExec.executeCommand(cmd);
   }
 
   public void migrateStreamFileToMember(TargetKey key) throws Exception {
-    CommandObject cmd = new CommandObject(SysCmd.CPYFRMSTMF);
-
-    cmd.put(ParamCmd.FROMSTMF, key.getStreamFile());
-    cmd.put(ParamCmd.TOMBR, key.getMemberPath());
-    cmd.put(ParamCmd.MBROPT, "*REPLACE");
-    cmd.put(ParamCmd.CVTDTA, "*AUTO");
-    cmd.put(ParamCmd.STMFCODPAG, MasterCompiler.UTF8_CCSID);
+    CommandObject cmd = new CommandObject(SysCmd.CPYFRMSTMF)
+      .put(ParamCmd.FROMSTMF, key.getStreamFile())
+      .put(ParamCmd.TOMBR, key.getMemberPath())
+      .put(ParamCmd.MBROPT, "*REPLACE")
+      .put(ParamCmd.CVTDTA, "*AUTO")
+      .put(ParamCmd.STMFCODPAG, MasterCompiler.UTF8_CCSID);
 
     commandExec.executeCommand(cmd);
   }

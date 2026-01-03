@@ -247,15 +247,15 @@ public class ObjectDescriptor {
       String srtSeq = rsMod.getString("SRTSEQ").trim();
       if (!srtSeq.isEmpty()) key.put(ParamCmd.SRTSEQ, srtSeq); 
 
-      key.put(ParamCmd.LANGID, rsMod.getString("LANGID").trim()); 
-      key.put(ParamCmd.TGTRLS, rsMod.getString("TGTRLS").trim()); 
-      key.put(ParamCmd.STGMDL, rsMod.getString("STGMDL").trim()); 
-      key.put(ParamCmd.PRFDTA, rsMod.getString("PRFDTA").trim()); 
+      key.put(ParamCmd.LANGID, rsMod.getString("LANGID").trim()) 
+        .put(ParamCmd.TGTRLS, rsMod.getString("TGTRLS").trim()) 
+        .put(ParamCmd.STGMDL, rsMod.getString("STGMDL").trim()) 
+        .put(ParamCmd.PRFDTA, rsMod.getString("PRFDTA").trim()); 
 
       switch (key.getCompilationCommand()) {
-      case CRTCLMOD:
-        key.put(ParamCmd.ALWRTVSRC, rsMod.getString("ALWRTVSRC").trim()); 
-        break;
+        case CRTCLMOD:
+          key.put(ParamCmd.ALWRTVSRC, rsMod.getString("ALWRTVSRC").trim()); 
+          break;
       }
 
       String licopt = rsMod.getString("LICOPT").trim();
@@ -358,8 +358,8 @@ public class ObjectDescriptor {
 
       if (verbose) logger.info("Found sql object compilation info " + key.asString());
 
-      key.put(ParamCmd.TEXT, rsSqlRpgInfo.getString("TEXT").trim()); 
-      key.put(ParamCmd.USRPRF, rsSqlRpgInfo.getString("USRPRF").trim()); 
+      key.put(ParamCmd.TEXT, rsSqlRpgInfo.getString("TEXT").trim())
+        .put(ParamCmd.USRPRF, rsSqlRpgInfo.getString("USRPRF").trim()); 
 
       String tgtrls = rsSqlRpgInfo.getString("TGTRLS").trim();
       if(!tgtrls.isEmpty()) key.put(ParamCmd.TGTRLS, tgtrls); 

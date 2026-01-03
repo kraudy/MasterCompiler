@@ -157,6 +157,7 @@ public class StreamCompilationIT {
               system, connection, spec,
               false, true, true, false, false
       );
+
       compiler.build();
 
       assertFalse(compiler.foundCompilationError(), "Multi-target compilation failed");
@@ -174,9 +175,10 @@ public class StreamCompilationIT {
       // Delete compiled objects (optional but nice)
       for (TargetKey key : objectsToDelete) {
         try {
-          CommandObject dlt = new CommandObject(SysCmd.DLTOBJ);
-          dlt.put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB));
-          dlt.put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
+          CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
+            .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
+            .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
+            
           commandExecutor.executeCommand(dlt);
         } catch (Exception ignored) {}  // This prevents breaking the loop
       }
