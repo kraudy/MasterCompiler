@@ -12,8 +12,6 @@ import com.ibm.as400.access.User;
 import io.github.theprez.dotenv_ibmi.IBMiDotEnv;
 import org.junit.jupiter.api.*;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -21,7 +19,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -35,7 +32,6 @@ public class StreamCompilationIT {
   static private User currentUser;
   static private String curlib;
   static private CommandExecutor commandExecutor;
-  private IFSFile ifsFile;
 
   @BeforeAll
   static void setupSystem() throws Exception {
@@ -57,6 +53,12 @@ public class StreamCompilationIT {
     } catch (SQLException e){
       throw new CompilerException("Error retrieving current library", e);
     }
+
+    /* Clean library list for tests */
+    CommandObject chgLibl = new CommandObject(SysCmd.CHGLIBL)
+      .put(ParamCmd.LIBL, curlib);
+
+    commandExecutor.executeCommand(chgLibl);
 
   }
 
@@ -85,8 +87,7 @@ public class StreamCompilationIT {
 
   private void masterCompilerTest(String yamlResourcePath, Map<TargetKey, String> keyMap) throws Exception {
     // 1. Load and deserialize the base YAML
-    String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath)
-              .replace("${CURLIB}", curlib);
+    String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath);
 
     Path tempYaml = Files.createTempFile("multi-", ".yaml");
     Files.writeString(tempYaml, yamlContent);

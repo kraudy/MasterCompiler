@@ -1,6 +1,4 @@
 before:
-  chglibl:
-    LIBL: ${CURLIB}
   CrtBndDir:
     BNDDIR: BNDHELLO
 
