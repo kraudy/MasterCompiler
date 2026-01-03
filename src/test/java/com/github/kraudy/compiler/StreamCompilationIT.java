@@ -67,48 +67,23 @@ public class StreamCompilationIT {
   }
 
   @Test
-  void test_Unit_Compile_Pgm_Rpgle_Streamfile() throws Exception {
-    Map<TargetKey, String> keyMap = Map.of(
-        new TargetKey("curlib.HELLO.pgm.rpgle"),   "sources/rpgle/hello.pgm.rpgle"
-    );
-
-    compileMultiTargetYaml(
-        "yaml/integration/unit/hello.pgm.rpgle.yaml",
-        keyMap
-    );
-
-  }
-
-  @Test
-  void test_Unit_Compile_Module_Rpgle_Streamfile() throws Exception {
-    Map<TargetKey, String> keyMap = Map.of(
-        new TargetKey("curlib.HELLO.module.rpgle"),   "sources/rpgle/hello.module.rpgle",
-        new TargetKey("curlib.bye.module.rpgle"),   "sources/rpgle/bye.module.rpgle"
-    );
-
-    compileMultiTargetYaml(
-        "yaml/integration/unit/hello.module.rpgle.yaml",
-        keyMap
-    );
-
-  }
-
-  @Test
-  void test_Multi_Target_With_Predefined_Params_And_Empty_Targets() throws Exception {
+  void test_Full_Ile_Compilation_Flow() throws Exception {
     /* Load sources per key */
     Map<TargetKey, String> keyMap = Map.of(
         new TargetKey("curlib.hello.module.rpgle"),   "sources/rpgle/hello.module.rpgle",
         new TargetKey("curlib.bye.module.rpgle"),     "sources/rpgle/bye.module.rpgle",
+        new TargetKey("curlib.srvhello.srvpgm.bnd"),   "sources/rpgle/srvhello.srvpgm.bnd",
         new TargetKey("curlib.hello.pgm.rpgle"),      "sources/rpgle/hello.pgm.rpgle"
+
     );
 
-    compileMultiTargetYaml(
+    masterCompilerTest(
         "yaml/integration/multi/multi.hello.pgm.rpgle.yaml",
         keyMap
     );
   }
 
-  private void compileMultiTargetYaml(String yamlResourcePath, Map<TargetKey, String> keyMap) throws Exception {
+  private void masterCompilerTest(String yamlResourcePath, Map<TargetKey, String> keyMap) throws Exception {
     // 1. Load and deserialize the base YAML
     String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath)
               .replace("${CURLIB}", curlib);
@@ -160,7 +135,7 @@ public class StreamCompilationIT {
 
       compiler.build();
 
-      assertFalse(compiler.foundCompilationError(), "Multi-target compilation failed");
+      assertFalse(compiler.foundCompilationError(), "Test compilation failed");
 
     } finally {
       // 5. Cleanup
@@ -178,7 +153,7 @@ public class StreamCompilationIT {
           CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
             .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
             .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
-            
+
           commandExecutor.executeCommand(dlt);
         } catch (Exception ignored) {}  // This prevents breaking the loop
       }

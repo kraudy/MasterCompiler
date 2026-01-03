@@ -1,13 +1,35 @@
 before:
   chglibl:
     LIBL: ${CURLIB}
+  CrtBndDir:
+    BNDDIR: BNDHELLO
 
 targets:  
   "curlib.hello.module.rpgle": {}
 
   curlib.bye.module.rpgle: {}
 
+  "curlib.srvhello.srvpgm.bnd":
+    params:
+      MODULE:
+        - HELLO
+        - BYE
+
   curlib.HELLO.pgm.rpgle:
+    before:
+      AddBndDirE:
+        BndDir: BNDHELLO
+        Obj: SRVHELLO
+
     params:
       TEXT: Hello from integration test
 
+after: 
+  DltObj: 
+    OBJ: BNDHELLO
+    OBJTYPE: BndDir
+
+failure: 
+  DltObj: 
+    OBJ: BNDHELLO
+    OBJTYPE: BndDir
