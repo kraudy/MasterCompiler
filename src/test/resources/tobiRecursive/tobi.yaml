@@ -251,3 +251,16 @@ targets:
         File: tmpdetord
         LVL: Job
 
+  # Context of ORD101
+  
+  curlib.ORDER1.LF.dds: # LF of ORDER
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ORDER1.LF.dds
+
+  curlib.ORD101D.DSPF.dds: # DSPF of ORD101
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ORD101D.DSPF.dds
+
+  curlib.ORD101.PGM.RPGLE: 
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ORD101.PGM.RPGLE

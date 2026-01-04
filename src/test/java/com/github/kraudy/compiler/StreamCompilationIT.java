@@ -21,8 +21,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -102,6 +104,9 @@ public class StreamCompilationIT {
     List<String> ifsPathsToDelete = new ArrayList<>();
     List<TargetKey> objectsToDelete = new ArrayList<>();
 
+    /* Track uploaded includes to avoid duplicates */
+    Set<String> uploadedIncludes = new HashSet<>();
+
     String testFolder = currentUser.getHomeDirectory() + "/" + "test_" + System.currentTimeMillis();
 
     try {
@@ -150,6 +155,9 @@ public class StreamCompilationIT {
           System.out.println("Found copy/include directive in: " + relativeSrc);
           String includePath = matcher.group(1).trim();  // e.g., "../QPROTOSRC/familly.RPGLEINC"
 
+          /* If laready present, omit */
+          if (!uploadedIncludes.add(includePath.toLowerCase())) continue;
+          
           System.out.println("Loading copy/include source: " + includePath);
           String includeCode = TestHelpers.loadResourceAsString(includePath);
 
