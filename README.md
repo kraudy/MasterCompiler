@@ -4,11 +4,9 @@
 
 # Master Compiler
 
-Master compilation tool for the IBM i platform. 
+MasterCompiler is not **Something for IBM i**. It is an actual IBM I specific compilation tool built from first principles based on how the system handles object compilation. It is a completely different approach to answer the compilation sphinx.
 
 YAML-based, sensible, open-source, modern, clean, and elegant approach to automate and streamline object compilation.
-
-Do you like building cool stuff for fun and freedom? Then this project is for you.
 
 ---
 
@@ -29,7 +27,7 @@ Java 8.
 
 ### Test
 
-Full remote test on real hardware on any server with zero proprietary tools, zero licensing and zero cost.
+Build official [TOBi recursive](https://github.com/IBM/tobi-example) example on real hardware on any server with zero proprietary tools, zero licensing and zero cost as showcase.
 
 Create a `.env` file like this
 
@@ -43,7 +41,7 @@ Then, run the integration test to watch a thing of beauty.
 
 * `mvn clean verify -Pintegration`
 
-[Tests doc](./docs/Tests.md)
+[Tests doc](./docs/Tests.md#integration-tests)
 
 ---
 

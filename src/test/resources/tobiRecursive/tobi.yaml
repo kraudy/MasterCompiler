@@ -1,4 +1,4 @@
-# Global defaults for ILE/IFS consistency
+# Global defaults
 defaults:
   TGTRLS: CURRENT
   DBGVIEW: ALL
