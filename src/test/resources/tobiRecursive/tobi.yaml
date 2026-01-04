@@ -169,3 +169,85 @@ targets:
   curlib.LOG100.PGM.RPGLE: 
     params:
       SRCSTMF: tobiRecursive/QRPGLESRC/LOG100.PGM.RPGLE
+
+  # Context of ORD100
+
+  curlib.DETORD.PF.dds: # PF of ORD100
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/DETORD.PF.dds
+
+  curlib.DETORD1.LF.dds: # LF of DETORD
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/DETORD1.LF.dds
+
+  curlib.ORDER.PF.dds: # PF of ORD100
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ORDER.PF.dds
+
+  curlib.ORDER3.LF.dds: # LF of ORDER
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ORDER3.LF.dds
+
+  curlib.ORD100D.DSPF.dds: # DSPF of ORD100
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ORD100D.DSPF.dds
+
+  curlib.vat300.module.rpgle: # Module of FVAT SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/functionsVAT/vat300.module.rpgle
+
+  curlib.fvat.srvpgm.bnd: # SrvPgm of ORD100
+    params:
+      SRCSTMF: tobiRecursive/functionsVAT/fvat.srvpgm.bnd
+      MODULE: VAT300
+      TEXT: Functions VAT
+
+  curlib.CUSTOMER.PF.dds: # PF of CUS300
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/CUSTOMER.PF.dds
+
+  curlib.CUSTOME1.LF.dds: # LF of CUSTOMER PF
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/CUSTOME1.LF.dds
+
+  curlib.CUS300.module.RPGLE: # Module of FCUSTOMER SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/CUS300.module.RPGLE
+
+  curlib.CUS301D.dspf.dds: # DSPF of CUS301
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/CUS301D.dspf.dds
+
+  curlib.CUS301.module.SQLRPGLE: # Module of FCUSTOMER SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/CUS301.module.SQLRPGLE
+
+  curlib.FCUSTOMER.srvpgm.BND: # SrvPgm of ORD100
+    params:
+      SRCSTMF: tobiRecursive/QSRVSRC/FCUSTOMER.srvpgm.BND
+      MODULE: 
+        - CUS300
+        - CUS301
+      TEXT: Functions Customer
+
+  curlib.ORD100.PGM.RPGLE: 
+    before:
+      OvrDbf: 
+        File: tmpdetord
+        ToFile: detord
+        OvrScope: Job
+      
+      AddBndDirE:   # Add srvpgm required by ORD100
+        BndDir: SAMPLE
+        Obj: 
+          - fvat
+          - FCUSTOMER
+
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ORD100.PGM.RPGLE
+
+    after:
+      DltOvr: 
+        File: tmpdetord
+        LVL: Job
+
