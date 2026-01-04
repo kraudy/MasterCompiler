@@ -296,6 +296,11 @@ public class Utilities {
         if (!key.containsKey(ParamCmd.DFTACTGRP)) {
           key.remove(ParamCmd.STGMDL); 
         }
+
+        /* ACTGRP not allowed with DFTACTGRP(*YES) */
+        if (key.containsKey(ParamCmd.ACTGRP) && !key.containsKey(ParamCmd.DFTACTGRP)) {
+          key.put(ParamCmd.DFTACTGRP, ValCmd.NO);
+        }
         break;
 
       case CRTSQLRPGI:
@@ -316,6 +321,16 @@ public class Utilities {
             }
           } catch (Exception ignore) {}
         }
+        /* *ALL value not valid for DBGVIEW for CRTSQLRPGI */
+        if (key.containsKey(ParamCmd.DBGVIEW)) {
+          String debugView = key.get(ParamCmd.DBGVIEW);
+          try{
+            if (ValCmd.ALL == ValCmd.fromString(debugView)){
+              key.put(ParamCmd.DBGVIEW, ValCmd.SOURCE.toString());
+            }
+          } catch (Exception ignore) {}
+        }
+
         break;
 
       case CRTSRVPGM:

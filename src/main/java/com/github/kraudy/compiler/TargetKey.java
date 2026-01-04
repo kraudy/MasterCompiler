@@ -199,7 +199,7 @@ public class TargetKey {
         put(param, value);
       } catch (Exception ignore) {
         /* Invalid params are just ignored. This is useful because this map has not been previously validated */
-        logger.info("\nRejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
+        logger.info("Rejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
       }
     });
 
@@ -308,6 +308,14 @@ public class TargetKey {
   }
 
   public String getObjectType() {
+    switch (this.objectType) {
+      case PF:
+      case LF:
+        return ParamCmd.FILE.toString();
+    
+      default:
+        break;
+    }
     return this.objectType.toParam();
   }
 

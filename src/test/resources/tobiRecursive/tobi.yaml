@@ -6,9 +6,96 @@ defaults:
   REPLACE: YES
   TGTCCSID: JOB
 
+before:
+  CrtBndDir:
+    BNDDIR: SAMPLE
+
+after: 
+  DltObj: 
+    OBJ: SAMPLE
+    OBJTYPE: BndDir
+
+failure: 
+  DltObj: 
+    OBJ: SAMPLE
+    OBJTYPE: BndDir
+
+# Just resolveconflict for DBGVIEW:[[INIT], *SOURCE, *ALL] not valid *ALL for CRTSQLRPGI
 
 targets:
-  # Modules first (RPGLE sources in QRPGLESRC → *MODULE)
+  # Simple rpgle compilation
   curlib.ADDnum.pgm.rpgle:
     params:
-      SRCSTMF: ${IFS_ROOT}/QRPGLESRC/ADD.RPGLE
+      SRCSTMF: tobiRecursive/QRPGLESRC/ADDNUM.RPGLE
+  
+  # Files used by reference
+  curlib.SAMREF.PF.dds:
+    params:
+      SRCSTMF: tobiRecursive/common/SAMREF.PF.dds
+
+  curlib.vatdef.pf.dds:
+    params:
+      SRCSTMF: tobiRecursive/functionsVAT/vatdef.pf.dds
+
+  # ART200 compilation context
+  curlib.ARTICLE.pf.dds: # PF of ART200
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ARTICLE.pf.dds
+
+  curlib.ARTICLE1.lf.dds: # LF of ARTICLE
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ARTICLE1.lf.dds
+
+  curlib.ARTICLE2.lf.dds: # LF of ARTICLE
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ARTICLE2.lf.dds
+
+  curlib.ART200D.dspf.dds: # DSPF of ART200
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ART200D.dspf.dds
+
+  #curlib.ART300.module.rpgle: # Module of xx SrvPgm
+  #  params:
+  #    SRCSTMF: tobiRecursive/QRPGLESRC/ART300.module.rpgle
+  #curlib.ART301D.dspf.dds: # DSPF of ART301
+  #  params:
+  #    SRCSTMF: tobiRecursive/QDDSSRC/ART301D.dspf.dds
+  #curlib.ART301.module.SQLRPGLE: # Module of xx SrvPgm
+  #  params:
+  #    SRCSTMF: tobiRecursive/QRPGLESRC/ART301.module.SQLRPGLE
+
+  curlib.FAMILLY.PF.dds: # PF of module FAM300
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/FAMILLY.PF.dds
+  
+  curlib.FAMILL1.LF.dds: # LF of PF FAMILLY
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/FAMILL1.LF.dds
+
+  curlib.FAM300.module.RPGLE: # Module of FFAMILLY SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/FAM300.module.RPGLE
+
+  curlib.FAM301D.DSPF.dds: # DSPF of module FAM301
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/FAM301D.DSPF.dds
+
+  curlib.FAM301.module.RPGLE: # Module of FFAMILLY SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/FAM301.module.RPGLE
+
+  curlib.FFAMILLY.srvpgm.BND: # SrvPgm of ART200
+    params:
+      SRCSTMF: tobiRecursive/QSRVSRC/FFAMILLY.srvpgm.BND
+      MODULE:
+        - FAM300
+        - FAM301
+
+  curlib.ART200.pgm.sqlrpgle: # Pgm
+    before:
+      AddBndDirE:   # Add srvpgm required by ART200
+        BndDir: SAMPLE
+        Obj: FFAMILLY
+
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ART200.pgm.sqlrpgle

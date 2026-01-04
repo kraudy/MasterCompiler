@@ -12,8 +12,10 @@ import com.ibm.as400.access.User;
 import io.github.theprez.dotenv_ibmi.IBMiDotEnv;
 import org.junit.jupiter.api.*;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -21,6 +23,8 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,7 +72,7 @@ public class StreamCompilationIT {
     if (system != null) system.disconnectAllServices();
   }
 
-  @Test
+  //@Test
   void test_Full_Ile_Compilation_Flow() throws Exception {    
 
     masterCompilerTest(
@@ -76,7 +80,16 @@ public class StreamCompilationIT {
     );
   }
 
+  @Test
+  void test_Tobi_Bob() throws Exception {    
+
+    masterCompilerTest("tobiRecursive/tobi.yaml");
+    
+  }
+
   private void masterCompilerTest(String yamlResourcePath) throws Exception {
+    boolean errorFound = false;
+
     // 1. Load and deserialize the base YAML
     String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath);
 
@@ -92,7 +105,7 @@ public class StreamCompilationIT {
     String testFolder = currentUser.getHomeDirectory() + "/" + "test_" + System.currentTimeMillis();
 
     try {
-      // 3. Iterate over targets and inject dynamic values
+      /* Iterate over targets and inject dynamic values */
       for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : spec.targets.entrySet()) {
         TargetKey key = entry.getKey();
         BuildSpec.TargetSpec targetSpec = entry.getValue();
@@ -100,6 +113,7 @@ public class StreamCompilationIT {
         /* Get source stream file */
         String relativeSrc = targetSpec.params.get(ParamCmd.SRCSTMF);
         // Get resource path
+        System.out.println("Loading source code: " + relativeSrc);
         String sourceCode = TestHelpers.loadResourceAsString(relativeSrc);
 
         /* Append home dir + timestamp for file */
@@ -115,6 +129,7 @@ public class StreamCompilationIT {
         IFSFile remoteFile = new IFSFile(system, remotePath);
         remoteFile.createNewFile();
         try (IFSFileWriter writer = new IFSFileWriter(remoteFile, false)) {
+          System.out.println("Uploading source code: " + remotePath);
           writer.write(sourceCode);
         }
 
@@ -126,9 +141,49 @@ public class StreamCompilationIT {
         objectsToDelete.add(key);
 
         // targetSpec.params.put(ParamCmd.TEXT, "Integration test - " + key.getObjectName());
+
+        /* Resolve copy/include */
+        Pattern copyPattern = Pattern.compile("\\s*/(?:COPY|INCLUDE)\\s+['\"]?([^'\";\\s]+)['\"]?", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = copyPattern.matcher(sourceCode);
+
+        while (matcher.find()) {
+          System.out.println("Found copy/include directive in: " + relativeSrc);
+          String includePath = matcher.group(1).trim();  // e.g., "../QPROTOSRC/familly.RPGLEINC"
+
+          System.out.println("Loading copy/include source: " + includePath);
+          String includeCode = TestHelpers.loadResourceAsString(includePath);
+
+          String remoteIncludePath = testFolder + "/" + includePath;
+
+          // Create parent dirs for include
+          // Create parent dirs
+          String parentPath = new IFSFile(system, remoteIncludePath).getParent();
+          IFSFile incParent = new IFSFile(system, parentPath);
+          if (!incParent.exists()) {
+              incParent.mkdirs();
+          }
+
+          // Upload include
+          IFSFile incFile = new IFSFile(system, remoteIncludePath);
+          if (!incFile.exists()) {
+            incFile.createNewFile();
+          }
+          try (IFSFileWriter w = new IFSFileWriter(incFile, false)) {
+            System.out.println("Uploading include: " + remoteIncludePath);
+            w.write(includeCode);
+          }
+
+          ifsPathsToDelete.add(remoteIncludePath);
+        }
+
       }
 
-      // 4. Run the compiler
+      /* Change cur dir to test dir */
+      CommandObject chgCurDir = new CommandObject(SysCmd.CHGCURDIR)
+        .put(ParamCmd.DIR, testFolder);
+      commandExecutor.executeCommand(chgCurDir);
+
+      /* Run the compiler */
       MasterCompiler compiler = new MasterCompiler(
               system, connection, spec,
               false, true, true, false, false
@@ -136,7 +191,12 @@ public class StreamCompilationIT {
 
       compiler.build();
 
-      assertFalse(compiler.foundCompilationError(), "Test compilation failed");
+      errorFound = compiler.foundCompilationError();
+
+      /* Set cur dir back */
+      CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
+        .put(ParamCmd.DIR, currentUser.getHomeDirectory());
+      commandExecutor.executeCommand(chgHome);
 
     } finally {
       // 5. Cleanup
@@ -148,23 +208,31 @@ public class StreamCompilationIT {
         if (file.exists()) file.delete();
       }
 
-      CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
-        .put(ParamCmd.DIR, testFolder)
-        .put(ParamCmd.SUBTREE, ValCmd.ALL);
+      try {
+        CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
+          .put(ParamCmd.DIR, testFolder)
+          .put(ParamCmd.SUBTREE, ValCmd.ALL);
 
-      commandExecutor.executeCommand(rmvDir);
+        commandExecutor.executeCommand(rmvDir);
+      } catch (CompilerException e) {
+        System.out.println(e.getFullContext());
+      }
 
-      // Delete compiled objects (optional but nice)
-      for (TargetKey key : objectsToDelete) {
+      // Delete compiled objects in reverse creation order (dependents first)
+      for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
+        TargetKey key = objectsToDelete.get(i);
         try {
           CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
             .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
             .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
 
           commandExecutor.executeCommand(dlt);
-        } catch (Exception ignored) {}  // This prevents breaking the loop
+        } catch (Exception ignored) {} // This prevents breaking the loop
       }
     }
+
+    assertFalse(errorFound, "Integration Test compilation failed");
+
   }
 
 }
