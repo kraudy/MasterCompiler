@@ -152,3 +152,12 @@ targets:
 
     params:
       SRCSTMF: tobiRecursive/QRPGLESRC/ART201.pgm.rpgle
+
+  # Context of ART202
+  curlib.ART202D.dspf.dds: # DSPF of ART202
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ART202D.dspf.dds
+
+  curlib.ART202.PGM.RPGLE: 
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ART202.PGM.RPGLE
