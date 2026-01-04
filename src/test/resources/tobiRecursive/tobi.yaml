@@ -54,16 +54,6 @@ targets:
     params:
       SRCSTMF: tobiRecursive/QDDSSRC/ART200D.dspf.dds
 
-  #curlib.ART300.module.rpgle: # Module of xx SrvPgm
-  #  params:
-  #    SRCSTMF: tobiRecursive/QRPGLESRC/ART300.module.rpgle
-  #curlib.ART301D.dspf.dds: # DSPF of ART301
-  #  params:
-  #    SRCSTMF: tobiRecursive/QDDSSRC/ART301D.dspf.dds
-  #curlib.ART301.module.SQLRPGLE: # Module of xx SrvPgm
-  #  params:
-  #    SRCSTMF: tobiRecursive/QRPGLESRC/ART301.module.SQLRPGLE
-
   curlib.FAMILLY.PF.dds: # PF of module FAM300
     params:
       SRCSTMF: tobiRecursive/QDDSSRC/FAMILLY.PF.dds
@@ -99,3 +89,66 @@ targets:
 
     params:
       SRCSTMF: tobiRecursive/QRPGLESRC/ART200.pgm.sqlrpgle
+
+  # Context of ART201
+  curlib.PROVIDER.PF.dds:
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/PROVIDER.PF.dds
+
+  curlib.PROVIDE1.LF.dds:
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/PROVIDE1.LF.dds
+
+  curlib.ARTIPROV.PF.dds: # PF of ART201
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ARTIPROV.PF.dds
+
+  curlib.ARTIPRO1.LF.dds: # LF of ARTIPROV
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ARTIPRO1.LF.dds
+
+  curlib.ART201D.dspf.dds: # DSPF of PGM ART201
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ART201D.dspf.dds
+
+  curlib.ART300.module.rpgle: # Module of FARTICLE SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ART300.module.rpgle
+
+  curlib.ART301D.dspf.dds: # DSPF of ART301
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/ART301D.dspf.dds
+
+  curlib.ART301.module.SQLRPGLE: # Module of FARTICLE SrvPgm
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ART301.module.SQLRPGLE
+
+  curlib.FARTICLE.srvpgm.BND: # SrvPgm of ART201
+    params:
+      SRCSTMF: tobiRecursive/QSRVSRC/FARTICLE.srvpgm.BND
+      MODULE:
+        - ART300
+        - ART301
+      BNDSRVPGM: FFAMILLY
+      TEXT: Function Article
+
+  curlib.PRO300.module.RPGLE:
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/PRO300.module.RPGLE
+
+  curlib.FPROVIDER.srvpgm.BND:
+    params:
+      SRCSTMF: tobiRecursive/QSRVSRC/FPROVIDER.srvpgm.BND
+      MODULE: PRO300
+      TEXT: Functions Provider
+
+  curlib.ART201.pgm.rpgle: 
+    before:
+      AddBndDirE:   # Add srvpgm required by ART201
+        BndDir: SAMPLE
+        Obj: 
+          - FARTICLE
+          - FPROVIDER
+
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/ART201.pgm.rpgle
