@@ -20,8 +20,6 @@ failure:
     OBJ: SAMPLE
     OBJTYPE: BndDir
 
-# Just resolveconflict for DBGVIEW:[[INIT], *SOURCE, *ALL] not valid *ALL for CRTSQLRPGI
-
 targets:
   # Simple rpgle compilation
   curlib.ADDnum.pgm.rpgle:
@@ -161,3 +159,13 @@ targets:
   curlib.ART202.PGM.RPGLE: 
     params:
       SRCSTMF: tobiRecursive/QRPGLESRC/ART202.PGM.RPGLE
+
+  # Context of LOG100
+
+  curlib.PARAMETER.PF.dds: # PF of LOG100
+    params:
+      SRCSTMF: tobiRecursive/QDDSSRC/PARAMETER.PF.dds
+
+  curlib.LOG100.PGM.RPGLE: 
+    params:
+      SRCSTMF: tobiRecursive/QRPGLESRC/LOG100.PGM.RPGLE
