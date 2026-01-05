@@ -4,7 +4,7 @@
 
 # Master Compiler
 
-MasterCompiler is not **Something for IBM i**. It is an actual IBM I specific compilation tool built from first principles based on how the system handles object compilation. It is a completely different approach to answer the compilation sphinx.
+MasterCompiler is not **Tool X, but for IBM i**. It is an actual IBM I specific compilation tool built from first principles based on how the system handles object compilation. It is a completely different approach to answer the compilation sphinx.
 
 YAML-based, sensible, open-source, modern, clean, and elegant approach to automate and streamline object compilation.
 
