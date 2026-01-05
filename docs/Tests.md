@@ -43,12 +43,12 @@ That's it.
 [StreamCompilation Integration Test](../src/test/java/com/github/kraudy/compiler/StreamCompilationIT.java)
 
 * Connects to a real IBM I
-* Upload source files from  [../src/test/resources/tobiRecursive](../src/test/resources/tobiRecursive)
+* Upload source files from repo [McOnTobi](../src/test/resources/tobiRecursive)
 * Execute compilation flow remotely
 * Generate log
 * Remove created objects
 
-Here is the [tobi-example yaml spec](../src/test/resources/tobiRecursive/tobi.yaml)
+Here is the [tobi-example yaml spec](https://github.com/kraudy/McOnTobi/blob/master/tobi.yaml)
 
 ```yaml
 # Global defaults
@@ -77,57 +77,57 @@ targets:
   # Simple rpgle compilation
   curlib.ADDnum.pgm.rpgle:
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ADDNUM.RPGLE
+      SRCSTMF: QRPGLESRC/ADDNUM.RPGLE
   
   # Files used by reference
   curlib.SAMREF.PF.dds:
     params:
-      SRCSTMF: tobiRecursive/common/SAMREF.PF.dds
+      SRCSTMF: common/SAMREF.PF.dds
 
   curlib.vatdef.pf.dds:
     params:
-      SRCSTMF: tobiRecursive/functionsVAT/vatdef.pf.dds
+      SRCSTMF: functionsVAT/vatdef.pf.dds
 
   # ART200 compilation context
   curlib.ARTICLE.pf.dds: # PF of ART200
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ARTICLE.pf.dds
+      SRCSTMF: QDDSSRC/ARTICLE.pf.dds
 
   curlib.ARTICLE1.lf.dds: # LF of ARTICLE
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ARTICLE1.lf.dds
+      SRCSTMF: QDDSSRC/ARTICLE1.lf.dds
 
   curlib.ARTICLE2.lf.dds: # LF of ARTICLE
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ARTICLE2.lf.dds
+      SRCSTMF: QDDSSRC/ARTICLE2.lf.dds
 
   curlib.ART200D.dspf.dds: # DSPF of ART200
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ART200D.dspf.dds
+      SRCSTMF: QDDSSRC/ART200D.dspf.dds
 
   curlib.FAMILLY.PF.dds: # PF of module FAM300
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/FAMILLY.PF.dds
+      SRCSTMF: QDDSSRC/FAMILLY.PF.dds
   
   curlib.FAMILL1.LF.dds: # LF of PF FAMILLY
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/FAMILL1.LF.dds
+      SRCSTMF: QDDSSRC/FAMILL1.LF.dds
 
   curlib.FAM300.module.RPGLE: # Module of FFAMILLY SrvPgm
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/FAM300.module.RPGLE
+      SRCSTMF: QRPGLESRC/FAM300.module.RPGLE
 
   curlib.FAM301D.DSPF.dds: # DSPF of module FAM301
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/FAM301D.DSPF.dds
+      SRCSTMF: QDDSSRC/FAM301D.DSPF.dds
 
   curlib.FAM301.module.RPGLE: # Module of FFAMILLY SrvPgm
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/FAM301.module.RPGLE
+      SRCSTMF: QRPGLESRC/FAM301.module.RPGLE
 
   curlib.FFAMILLY.srvpgm.BND: # SrvPgm of ART200
     params:
-      SRCSTMF: tobiRecursive/QSRVSRC/FFAMILLY.srvpgm.BND
+      SRCSTMF: QSRVSRC/FFAMILLY.srvpgm.BND
       MODULE:
         - FAM300
         - FAM301
@@ -139,44 +139,44 @@ targets:
         Obj: FFAMILLY
 
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ART200.pgm.sqlrpgle
+      SRCSTMF: QRPGLESRC/ART200.pgm.sqlrpgle
 
   # Context of ART201
   curlib.PROVIDER.PF.dds:
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/PROVIDER.PF.dds
+      SRCSTMF: QDDSSRC/PROVIDER.PF.dds
 
   curlib.PROVIDE1.LF.dds:
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/PROVIDE1.LF.dds
+      SRCSTMF: QDDSSRC/PROVIDE1.LF.dds
 
   curlib.ARTIPROV.PF.dds: # PF of ART201
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ARTIPROV.PF.dds
+      SRCSTMF: QDDSSRC/ARTIPROV.PF.dds
 
   curlib.ARTIPRO1.LF.dds: # LF of ARTIPROV
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ARTIPRO1.LF.dds
+      SRCSTMF: QDDSSRC/ARTIPRO1.LF.dds
 
   curlib.ART201D.dspf.dds: # DSPF of PGM ART201
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ART201D.dspf.dds
+      SRCSTMF: QDDSSRC/ART201D.dspf.dds
 
   curlib.ART300.module.rpgle: # Module of FARTICLE SrvPgm
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ART300.module.rpgle
+      SRCSTMF: QRPGLESRC/ART300.module.rpgle
 
   curlib.ART301D.dspf.dds: # DSPF of ART301
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ART301D.dspf.dds
+      SRCSTMF: QDDSSRC/ART301D.dspf.dds
 
   curlib.ART301.module.SQLRPGLE: # Module of FARTICLE SrvPgm
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ART301.module.SQLRPGLE
+      SRCSTMF: QRPGLESRC/ART301.module.SQLRPGLE
 
   curlib.FARTICLE.srvpgm.BND: # SrvPgm of ART201
     params:
-      SRCSTMF: tobiRecursive/QSRVSRC/FARTICLE.srvpgm.BND
+      SRCSTMF: QSRVSRC/FARTICLE.srvpgm.BND
       MODULE:
         - ART300
         - ART301
@@ -185,11 +185,11 @@ targets:
 
   curlib.PRO300.module.RPGLE:
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/PRO300.module.RPGLE
+      SRCSTMF: QRPGLESRC/PRO300.module.RPGLE
 
   curlib.FPROVIDER.srvpgm.BND:
     params:
-      SRCSTMF: tobiRecursive/QSRVSRC/FPROVIDER.srvpgm.BND
+      SRCSTMF: QSRVSRC/FPROVIDER.srvpgm.BND
       MODULE: PRO300
       TEXT: Functions Provider
 
@@ -202,82 +202,82 @@ targets:
           - FPROVIDER
 
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ART201.pgm.rpgle
+      SRCSTMF: QRPGLESRC/ART201.pgm.rpgle
 
   # Context of ART202
   curlib.ART202D.dspf.dds: # DSPF of ART202
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ART202D.dspf.dds
+      SRCSTMF: QDDSSRC/ART202D.dspf.dds
 
   curlib.ART202.PGM.RPGLE: 
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ART202.PGM.RPGLE
+      SRCSTMF: QRPGLESRC/ART202.PGM.RPGLE
 
   # Context of LOG100
 
   curlib.PARAMETER.PF.dds: # PF of LOG100
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/PARAMETER.PF.dds
+      SRCSTMF: QDDSSRC/PARAMETER.PF.dds
 
   curlib.LOG100.PGM.RPGLE: 
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/LOG100.PGM.RPGLE
+      SRCSTMF: QRPGLESRC/LOG100.PGM.RPGLE
 
   # Context of ORD100
 
   curlib.DETORD.PF.dds: # PF of ORD100
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/DETORD.PF.dds
+      SRCSTMF: QDDSSRC/DETORD.PF.dds
 
   curlib.DETORD1.LF.dds: # LF of DETORD
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/DETORD1.LF.dds
+      SRCSTMF: QDDSSRC/DETORD1.LF.dds
 
   curlib.ORDER.PF.dds: # PF of ORD100
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ORDER.PF.dds
+      SRCSTMF: QDDSSRC/ORDER.PF.dds
 
   curlib.ORDER3.LF.dds: # LF of ORDER
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ORDER3.LF.dds
+      SRCSTMF: QDDSSRC/ORDER3.LF.dds
 
   curlib.ORD100D.DSPF.dds: # DSPF of ORD100
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ORD100D.DSPF.dds
+      SRCSTMF: QDDSSRC/ORD100D.DSPF.dds
 
   curlib.vat300.module.rpgle: # Module of FVAT SrvPgm
     params:
-      SRCSTMF: tobiRecursive/functionsVAT/vat300.module.rpgle
+      SRCSTMF: functionsVAT/vat300.module.rpgle
 
   curlib.fvat.srvpgm.bnd: # SrvPgm of ORD100
     params:
-      SRCSTMF: tobiRecursive/functionsVAT/fvat.srvpgm.bnd
+      SRCSTMF: functionsVAT/fvat.srvpgm.bnd
       MODULE: VAT300
       TEXT: Functions VAT
 
   curlib.CUSTOMER.PF.dds: # PF of CUS300
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/CUSTOMER.PF.dds
+      SRCSTMF: QDDSSRC/CUSTOMER.PF.dds
 
   curlib.CUSTOME1.LF.dds: # LF of CUSTOMER PF
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/CUSTOME1.LF.dds
+      SRCSTMF: QDDSSRC/CUSTOME1.LF.dds
 
   curlib.CUS300.module.RPGLE: # Module of FCUSTOMER SrvPgm
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/CUS300.module.RPGLE
+      SRCSTMF: QRPGLESRC/CUS300.module.RPGLE
 
   curlib.CUS301D.dspf.dds: # DSPF of CUS301
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/CUS301D.dspf.dds
+      SRCSTMF: QDDSSRC/CUS301D.dspf.dds
 
   curlib.CUS301.module.SQLRPGLE: # Module of FCUSTOMER SrvPgm
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/CUS301.module.SQLRPGLE
+      SRCSTMF: QRPGLESRC/CUS301.module.SQLRPGLE
 
   curlib.FCUSTOMER.srvpgm.BND: # SrvPgm of ORD100
     params:
-      SRCSTMF: tobiRecursive/QSRVSRC/FCUSTOMER.srvpgm.BND
+      SRCSTMF: QSRVSRC/FCUSTOMER.srvpgm.BND
       MODULE: 
         - CUS300
         - CUS301
@@ -297,7 +297,7 @@ targets:
           - FCUSTOMER
 
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ORD100.PGM.RPGLE
+      SRCSTMF: QRPGLESRC/ORD100.PGM.RPGLE
 
     after:
       DltOvr: 
@@ -308,15 +308,15 @@ targets:
   
   curlib.ORDER1.LF.dds: # LF of ORDER
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ORDER1.LF.dds
+      SRCSTMF: QDDSSRC/ORDER1.LF.dds
 
   curlib.ORD101D.DSPF.dds: # DSPF of ORD101
     params:
-      SRCSTMF: tobiRecursive/QDDSSRC/ORD101D.DSPF.dds
+      SRCSTMF: QDDSSRC/ORD101D.DSPF.dds
 
   curlib.ORD101.PGM.RPGLE: 
     params:
-      SRCSTMF: tobiRecursive/QRPGLESRC/ORD101.PGM.RPGLE
+      SRCSTMF: QRPGLESRC/ORD101.PGM.RPGLE
 ```
 
 Here is the resumed integration test log
