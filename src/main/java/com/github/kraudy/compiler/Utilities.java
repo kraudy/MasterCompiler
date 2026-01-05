@@ -5,6 +5,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +22,7 @@ import com.github.kraudy.compiler.CompilationPattern.ValCmd;
  * Utility methods
  */
 public class Utilities {
+  private static final Logger logger = LoggerFactory.getLogger(Utilities.class);
 
   public static final String CteLibraryList = 
     "Libs (Libraries) As ( " +
@@ -154,6 +158,7 @@ public class Utilities {
     
     if (!f.exists()) throw new RuntimeException("YAML file not found: " + yamlFile);
 
+    logger.info("Deserializing spec: " + yamlFile);
     try{
       /* Diserialize yaml file */
       spec = mapper.readValue(f, BuildSpec.class);
@@ -208,7 +213,10 @@ public class Utilities {
     
   }
 
-  /* Validates proper value format per param */
+  /* 
+   * Validates proper value format per param 
+   * Called from ParamMap since it is a common point between TargetKey and CommandObject classes
+   */
   public static String validateParamValue(ParamCmd param, String value) {
     switch (param) {
       case TEXT:
@@ -218,6 +226,7 @@ public class Utilities {
       case FROMMBR:
       case TOSTMF:
       case DIR:
+      case CMD:
         return "''" + value + "''";
     
       case MODULE:

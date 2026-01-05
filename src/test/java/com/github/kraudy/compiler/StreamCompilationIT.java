@@ -1,11 +1,14 @@
 package com.github.kraudy.compiler;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400JDBCDataSource;
 import com.ibm.as400.access.IFSFile;
+import com.ibm.as400.access.IFSFileInputStream;
 import com.ibm.as400.access.IFSFileWriter;
 import com.ibm.as400.access.User;
 
@@ -77,112 +80,52 @@ public class StreamCompilationIT {
   @Test
   void test_Tobi_Bob() throws Exception {    
 
-    masterCompilerTest("tobiRecursive/tobi.yaml");
+    masterCompilerTest("tobi.yaml", "https://github.com/kraudy/McOnTobi.git");
     
   }
 
-  private void masterCompilerTest(String yamlResourcePath) throws Exception {
+  private void masterCompilerTest(String yamlResourcePath, String gitRepoUrl) throws Exception {
     boolean errorFound = false;
 
-    // 1. Load and deserialize the base YAML
-    String yamlContent = TestHelpers.loadResourceAsString(yamlResourcePath);
-
-    Path tempYaml = Files.createTempFile("multi-", ".yaml");
-    Files.writeString(tempYaml, yamlContent);
-
-    BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
-
-    // 2. Map to hold IFS paths for cleanup
-    List<String> ifsPathsToDelete = new ArrayList<>();
+    /* Hold object list to delete */
     List<TargetKey> objectsToDelete = new ArrayList<>();
 
-    /* Track uploaded includes to avoid duplicates */
-    Set<String> uploadedIncludes = new HashSet<>();
+    String testFolder = currentUser.getHomeDirectory() + "/" + "McOnTobi";
 
-    String testFolder = currentUser.getHomeDirectory() + "/" + "test_" + System.currentTimeMillis();
+    BuildSpec spec = null;
 
     try {
-      /* Iterate over targets and inject dynamic values */
-      for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : spec.targets.entrySet()) {
-        TargetKey key = entry.getKey();
-        BuildSpec.TargetSpec targetSpec = entry.getValue();
+      // Clone the entire repo once
+      System.out.println("Clonning repo: " + gitRepoUrl);
+      CommandObject gitClone = new CommandObject(SysCmd.QSH)  // Use QShell for git
+          .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/git clone " + gitRepoUrl + " " + testFolder);
 
-        /* Get source stream file */
-        String relativeSrc = targetSpec.params.get(ParamCmd.SRCSTMF);
-        // Get resource path
-        System.out.println("Loading source code: " + relativeSrc);
-        String sourceCode = TestHelpers.loadResourceAsString(relativeSrc);
+      commandExecutor.executeCommand(gitClone);  // Throws if git fails
 
-        /* Append home dir + timestamp for file */
-        String remotePath = testFolder + "/" + relativeSrc;
+      /* Get remote spec */
+      String remoteYamlPath = testFolder + "/" + "tobi.yaml";
+      System.out.println("Obtaining remote spec: " + remoteYamlPath);
+      IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
 
-        // Create parent directories recursively
-        IFSFile parentDir = new IFSFile(system, new IFSFile(system, remotePath).getParent());
-        if (!parentDir.exists()) {
-          parentDir.mkdirs();  // This creates the full chain (e.g., sources/rpgle)
-        }
-
-        /* Create source on remote server */
-        IFSFile remoteFile = new IFSFile(system, remotePath);
-        remoteFile.createNewFile();
-        try (IFSFileWriter writer = new IFSFileWriter(remoteFile, false)) {
-          System.out.println("Uploading source code: " + remotePath);
-          writer.write(sourceCode);
-        }
-
-        /* Inject into the target's params. This even works for opm or any other object */
-        targetSpec.params.put(ParamCmd.SRCSTMF, remotePath);  // Replace with absolute
-
-        ifsPathsToDelete.add(remotePath);
-
-        objectsToDelete.add(key);
-
-        // targetSpec.params.put(ParamCmd.TEXT, "Integration test - " + key.getObjectName());
-
-        /* Resolve copy/include */
-        Pattern copyPattern = Pattern.compile("\\s*/(?:COPY|INCLUDE)\\s+['\"]?([^'\";\\s]+)['\"]?", Pattern.CASE_INSENSITIVE);
-        Matcher matcher = copyPattern.matcher(sourceCode);
-
-        while (matcher.find()) {
-          System.out.println("Found copy/include directive in: " + relativeSrc);
-          String includePath = matcher.group(1).trim();  // e.g., "../QPROTOSRC/familly.RPGLEINC"
-
-          /* If laready present, omit */
-          if (!uploadedIncludes.add(includePath.toLowerCase())) continue;
-          
-          System.out.println("Loading copy/include source: " + includePath);
-          String includeCode = TestHelpers.loadResourceAsString(includePath);
-
-          String remoteIncludePath = testFolder + "/" + includePath;
-
-          // Create parent dirs for include
-          // Create parent dirs
-          String parentPath = new IFSFile(system, remoteIncludePath).getParent();
-          IFSFile incParent = new IFSFile(system, parentPath);
-          if (!incParent.exists()) {
-              incParent.mkdirs();
-          }
-
-          // Upload include
-          IFSFile incFile = new IFSFile(system, remoteIncludePath);
-          if (!incFile.exists()) {
-            incFile.createNewFile();
-          }
-          try (IFSFileWriter w = new IFSFileWriter(incFile, false)) {
-            System.out.println("Uploading include: " + remoteIncludePath);
-            w.write(includeCode);
-          }
-
-          ifsPathsToDelete.add(remoteIncludePath);
-        }
-
+      if (!remoteYamlFile.exists()) {
+        throw new RuntimeException("Cloned YAML not found remotely: " + remoteYamlPath);
       }
+
+      // Read remote content and deserialize
+      ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+      System.out.println("Deserializing remote spec: " + remoteYamlPath);
+      try (IFSFileInputStream yamlStream = new IFSFileInputStream(remoteYamlFile)) {
+        spec = mapper.readValue(yamlStream, BuildSpec.class);
+      }
+
+      // Collect for cleanup
+      objectsToDelete.addAll(spec.targets.keySet());
 
       /* Change cur dir to test dir */
       CommandObject chgCurDir = new CommandObject(SysCmd.CHGCURDIR)
         .put(ParamCmd.DIR, testFolder);
       commandExecutor.executeCommand(chgCurDir);
-
+       
       /* Run the compiler */
       MasterCompiler compiler = new MasterCompiler(
               system, connection, spec,
@@ -192,21 +135,15 @@ public class StreamCompilationIT {
       compiler.build();
 
       errorFound = compiler.foundCompilationError();
-
+      
       /* Set cur dir back */
       CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
         .put(ParamCmd.DIR, currentUser.getHomeDirectory());
       commandExecutor.executeCommand(chgHome);
 
+    } catch (CompilerException e) {
+      System.out.println(e.getFullContext());
     } finally {
-      // 5. Cleanup
-      Files.deleteIfExists(tempYaml);
-
-      // Delete IFS files
-      for (String path : ifsPathsToDelete) {
-        IFSFile file = new IFSFile(system, path);
-        if (file.exists()) file.delete();
-      }
 
       try {
         CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)

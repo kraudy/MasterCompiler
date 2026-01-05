@@ -48,7 +48,9 @@ public class CompilationPattern {
     // Objects
     DLTOBJ, CRTDUPOBJ,
     // Stream files
-    CHGCURDIR, RMVDIR
+    CHGCURDIR, RMVDIR,
+    // PASE
+    QSH
     ;
 
     public static SysCmd fromString(String value) {
@@ -422,6 +424,11 @@ public class CompilationPattern {
     ParamCmd.DIR,
     ParamCmd.SUBTREE,
     ParamCmd.RMVLNK
+  );
+
+  // QSH
+  public static final List<ParamCmd> Qsh_Pattern = Arrays.asList(
+    ParamCmd.CMD
   );
 
   // OVRDBF
@@ -1190,6 +1197,8 @@ public class CompilationPattern {
     /* stream files */
     commandToPatternMap.put(SysCmd.CHGCURDIR, ChgCurDir_Pattern);
     commandToPatternMap.put(SysCmd.RMVDIR, RmvDir_Pattern);
+    /* Pase */
+    commandToPatternMap.put(SysCmd.QSH, Qsh_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);
