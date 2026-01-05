@@ -90,7 +90,7 @@ public class StreamCompilationIT {
     /* Hold object list to delete */
     List<TargetKey> objectsToDelete = new ArrayList<>();
 
-    String testFolder = currentUser.getHomeDirectory() + "/" + "McOnTobi";
+    String testFolder = currentUser.getHomeDirectory() + "/" + "test_" + System.currentTimeMillis();
 
     BuildSpec spec = null;
 
@@ -107,16 +107,7 @@ public class StreamCompilationIT {
       System.out.println("Obtaining remote spec: " + remoteYamlPath);
       IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
 
-      if (!remoteYamlFile.exists()) {
-        throw new RuntimeException("Cloned YAML not found remotely: " + remoteYamlPath);
-      }
-
-      // Read remote content and deserialize
-      ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
-      System.out.println("Deserializing remote spec: " + remoteYamlPath);
-      try (IFSFileInputStream yamlStream = new IFSFileInputStream(remoteYamlFile)) {
-        spec = mapper.readValue(yamlStream, BuildSpec.class);
-      }
+      spec = Utilities.deserializeYaml(remoteYamlFile);
 
       // Collect for cleanup
       objectsToDelete.addAll(spec.targets.keySet());

@@ -1,6 +1,9 @@
 package com.github.kraudy.compiler;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -11,12 +14,15 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.github.kraudy.compiler.CompilationPattern.Command;
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
+import com.ibm.as400.access.IFSFile;
+import com.ibm.as400.access.IFSFileInputStream;
 
 /*
  * Utility methods
@@ -148,31 +154,84 @@ public class Utilities {
 
   }
 
-  public static BuildSpec deserializeYaml (String yamlFile) {
+  /**
+   * Overload 1: Deserialize from a local file path (used by CLI, unit tests, etc.)
+   */
+  public static BuildSpec deserializeYaml(String yamlPath) {
+    if (yamlPath == null) throw new RuntimeException("YAML build file must be provided");
+
+    File f = new File(yamlPath);
+
+    if (!f.exists()) throw new RuntimeException("YAML file not found: " + yamlPath);
+
+    if (!f.canRead()) throw new RuntimeException("YAML file not readable: " + yamlPath);
+
+    // Optional: enforce extension for local files
+    if (!yamlPath.toLowerCase().endsWith(".yaml") && !yamlPath.toLowerCase().endsWith(".yml")) {
+        throw new RuntimeException("File does not appear to be a YAML file (missing .yaml/.yml extension): " + yamlPath);
+    }
+
+    logger.info("Deserializing local spec: {}", yamlPath);
+
+    // Convert local File → InputStream and delegate to shared InputStream logic
+    try (InputStream stream = new FileInputStream(f)) {
+        return deserializeYaml(stream);
+    } catch (IOException e) {
+        throw new RuntimeException("IO error opening local YAML file: " + e.getMessage(), e);
+    }
+  }
+
+  public static BuildSpec deserializeYaml(IFSFile remoteYamlFile) throws Exception {
+    if (remoteYamlFile == null) throw new RuntimeException("Remote YAML build file must be provided");
+
+    if (!remoteYamlFile.exists()) throw new RuntimeException("Remote YAML not found: " + remoteYamlFile.toString());
+
+    if (!remoteYamlFile.canRead()) throw new RuntimeException("YAML file not readable: " + remoteYamlFile.toString());
+
+    // Optional: enforce extension for local files
+    if (!remoteYamlFile.toString().toLowerCase().endsWith(".yaml") && !remoteYamlFile.toString().toLowerCase().endsWith(".yml")) {
+        throw new RuntimeException("File does not appear to be a YAML file (missing .yaml/.yml extension): " + remoteYamlFile.toString());
+    }
+
+    logger.info("Deserializing local spec: {}", remoteYamlFile.toString());
+
+    // Convert local File → InputStream and delegate to shared InputStream logic
+    try (InputStream stream = new IFSFileInputStream(remoteYamlFile)) {
+        return deserializeYaml(stream);
+    } catch (IOException e) {
+        throw new RuntimeException("IO error opening local YAML file: " + e.getMessage(), e);
+    }
+  }
+
+  /**
+   * Deserialize directly from any InputStream (remote IFS, classpath, etc.)
+   */
+  public static BuildSpec deserializeYaml(InputStream yamlStream) {
     ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
-    BuildSpec spec = null;
+    BuildSpec spec;
 
-    if (yamlFile == null) throw new RuntimeException("YAML build file must be provided");
-    
-    File f = new File(yamlFile);
-    
-    if (!f.exists()) throw new RuntimeException("YAML file not found: " + yamlFile);
+    if (yamlStream == null) throw new RuntimeException("YAML InputStream must be provided");
 
-    logger.info("Deserializing spec: " + yamlFile);
-    try{
-      /* Diserialize yaml file */
-      spec = mapper.readValue(f, BuildSpec.class);
+    logger.info("Deserializing spec from InputStream");
 
-      // Post-deserialization sanity check (e.g., targets not empty)
-      if (spec.targets.isEmpty()) {
+    try {
+      spec = mapper.readValue(yamlStream, BuildSpec.class);
+
+      // Post-deserialization sanity check
+      if (spec.targets == null || spec.targets.isEmpty()) {
         throw new IllegalArgumentException("YAML must define at least one target in 'targets' section.");
       }
 
+    } catch (MismatchedInputException e) {
+        throw new RuntimeException("Invalid or empty YAML content: " + e.getMessage(), e);
     } catch (JsonMappingException e) {
-      throw new RuntimeException("YAML schema error: " + e.getMessage() + "\nCheck required fields like 'targets' or 'params'.", e);
+        throw new RuntimeException("YAML schema error: " + e.getMessage() + 
+            "\nCheck required fields like 'targets' or 'params'.", e);
+    } catch (IOException e) {
+        throw new RuntimeException("IO error reading YAML: " + e.getMessage(), e);
     } catch (Exception e) {
-      e.printStackTrace();
-      throw new RuntimeException("Could not map build file to spec");
+        e.printStackTrace();
+        throw new RuntimeException("Could not map YAML to BuildSpec: " + e.getMessage(), e);
     }
 
     return spec;
