@@ -1,9 +1,0 @@
-
-# Simple module creation
-before:
-  chglibl:
-    LIBL: ${CURLIB}
-    
-targets:  
-  "curlib.hello.module.rpgle": {}
-  "curlib.bye.module.rpgle": {}

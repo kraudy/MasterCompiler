@@ -74,14 +74,6 @@ public class StreamCompilationIT {
     if (system != null) system.disconnectAllServices();
   }
 
-  //@Test
-  void test_Full_Ile_Compilation_Flow() throws Exception {    
-
-    masterCompilerTest(
-        "yaml/integration/multi/multi.hello.pgm.rpgle.yaml"
-    );
-  }
-
   @Test
   void test_Tobi_Bob() throws Exception {    
 

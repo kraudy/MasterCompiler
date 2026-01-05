@@ -1,9 +1,0 @@
-before:
-  chglibl:
-    LIBL: ${CURLIB}
-
-targets:
-  curlib.HELLO.pgm.rpgle:
-    params:
-      TEXT: Hello from integration test
-      SRCSTMF: ${SRCSTMF}
