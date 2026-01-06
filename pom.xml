@@ -100,6 +100,9 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
         <version>${failsafe.version}</version>
+        <configuration>
+          <groups>integration</groups>  <!-- Hard-code base: all integration tests -->
+        </configuration>
         <executions>
           <execution>
             <goals>
@@ -137,29 +140,57 @@
   <!-- Profile to activate integration tests -->
   <profiles>
     <profile>
-      <id>integration</id>
-      <activation>
-        <property>
-          <name>integration</name>
-        </property>
-      </activation>
+      <id>integration-fast</id>
       <build>
         <plugins>
           <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
-              <!-- Only include tests tagged with "integration" -->
-              <groups>integration</groups>
+              <excludedGroups>heavy,diff</excludedGroups>  <!-- Exclude the heavy one -->
             </configuration>
-            <executions>
-              <execution>
-                <goals>
-                  <goal>integration-test</goal>
-                  <goal>verify</goal>
-                </goals>
-              </execution>
-            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <profile>
+      <id>integration-heavy</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <excludedGroups>fast,diff</excludedGroups>  <!-- Exclude the light one -->
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <profile>
+      <id>integration-diff</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <excludedGroups>fast,heavy</excludedGroups>  <!-- Exclude the other two -->
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- Optional: all explicit (no exclude) -->
+    <profile>
+      <id>integration-all</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <!-- No excludedGroups → all -->
+            </configuration>
           </plugin>
         </plugins>
       </build>

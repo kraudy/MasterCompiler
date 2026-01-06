@@ -77,10 +77,20 @@ public class StreamCompilationIT {
     if (system != null) system.disconnectAllServices();
   }
 
+
   @Test
+  @Tag("heavy")  // Heavyweight
   void test_Tobi_Bob() throws Exception {    
 
     masterCompilerTest("tobi.yaml", "https://github.com/kraudy/McOnTobi.git");
+    
+  }
+
+  @Test
+  @Tag("fast")  // Ligther
+  void test_Diff() throws Exception {    
+
+    masterCompilerTest("art200.yaml", "https://github.com/kraudy/McOnTobi.git");
     
   }
 
@@ -103,7 +113,7 @@ public class StreamCompilationIT {
       commandExecutor.executeCommand(gitClone);  // Throws if git fails
 
       /* Get remote spec */
-      String remoteYamlPath = testFolder + "/" + "tobi.yaml";
+      String remoteYamlPath = testFolder + "/" + yamlResourcePath;
       System.out.println("Obtaining remote spec: " + remoteYamlPath);
       IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
 
