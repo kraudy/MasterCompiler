@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
+import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
@@ -78,6 +79,9 @@ public class CommandExecutor {
 
   /* Executes targets compilation commands */
   public void executeCommand(TargetKey key) throws Exception{
+    /* If object exists and no REPLACE options exist, force delete */
+    if (key.objectExists()) forceDeletion(key);
+
     Timestamp commandTime = getCurrentTime();
     String commandString = (verbose) ? key.getCommandString() : key.getCommandStringWithoutSummary();
 
@@ -132,6 +136,17 @@ public class CommandExecutor {
       throw new CompilerException("Error retrieving command time", e);
     }
     return currentTime;
+  }
+
+    /* Delete object without REPLACE = *YES */
+  public void forceDeletion(TargetKey key) throws Exception {
+    if (!Arrays.asList(ObjectType.PF, ObjectType.LF).contains(key.getObjectTypeEnum())) return;
+
+    CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
+      .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
+      .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
+
+    executeCommand(dlt);
   }
 
   /* For a system command to have a recovery logic, it need to be in the list cmdWithRecovery */

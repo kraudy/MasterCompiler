@@ -175,7 +175,16 @@ public class Utilities {
 
     // Convert local File → InputStream and delegate to shared InputStream logic
     try (InputStream stream = new FileInputStream(f)) {
-        return deserializeYaml(stream);
+      BuildSpec spec = deserializeYaml(stream);
+
+      // Capture absolute base directory (parent of the YAML file)
+      String baseDir = f.getAbsoluteFile().getParent();
+      if (baseDir == null) {
+        baseDir = ".";  // Fallback to current directory
+      }
+      spec.setBaseDirectory(baseDir);
+
+      return spec;
     } catch (IOException e) {
         throw new RuntimeException("IO error opening local YAML file: " + e.getMessage(), e);
     }
@@ -197,7 +206,16 @@ public class Utilities {
 
     // Convert local File → InputStream and delegate to shared InputStream logic
     try (InputStream stream = new IFSFileInputStream(remoteYamlFile)) {
-        return deserializeYaml(stream);
+      BuildSpec spec = deserializeYaml(stream);
+
+      // Capture absolute base directory (parent of the YAML file)
+      String baseDir = remoteYamlFile.getParent();
+      if (baseDir == null || baseDir.isEmpty()) {
+        baseDir = "/";  // Fallback to root (common on IFS)
+      }
+      spec.setBaseDirectory(baseDir);
+
+      return spec;
     } catch (IOException e) {
         throw new RuntimeException("IO error opening local YAML file: " + e.getMessage(), e);
     }

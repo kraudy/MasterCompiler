@@ -1,6 +1,9 @@
 package com.github.kraudy.compiler;
 
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,6 +40,8 @@ public class TargetKey {
 
   private boolean isOpm;               // Is this key opm?
   private boolean objectExists = false;        // Does the compiled object exists?
+
+  private final List<TargetKey> dependedOnBy = new ArrayList<>(); // Who depends on me (rebuild if I change)
 
   public TargetKey(String key) {
     String[] parts = key.split("\\.");
@@ -337,6 +342,42 @@ public class TargetKey {
     return this.objectType.name();
   }
 
+  public List<TargetKey> getDependedOnBy() {
+    return Collections.unmodifiableList(dependedOnBy);
+  }
+
+  public boolean isDependedOn() {
+    return this.dependedOnBy.size() > 0;
+  }
+
+  public void addDependedOnBy(TargetKey dependent) {
+    if (dependent != null && !dependedOnBy.contains(dependent)) {
+      dependedOnBy.add(dependent);
+    }
+  }
+
+  public List<String> getModulesNameList() {
+    if (getCompilationCommand() != CompCmd.CRTSRVPGM) throw new IllegalArgumentException("Method not valid for command " + getCompilationCommandName());
+  
+    List<String> modList = new ArrayList<>();
+
+    String modules = get(ParamCmd.MODULE);
+    if (modules.isEmpty()) return modList;
+
+    for (String mod : modules.split("\\s+")) {
+      if (mod.isEmpty()) continue;
+
+      String modName = mod.replaceAll(".*/", "").trim(); // strip lib if present
+      if (modName.isEmpty()) continue;
+
+      if (modName.isEmpty()) continue;
+
+      modList.add(modName);
+    }
+
+    return modList;
+  }
+
   public String getSourceType() {
     return this.sourceType.name();
   }
@@ -345,6 +386,7 @@ public class TargetKey {
     String source = get(ParamCmd.SRCFILE);
     if (source.isEmpty()) return this.sourceFile;
 
+    source = source.replace("'", "").trim(); // Remove scaping
     String[] sourceList = source.split("/");
     if(sourceList.length < 2){
       this.sourceFile = source;

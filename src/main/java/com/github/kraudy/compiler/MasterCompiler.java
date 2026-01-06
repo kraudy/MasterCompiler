@@ -36,6 +36,7 @@ public class MasterCompiler{
   private Migrator migrator;
   private ObjectDescriptor odes;
   private SourceDescriptor sourceDes;
+  private DependencyAwareness specDep;
 
   private BuildSpec globalSpec;     // global build spec
   private boolean dryRun = false;   // Compile commands without executing 
@@ -85,6 +86,10 @@ public class MasterCompiler{
     /* Init migrator */
     if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
 
+    /* Init dependency awareness */
+    if (diff) specDep = new DependencyAwareness(system, debug, verbose);
+
+
     /* Init source descriptor */
     sourceDes = new SourceDescriptor(connection, debug, verbose);
 
@@ -99,6 +104,8 @@ public class MasterCompiler{
       }
 
       if(verbose) logger.info(showLibraryList());
+
+      if (diff) specDep.detectDependencies(globalSpec);
 
       /* Build each target */
       buildTargets(globalSpec.targets);
@@ -192,6 +199,13 @@ public class MasterCompiler{
 
         /* Execute compilation command */
         commandExec.executeCommand(key);
+
+        //TODO: This need improvement
+        if (diff && key.isDependedOn()) {
+          for (TargetKey depended : key.getDependedOnBy()){
+            commandExec.executeCommand(depended);
+          }
+        }
 
         /* Per target after */
         if(!targetSpec.after.isEmpty()){

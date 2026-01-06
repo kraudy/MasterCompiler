@@ -15,6 +15,11 @@ import java.util.Map;
  *  Commmands patterns to be extracted from the build spec (YAML file )
  */
 public class BuildSpec {
+  private String baseDirectory;  // Absolute path to the directory containing the YAML
+
+  public String getBaseDirectory() { return baseDirectory; }
+  public void setBaseDirectory(String baseDirectory) { this.baseDirectory = baseDirectory; }
+
   /* Global compilation command params */
   @JsonProperty(value = "defaults", required = false)
   @JsonDeserialize(using = ParamMapDeserializer.class)
