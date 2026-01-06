@@ -84,6 +84,8 @@ public class SourceDescriptor {
 
   }
 
+  //TODO: Check if the object exists using SYSPARTITIONSTAT
+
   public void getObjectTimestamps(TargetKey key) throws SQLException {
     /* Get object creation timestamp */
     if (key.isProgram() || key.isServiceProgram()) {

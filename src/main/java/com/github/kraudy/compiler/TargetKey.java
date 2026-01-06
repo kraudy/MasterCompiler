@@ -299,12 +299,16 @@ public class TargetKey {
   public String getStreamFile() {
     String sourceStreamFile = get(ParamCmd.SRCSTMF);
     if (sourceStreamFile.isEmpty()) return this.sourceStmf;
-    this.sourceStmf = sourceStreamFile;
+    this.sourceStmf = sourceStreamFile.replace("'", "").trim(); // Remove scaping
     return this.sourceStmf;
   }
 
   public String getObjectName() {
     return this.objectName;
+  }
+
+  public ObjectType getObjectTypeEnum() {
+    return this.objectType;
   }
 
   public String getObjectType() {

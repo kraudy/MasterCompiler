@@ -4,9 +4,14 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.github.kraudy.compiler.CompilationPattern.ObjectType;
+import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
+import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400JDBCDataSource;
 import com.ibm.as400.access.User;
@@ -40,6 +45,8 @@ public class MasterCompiler{
   private boolean noMigrate = false;  // Source migration
 
   private boolean compilationError = false;
+  private int builtCount = 0;
+  private int skippedCount = 0;
 
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
@@ -87,7 +94,7 @@ public class MasterCompiler{
     try {
       /* Global before */
       if(!globalSpec.before.isEmpty()){
-        if (verbose) logger.info("Executing global before: " + globalSpec.before.size() + "commands found");
+        if (verbose) logger.info("Executing global before: " + globalSpec.before.size() + " commands found");
         commandExec.executeCommand(globalSpec.before);
       }
 
@@ -98,13 +105,13 @@ public class MasterCompiler{
 
       /* Execute global after */
       if(!globalSpec.after.isEmpty()){
-        if (verbose) logger.info("Executing global after: " + globalSpec.after.size() + "commands found");
+        if (verbose) logger.info("Executing global after: " + globalSpec.after.size() + " commands found");
         commandExec.executeCommand(globalSpec.after);
       }
 
       /* Execute global success */
       if(!globalSpec.success.isEmpty()){
-        if (verbose) logger.info("Executing global success: " + globalSpec.success.size() + "commands found");
+        if (verbose) logger.info("Executing global success: " + globalSpec.success.size() + " commands found");
         commandExec.executeCommand(globalSpec.success);
       }
       
@@ -148,11 +155,13 @@ public class MasterCompiler{
       if (diff) {
         sourceDes.getObjectTimestamps(key);
         if (!key.needsRebuild()) {
+          this.skippedCount++;
           if (verbose) logger.info("Skipping unchanged target: " + key.asString() + key.getTimestmaps());
           continue; 
         }
       }
 
+      this.builtCount++;
       if (verbose) logger.info("Building: " + key.asString());
 
       try{
@@ -165,7 +174,7 @@ public class MasterCompiler{
 
         /* Per target before */
         if(!targetSpec.before.isEmpty()){
-          if (verbose) logger.info("Executing target before: " + targetSpec.before.size() + "commands found");
+          if (verbose) logger.info("Executing target before: " + targetSpec.before.size() + " commands found");
           commandExec.executeCommand(targetSpec.before);
         }
 
@@ -186,13 +195,13 @@ public class MasterCompiler{
 
         /* Per target after */
         if(!targetSpec.after.isEmpty()){
-          if (verbose) logger.info("Executing target after: " + targetSpec.after.size() + "commands found");
+          if (verbose) logger.info("Executing target after: " + targetSpec.after.size() + " commands found");
           commandExec.executeCommand(targetSpec.after);
         } 
 
         /* Per target success */
         if(!targetSpec.success.isEmpty()){
-          if (verbose) logger.info("Executing target success: " + targetSpec.success.size() + "commands found");
+          if (verbose) logger.info("Executing target success: " + targetSpec.success.size() + " commands found");
           commandExec.executeCommand(targetSpec.success);
         } 
 
@@ -202,7 +211,7 @@ public class MasterCompiler{
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
-          if (verbose) logger.error("Executing target failure: " + targetSpec.failure.size() + "commands found");
+          if (verbose) logger.error("Executing target failure: " + targetSpec.failure.size() + " commands found");
           commandExec.executeCommand(targetSpec.failure);
         } 
 
@@ -223,6 +232,14 @@ public class MasterCompiler{
 
   public boolean foundCompilationError(){
     return this.compilationError;
+  }
+
+  public int getBuiltCount() {
+    return this.builtCount;
+  }
+
+  public int getSkippedCount() {
+    return this.skippedCount;
   }
 
   private String showLibraryList() throws SQLException{

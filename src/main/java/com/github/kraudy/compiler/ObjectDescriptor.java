@@ -26,7 +26,6 @@ public class ObjectDescriptor {
   }
 
   public void getObjectInfo(TargetKey key) throws SQLException {
-
     switch (key.getCompilationCommand()) {
       /* PGM info */
       case CRTBNDRPG:

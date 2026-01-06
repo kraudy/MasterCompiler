@@ -77,7 +77,6 @@ public class StreamCompilationIT {
     if (system != null) system.disconnectAllServices();
   }
 
-
   @Test
   @Tag("heavy")  // Heavyweight
   void test_Tobi_Bob() throws Exception {    
@@ -136,15 +135,14 @@ public class StreamCompilationIT {
       compiler.build();
 
       errorFound = compiler.foundCompilationError();
-      
-      /* Set cur dir back */
-      CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
-        .put(ParamCmd.DIR, currentUser.getHomeDirectory());
-      commandExecutor.executeCommand(chgHome);
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
     } finally {
+      /* Set cur dir back to free test dir */
+      CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
+        .put(ParamCmd.DIR, currentUser.getHomeDirectory());
+      commandExecutor.executeCommand(chgHome);
 
       try {
         CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
@@ -173,4 +171,104 @@ public class StreamCompilationIT {
 
   }
 
+  @Test
+  @Tag("diff")
+  void test_Diff_Build() throws Exception {
+    boolean errorFound = false;
+
+    List<TargetKey> objectsToDelete = new ArrayList<>();
+
+    String testFolder = currentUser.getHomeDirectory() + "/test_" + System.currentTimeMillis();
+
+    BuildSpec spec = null;
+
+    try {
+      // Clone repo
+      System.out.println("Cloning repo for diff test: https://github.com/kraudy/McOnTobi.git");
+      CommandObject gitClone = new CommandObject(SysCmd.QSH)
+          .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/git clone https://github.com/kraudy/McOnTobi.git " + testFolder);
+      commandExecutor.executeCommand(gitClone);
+
+      // Load spec
+      String remoteYamlPath = testFolder + "/art200.yaml";
+      IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
+      spec = Utilities.deserializeYaml(remoteYamlFile);
+
+      objectsToDelete.addAll(spec.targets.keySet());
+
+      // CHGCURDIR to repo root
+      CommandObject chgCurDir = new CommandObject(SysCmd.CHGCURDIR)
+          .put(ParamCmd.DIR, testFolder);
+      commandExecutor.executeCommand(chgCurDir);
+
+      // FIRST BUILD: Full (diff=false) - creates all objects, syncs timestamps
+      MasterCompiler fullCompiler = new MasterCompiler(
+        system, connection, spec,
+        false, true, true, false, false  // verbose=true for logs
+      );
+      fullCompiler.build();
+      assertFalse(fullCompiler.foundCompilationError(), "Full build failed");
+
+      int totalTargets = spec.targets.size();
+      assertEquals(totalTargets, fullCompiler.getBuiltCount(), "Full build should build all targets");
+
+      // Simulate changes: Touch a few sources (updates IFS DATA_CHANGE_TIMESTAMP)
+      List<String> changedRelativePaths = List.of(
+        "QRPGLESRC/ADDNUM.RPGLE",           // Independent program
+        "QDDSSRC/ART200D.dspf.dds",         // DSPF
+        "QRPGLESRC/ART200.pgm.sqlrpgle"     // SQLRPGI program source
+      );
+
+      for (String relPath : changedRelativePaths) {
+        String fullPath = testFolder + "/" + relPath;
+        CommandObject touch = new CommandObject(SysCmd.QSH)
+            .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/touch " + fullPath);
+        commandExecutor.executeCommand(touch);
+      }
+
+      // SECOND BUILD: Diff mode
+      MasterCompiler diffCompiler = new MasterCompiler(
+        system, connection, spec,
+        false, true, true, true, false  // diff=true
+      );
+      diffCompiler.build();
+      errorFound = diffCompiler.foundCompilationError();
+      assertFalse(errorFound, "Diff build failed");
+
+      // ASSERTIONS: Only changed targets rebuilt, others skipped
+      int expectedRebuilt = changedRelativePaths.size();  // Assuming one target per file
+      assertEquals(expectedRebuilt, diffCompiler.getBuiltCount(), "Diff build should rebuild only changed sources");
+      assertEquals(totalTargets - expectedRebuilt, diffCompiler.getSkippedCount(), "Diff build should skip unchanged");
+
+    } catch (CompilerException e) {
+      System.out.println(e.getFullContext());
+    } finally {
+      /* Set cur dir back to free test dir */
+      CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
+        .put(ParamCmd.DIR, currentUser.getHomeDirectory());
+      commandExecutor.executeCommand(chgHome);
+
+      try {
+        CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
+          .put(ParamCmd.DIR, testFolder)
+          .put(ParamCmd.SUBTREE, ValCmd.ALL);
+
+        commandExecutor.executeCommand(rmvDir);
+      } catch (CompilerException e) {
+        System.out.println(e.getFullContext());
+      }
+
+      // Delete compiled objects in reverse creation order (dependents first)
+      for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
+        TargetKey key = objectsToDelete.get(i);
+        try {
+          CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
+            .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
+            .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
+
+          commandExecutor.executeCommand(dlt);
+        } catch (Exception ignored) {} // This prevents breaking the loop
+      }
+    }
+  }
 }
