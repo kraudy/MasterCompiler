@@ -8,6 +8,8 @@ import java.sql.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.kraudy.compiler.CompilationPattern.ValCmd;
+
 public class SourceDescriptor {
   private static final Logger logger = LoggerFactory.getLogger(SourceDescriptor.class);
 

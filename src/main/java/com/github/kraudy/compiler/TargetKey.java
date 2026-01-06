@@ -36,6 +36,7 @@ public class TargetKey {
   private Timestamp lastBuild;         // Last time the object was compiled
 
   private boolean isOpm;               // Is this key opm?
+  private boolean objectExists = false;        // Does the compiled object exists?
 
   public TargetKey(String key) {
     String[] parts = key.split("\\.");
@@ -307,6 +308,14 @@ public class TargetKey {
     return this.objectName;
   }
 
+  public boolean objectExists() {
+    return this.objectExists;
+  }
+
+  public void setObjectExists(boolean exists) {
+    this.objectExists = exists;
+  }
+
   public ObjectType getObjectTypeEnum() {
     return this.objectType;
   }
@@ -315,6 +324,7 @@ public class TargetKey {
     switch (this.objectType) {
       case PF:
       case LF:
+      case DSPF:
         return ParamCmd.FILE.toString();
     
       default:

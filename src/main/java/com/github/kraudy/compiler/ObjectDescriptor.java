@@ -26,6 +26,13 @@ public class ObjectDescriptor {
   }
 
   public void getObjectInfo(TargetKey key) throws SQLException {
+
+    /* Check if object exists */
+    objectExists(key);
+
+    /* If no object, return */
+    if (!key.objectExists()) return;
+
     switch (key.getCompilationCommand()) {
       /* PGM info */
       case CRTBNDRPG:
@@ -75,6 +82,29 @@ public class ObjectDescriptor {
 
     return;
   }
+
+  public void objectExists(TargetKey key) throws SQLException {
+    try (Statement stmt = connection.createStatement();
+        ResultSet rs = stmt.executeQuery(
+          "Select 1  " +
+          "From TABLE( " +
+            "QSYS2.OBJECT_STATISTICS( " +
+              "OBJECT_SCHEMA => '" + ValCmd.LIBL.toString() + "', " +
+              "OBJTYPELIST => '" + key.getObjectType() + "', " +
+              "OBJECT_NAME => '" + key.getObjectName() + "' " +
+            ") " +
+          ") " + 
+          "LIMIT 1")) {
+      if (!rs.next()) {
+        if (verbose) logger.info("Object not found: " + key.asString());
+        return;  
+      }
+
+      if (verbose) logger.info("Found object: " + key.asString());
+      key.setObjectExists(true);
+      return;
+  }
+}
 
   /* *PGM */
   private void getPgmInfo(TargetKey key) throws SQLException {
