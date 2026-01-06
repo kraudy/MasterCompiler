@@ -37,9 +37,9 @@ IBMI_USERNAME=BIGBOY
 IBMI_PASSWORD=BIGMONEY
 ```
 
-Then, run the integration test to watch a thing of beauty.
+Then, run the integration test to watch a thing of beauty. Note that this is the *heavy* test.
 
-* `mvn clean verify -Pintegration`
+* `mvn clean verify -Pintegration-heavy`
 
 [Tests doc](./docs/Tests.md#integration-tests)
 

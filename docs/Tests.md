@@ -36,7 +36,13 @@ IBMI_USERNAME=BIGBOY
 IBMI_PASSWORD=BIGMONEY
 ```
 
-Then execute `mvn clean verify -Pintegration`
+Then you get various flavors of tests.
+```bash
+mvn clean verify -Pintegration-heavy # Build the full tobi recursive test
+
+mvn clean verify -Pintegration-fast # Build an object with many dependencies
+
+```
 
 That's it.
 
