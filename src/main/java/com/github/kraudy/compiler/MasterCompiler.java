@@ -201,11 +201,12 @@ public class MasterCompiler{
         commandExec.executeCommand(key);
 
         //TODO: This need improvement
-        if (diff && key.isDependedOn()) {
-          for (TargetKey depended : key.getDependedOnBy()){
-            commandExec.executeCommand(depended);
-          }
-        }
+        //if (diff && key.isDependedOn()) {
+        //  for (TargetKey depended : key.getDependedOnBy()){
+        //    if (verbose) logger.info("Compiling object: " + depended.asString() + " -> depended on " + key.asString());
+        //    commandExec.executeCommand(depended);
+        //  }
+        //}
 
         /* Per target after */
         if(!targetSpec.after.isEmpty()){

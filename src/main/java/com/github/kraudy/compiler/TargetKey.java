@@ -163,6 +163,18 @@ public class TargetKey {
     return this.sourceType == SourceType.DDS;
   }
 
+  public boolean isFile() {
+    switch (this.objectType) {
+      case PF:
+      case LF:
+      case PRTF:
+      case DSPF:
+      case TABLE:
+        return true;
+    }
+    return false;
+  }
+
   public boolean isModule() {
     return this.objectType == ObjectType.MODULE;
   }
@@ -298,6 +310,11 @@ public class TargetKey {
     return library + "." + objectName + "." + objectType.name() + "." + sourceType.name();
   }
 
+  public String asMapKey() {
+    /* We use  getObjectType to handle different file types*/
+    return objectName + "." + getObjectType(); // + "." + sourceType.name(); // Should add the source type
+  }
+
   public String asFileName() {
     return getObjectName() + "." + getSourceType();
   }
@@ -339,15 +356,24 @@ public class TargetKey {
   }
 
   public String getObjectTypeName() {
+    switch (this.objectType) {
+      case PF:
+      case LF:
+      case DSPF:
+        return ParamCmd.FILE.name();
+    
+      default:
+        break;
+    }
     return this.objectType.name();
   }
-
+  
   public List<TargetKey> getDependedOnBy() {
     return Collections.unmodifiableList(dependedOnBy);
   }
 
   public boolean isDependedOn() {
-    return this.dependedOnBy.size() > 0;
+    return !this.dependedOnBy.isEmpty();
   }
 
   public void addDependedOnBy(TargetKey dependent) {
@@ -431,13 +457,15 @@ public class TargetKey {
     // Allow comparison with String directly
     if (obj instanceof String) {
       String str = (String) obj;
+      /* Performs validation for map key. If false just ignore*/
+      if (this.asMapKey().equals(str)) return true;
       return this.asString().toUpperCase().equals(str);
     }
 
     /* If the other object is not a TargetKey, return false */
     if (!(obj instanceof TargetKey)) return false;
 
-    /* Key string comparison */
+    /* Key string comparison between two TargetKey objects */
     TargetKey targetKey = (TargetKey) obj;
     return this.asString().toUpperCase().equals(targetKey.asString().toUpperCase());
   }
