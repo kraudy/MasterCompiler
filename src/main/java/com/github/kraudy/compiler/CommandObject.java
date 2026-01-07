@@ -58,9 +58,8 @@ public class CommandObject {
   }
 
   public String getCommandStringWithoutSummary(){
-    if (this.commandString != null) return this.commandString;
-    this.commandString = this.ParamCmdSequence.getCommandStringWithoutSummary(this.systemCommand);
-    return this.commandString;
+    Utilities.ResolveConflicts(this);
+    return this.ParamCmdSequence.getCommandStringWithoutSummary(this.systemCommand);
   }
 
   public void getChangesSummary() {

@@ -98,6 +98,8 @@ public class CompilationPattern {
         case CLP:
         case CLLE:
           return DftSrc.QCLSRC.name();
+        case CMD:
+          return DftSrc.QCMDSRC.name();
         case DDS:
           switch (objectType) {
             case DSPF:
@@ -130,7 +132,8 @@ public class CompilationPattern {
 
   /* Default source files */
   public enum DftSrc { 
-    QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC, QPRTFSRC
+    QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC, QPRTFSRC,
+    QCMDSRC
   }
 
   /* Commands params as enums */

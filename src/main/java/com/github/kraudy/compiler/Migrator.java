@@ -83,10 +83,20 @@ public class Migrator {
   }
 
   public void createSourcePf(TargetKey key) throws Exception {
-    CommandObject cmd = new CommandObject(SysCmd.CRTSRCPF)
-      .put(ParamCmd.FILE, key.getQualifiedSourceFile());
+    /* 
+     * If this creation returns an error because the source pf already exits
+     * that means that it has no data and can be ommited
+     * SYSPARTITIONSTAT does not catch empty source pf.
+     */
+    try {
+      CommandObject cmd = new CommandObject(SysCmd.CRTSRCPF)
+        .put(ParamCmd.FILE, key.getQualifiedSourceFile());
+      
+      commandExec.executeCommand(cmd);
+    } catch (Exception ignore) {
+      if(verbose) logger.info("Omitting source pf creation: " + key.getQualifiedSourceFile() + " .Already exists");
+    }
     
-    commandExec.executeCommand(cmd);
   }
 
   public void createSourceMember(TargetKey key) throws Exception {
@@ -145,6 +155,7 @@ public class Migrator {
         if (verbose) logger.info("Source PF " + key.getSourceFile() + " already exist in library " + key.getLibrary());
         return true;
       }
+      if (verbose) logger.info("Source PF " + key.getSourceFile() + " does not exist in library " + key.getLibrary());
       return false;
     }
   }

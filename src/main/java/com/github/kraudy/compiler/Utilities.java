@@ -53,6 +53,7 @@ public class Utilities {
       case CRTRPGMOD:
       case CRTCLMOD:
       case RUNSQLSTM:
+      case CRTCMD:
         targetKey.put(ParamCmd.SRCFILE, targetKey.getQualifiedSourceFile())
           .put(ParamCmd.SRCMBR, targetKey.getSourceName());
         break;
@@ -106,6 +107,17 @@ public class Utilities {
           .put(ParamCmd.OPTION, ValCmd.LIST);
         break;
 
+      default:
+        break;
+    }
+
+    /* Cmd specific params */
+    switch (targetKey.getCompilationCommand()) {
+      case CRTCMD:
+        targetKey.put(ParamCmd.CMD, targetKey.getQualifiedObject())
+          .put(ParamCmd.CMD, targetKey.getQualifiedObject(ValCmd.CURLIB));
+        break;
+    
       default:
         break;
     }
@@ -303,7 +315,6 @@ public class Utilities {
       case FROMMBR:
       case TOSTMF:
       case DIR:
-      case CMD:
         return "''" + value + "''";
     
       case MODULE:
@@ -430,7 +441,7 @@ public class Utilities {
         break;
     }
 
-    /* Migration logic */
+    /* Migration logic between SRCSTMF and  SRCFILE, SRCMBR */
     switch (key.getCompilationCommand()){
       case CRTRPGMOD:
       case CRTBNDRPG:
@@ -438,6 +449,7 @@ public class Utilities {
       case CRTSQLRPGI:
       case CRTSRVPGM:
       case RUNSQLSTM:
+      case CRTCMD:
         if(key.containsKey(ParamCmd.SRCSTMF) &&
             key.containsKey(ParamCmd.SRCFILE)){
           key.remove(ParamCmd.SRCFILE); 
@@ -451,6 +463,19 @@ public class Utilities {
   }
 
   public static void ResolveConflicts(CommandObject commandObject){
+    switch (commandObject.getSystemCommand()){
+      /* Scape command */
+      case QSH:
+        if (commandObject.containsKey(ParamCmd.CMD)){
+          String cmd = commandObject.get(ParamCmd.CMD);
+          cmd = "''" + cmd + "''";
+          commandObject.put(ParamCmd.CMD, cmd);
+        }
+        break;
+
+      default: 
+        break;
+    }
     return;
   }
 

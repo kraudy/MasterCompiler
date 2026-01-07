@@ -89,7 +89,9 @@ public class StreamCompilationIT {
   @Tag("fast")  // Ligther
   void test_Diff() throws Exception {    
 
-    masterCompilerTest("art200.yaml", "https://github.com/kraudy/McOnTobi.git");
+    //masterCompilerTest("art200.yaml", "https://github.com/kraudy/McOnTobi.git");
+    //masterCompilerTest("rpgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+    masterCompilerTest("clsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     
   }
 
