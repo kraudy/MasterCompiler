@@ -429,6 +429,18 @@ public class Utilities {
         }
 
         break;
+      
+      case CRTRPGPGM:
+        /* *NOEVENTF value not valid for OPTION for CRTRPGPGM */
+        if (key.containsKey(ParamCmd.OPTION)) {
+          String option = key.get(ParamCmd.OPTION);
+          try{
+            if (ValCmd.NOEVENTF == ValCmd.fromString(option)){
+              key.put(ParamCmd.OPTION, ValCmd.LSTDBG.toString());
+            }
+          } catch (Exception ignore) {}
+        } 
+        break;
 
       case CRTSRVPGM:
         if (key.containsKey(ParamCmd.SRCSTMF) && 
