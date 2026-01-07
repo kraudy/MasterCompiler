@@ -253,7 +253,7 @@ public class CompilationPattern {
   /* Params defined values. You see these when you press F4 */
   public enum ValCmd { 
     FIRST, REPLACE, OUTFILE, LIBL, FILE, DTAARA, PGM, MODULE, OBJ, SRVPGM, CURLIB, ALL, CURRENT,
-    NONE, BASIC, FULL, LSTDBG, JOB, EVENTF,
+    NONE, BASIC, FULL, LSTDBG, JOB, EVENTF, NOEVENTF,
 
     YES, NO, STMT, SOURCE, LIST, HEX, JOBRUN, USER, LIBCRTAUT, PEP, NOCOL, PRINT, SNGLVL,
     
