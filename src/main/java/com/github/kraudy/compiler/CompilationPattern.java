@@ -7,6 +7,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+
 
 /*
  * Defines all the commands and params as enums.
@@ -50,7 +52,9 @@ public class CompilationPattern {
     // Stream files
     CHGCURDIR, RMVDIR,
     // PASE
-    QSH
+    QSH,
+    // DATA
+    CRTDTAARA,  CRTDTAQ,
     ;
 
     public static SysCmd fromString(String value) {
@@ -212,7 +216,13 @@ public class CompilationPattern {
 
     // RMVDIR
     SUBTREE, RMVLNK, 
-    
+
+    // CRTDTAARA
+    DTAARA, LEN, VALUE, RMTDTAARA, RMTLOCNAME, LCLLOCNAME, MODE, RMTNETID,
+
+    // CRTDTAQ
+    MAXLEN, FORCE, SEQ, SENDERID, AUTORCL
+
     ;
 
     /* Convert string to param enum */
@@ -252,7 +262,7 @@ public class CompilationPattern {
 
   /* Params defined values. You see these when you press F4 */
   public enum ValCmd { 
-    FIRST, REPLACE, OUTFILE, LIBL, FILE, DTAARA, PGM, MODULE, OBJ, SRVPGM, CURLIB, ALL, CURRENT,
+    FIRST, REPLACE, OUTFILE, LIBL, FILE, DTAARA, DTAQ, PGM, MODULE, OBJ, SRVPGM, CURLIB, ALL, CURRENT,
     NONE, BASIC, FULL, LSTDBG, JOB, EVENTF, NOEVENTF,
 
     YES, NO, STMT, SOURCE, LIST, HEX, JOBRUN, USER, LIBCRTAUT, PEP, NOCOL, PRINT, SNGLVL,
@@ -265,7 +275,7 @@ public class CompilationPattern {
     // Object types as F4 values
     BNDDIR, ALRTBL, AUTL, CFGL ,CHTFMT, CLD , CLS , CMD , CNNL, COSD, CRQD,  
     CSI, CSPMAP,
-    CSPTBL, CTLD, DEVD, DTADCT, DTAQ , EDTD, FCT, FNTRSC, FNTTBL, FORMDF, FTR,
+    CSPTBL, CTLD, DEVD, DTADCT , EDTD, FCT, FNTRSC, FNTTBL, FORMDF, FTR,
     GSS, IGCDCT, IGCSRT, IGCTBL, IMGCLG, IPXD, JOBD, JOBQ, JRN, JRNRCV, LIB, LIND, LOCALE,
     MEDDFN, MENU, MGTCOL, MODD, MSGF, MSGQ, NODGRP, NODL, NTBD, NWID, NWSCFG, NWSD,
     OUTQ, OVL, PAGDFN, PAGSEG, PDFMAP, PDG, PNLGRP, PSFCFG, QMFORM, QMQRY , QRYDFN, SBSD,
@@ -276,7 +286,13 @@ public class CompilationPattern {
     DATETIME, VARCHAR , GRAPHIC, PRV, 
 
     // CLOSQLCSR
-    ENDACTGRP, ENDMOD, CALLER
+    ENDACTGRP, ENDMOD, CALLER,
+
+    // CRTDTAARA
+    DEC,
+
+    // CRTDTAQ
+    MAX16MB, MAX2GB, 
 
     ; 
 
@@ -432,6 +448,37 @@ public class CompilationPattern {
   // QSH
   public static final List<ParamCmd> Qsh_Pattern = Arrays.asList(
     ParamCmd.CMD
+  );
+
+  // CRTDTAARA
+  public static final List<ParamCmd> CrtDtaAra_Pattern = Arrays.asList(
+    ParamCmd.DTAARA,
+    ParamCmd.TYPE,
+    ParamCmd.LEN, 
+    ParamCmd.VALUE,     
+    ParamCmd.RMTDTAARA, 
+    ParamCmd.RMTLOCNAME,
+    ParamCmd.RDB,       
+    ParamCmd.DEV,       
+    ParamCmd.LCLLOCNAME,
+    ParamCmd.MODE,      
+    ParamCmd.RMTNETID,
+    ParamCmd.TEXT,
+    ParamCmd.AUT
+  );
+
+  // CRTDTAQ
+  public static final List<ParamCmd> CrtDtaQ_Pattern = Arrays.asList(
+    ParamCmd.DTAQ,
+    ParamCmd.TYPE,  
+    ParamCmd.MAXLEN,
+    ParamCmd.FORCE, 
+    ParamCmd.SEQ,
+    ParamCmd.SENDERID,
+    ParamCmd.SIZE,    
+    ParamCmd.AUTORCL, 
+    ParamCmd.TEXT,    
+    ParamCmd.AUT
   );
 
   // OVRDBF
@@ -1202,6 +1249,9 @@ public class CompilationPattern {
     commandToPatternMap.put(SysCmd.RMVDIR, RmvDir_Pattern);
     /* Pase */
     commandToPatternMap.put(SysCmd.QSH, Qsh_Pattern);
+    /* Data */
+    commandToPatternMap.put(SysCmd.CRTDTAARA, CrtDtaAra_Pattern);
+    commandToPatternMap.put(SysCmd.CRTDTAQ, CrtDtaQ_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);

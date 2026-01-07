@@ -343,6 +343,8 @@ public class Utilities {
         break;
 
       case BNDDIR:
+      case DTAARA:
+      case DTAQ:
         /* If not qualified, set to CURLIB */
         if(!value.contains("/")) value = ValCmd.CURLIB.toString() + "/" + value;
         break;
