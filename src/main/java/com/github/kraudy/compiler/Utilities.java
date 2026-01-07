@@ -456,6 +456,7 @@ public class Utilities {
     /* Migration logic between SRCSTMF and  SRCFILE, SRCMBR */
     switch (key.getCompilationCommand()){
       case CRTRPGMOD:
+      case CRTCLMOD:
       case CRTBNDRPG:
       case CRTBNDCL:
       case CRTSQLRPGI:
