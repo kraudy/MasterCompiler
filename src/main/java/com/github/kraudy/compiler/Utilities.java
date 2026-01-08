@@ -118,6 +118,18 @@ public class Utilities {
           .put(ParamCmd.CMD, targetKey.getQualifiedObject(ValCmd.CURLIB));
         break;
     
+      case CRTBNDDIR:
+        targetKey.put(ParamCmd.BNDDIR, targetKey.getObjectName());
+        break;
+    
+      case CRTDTAARA:
+        targetKey.put(ParamCmd.DTAARA, targetKey.getObjectName());
+        break;
+    
+      case CRTDTAQ:
+        targetKey.put(ParamCmd.DTAQ, targetKey.getObjectName());
+        break;
+
       default:
         break;
     }

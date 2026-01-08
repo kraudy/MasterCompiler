@@ -28,11 +28,6 @@ public class CommandExecutor {
   private final boolean dryRun;
   private final StringBuilder CmdExecutionChain = new StringBuilder();
 
-  /* Commands with a recovery in case of failure */
-  private static final List<SysCmd> cmdWithRecovery = Arrays.asList(
-    SysCmd.CRTBNDDIR
-  );
-
   public CommandExecutor(Connection connection, boolean debug, boolean verbose, boolean dryRun){
     this.connection = connection;
     this.debug = debug;
@@ -56,20 +51,8 @@ public class CommandExecutor {
       executeCommand(commandString, commandTime);
     } catch (CompilerException e) {
 
-      if (!CommandExecutor.cmdWithRecovery.contains(command.getSystemCommand())) {
-        throw new CompilerException("System command failed", e, command);
-      }
-
-      List<ErrMsg> errorMessages = getErrorsList(commandTime);
-
-      if(errorMessages.size() == 0) {
-        if(verbose) logger.error("No error messages found : " + commandString);
-        throw new CompilerException("System command failed", e, command);
-      }
-
-      /* We try to recover from known execution errors */
-      if(verbose) logger.error("Trying recovery command for falied : " + commandString);
-      executeCommand(recoverFromFailure(command, errorMessages));
+      if(verbose) logger.error("No error messages found : " + commandString);
+      throw new CompilerException("System command failed", e, command);
 
     } catch (Exception e) {
       throw new CompilerException("Unexpected exception in target compilation command", e, command);
@@ -140,8 +123,7 @@ public class CommandExecutor {
 
     /* Delete object without REPLACE = *YES */
   public void forceDeletion(TargetKey key) throws Exception {
-    //TODO: Add bnddir, dtaara, dtaq
-    if (!Arrays.asList(ObjectType.PF, ObjectType.LF).contains(key.getObjectTypeEnum())) return;
+    if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ).contains(key.getObjectTypeEnum())) return;
 
     //TODO: For function deletion
     // for this, add method executeStatement that receives a sql string
@@ -152,48 +134,6 @@ public class CommandExecutor {
       .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
 
     executeCommand(dlt);
-  }
-
-  /* For a system command to have a recovery logic, it need to be in the list cmdWithRecovery */
-  public List<CommandObject> recoverFromFailure(CommandObject cmd, List<ErrMsg> errorMessages) {
-    switch (cmd.getSystemCommand()) {
-      case CRTBNDDIR:
-        if (errorMessages.contains(ErrMsg.CPF2112)) { //Object type *BNDDIR already exists.
-          CommandObject previousCommand = new CommandObject(SysCmd.DLTOBJ);
-          previousCommand.put(ParamCmd.OBJ, cmd.get(ParamCmd.BNDDIR));
-          previousCommand.put(ParamCmd.OBJTYPE, ValCmd.BNDDIR);
-          return Arrays.asList(previousCommand, cmd);
-        }
-        break;
-
-    }
-    throw new CompilerException("System command with recovery but no matched found. This should not happen: " + cmd.getCommandStringWithoutSummary());
-  }
-
-  /* For target key compilation recovery */
-  public boolean recoverFromFailure(TargetKey key, List<ErrMsg> errorMessages) {
-    /* We try to recover from known execution errors */
-    if(verbose) logger.error("Trying recovery command for falied : " + key.getCommandStringWithoutSummary());
-
-    switch (key.getCompilationCommand()) {
-      case CRTSQLRPGI:
-      case CRTBNDRPG:
-      case CRTBNDCL:
-      case CRTRPGMOD:
-      case CRTCLMOD:
-      case RUNSQLSTM:
-        if (errorMessages.contains(ErrMsg.RNS9380)) { // CCSID 1208 of stream file not valid for TGTCCSID(*SRC)
-          logger.info("If the RNS9380 is not resolved, we reccommend using the flag --no-migrate to ommit migration");
-          key.put(ParamCmd.SRCFILE, key.getQualifiedLiblSourceFile());
-          key.put(ParamCmd.SRCMBR, key.getObjectName());
-          key.removeStreamFile();
-        }
-        return true;
-
-    }
-
-    if(verbose) logger.error("Could not recover from failed compilation command");
-    return false;
   }
 
   private String buildJoblogMessagesString(Timestamp commandTime) {
@@ -234,35 +174,6 @@ public class CommandExecutor {
     }
 
     return messages.toString();
-}
-
-  private List<ErrMsg> getErrorsList(Timestamp commandTime) {
-    List<ErrMsg> errorMessages = new ArrayList<>();
-
-    try (Statement stmt = connection.createStatement();
-         ResultSet rsMessages = stmt.executeQuery(
-             "SELECT MESSAGE_ID " +
-             "FROM TABLE(QSYS2.JOBLOG_INFO('*')) " +
-             "WHERE FROM_USER = USER " +
-             "AND MESSAGE_TIMESTAMP > '" + commandTime + "' " +
-             "AND MESSAGE_ID NOT IN ('SQL0443', 'CPC0904', 'CPF2407') " +
-             "AND SEVERITY > 20 " + // Only errors
-             "ORDER BY MESSAGE_TIMESTAMP ASC"
-         )) {
-
-
-        while (rsMessages.next()) {
-          String messageId = rsMessages.getString("MESSAGE_ID").trim();
-          try{
-            ErrMsg errMsg = ErrMsg.fromString(messageId);
-            errorMessages.add(errMsg);
-          } catch (Exception ignore) {} /* UnKnown messages are ignored */
-        }
-
-    } catch (SQLException e) {
-      throw new CompilerException("Error retrieving joblog", e);
-    }
-  return errorMessages;
 }
 
   public String getExecutionChain() {

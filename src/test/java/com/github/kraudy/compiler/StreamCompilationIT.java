@@ -93,9 +93,9 @@ public class StreamCompilationIT {
     //masterCompilerTest("art200.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("rpgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("clsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
-    //masterCompilerTest("dtasrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+    masterCompilerTest("dtasrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("msgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
-    masterCompilerTest("sqlsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+    //masterCompilerTest("sqlsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     
   }
 

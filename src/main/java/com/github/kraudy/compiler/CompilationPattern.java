@@ -38,7 +38,7 @@ public class CompilationPattern {
     // Dependency commands
     DSPPGMREF, DSPOBJD, DSPDBR ,
     // Bind dir related commands
-    CRTBNDDIR, ADDBNDDIRE,
+    ADDBNDDIRE,
     // Overs
     OVRDBF, OVRPRTF, DLTOVR,
     //
@@ -54,8 +54,6 @@ public class CompilationPattern {
     // PASE
     QSH,
 
-    // DATA
-    CRTDTAARA,  CRTDTAQ,
     // Messages
     CRTMSGF,
 
@@ -77,7 +75,10 @@ public class CompilationPattern {
   }
 
   public enum CompCmd implements Command { 
-    CRTRPGMOD, CRTSQLRPGI, CRTBNDRPG, CRTRPGPGM, CRTCLMOD, CRTBNDCL, CRTCLPGM, RUNSQLSTM, CRTSRVPGM, CRTDSPF, CRTLF, CRTPRTF, CRTMNU, CRTQMQRY, CRTPF, CRTCMD;
+    CRTRPGMOD, CRTSQLRPGI, CRTBNDRPG, CRTRPGPGM, CRTCLMOD, CRTBNDCL, CRTCLPGM, RUNSQLSTM, 
+    CRTSRVPGM, CRTDSPF, CRTLF, CRTPRTF, CRTMNU, CRTQMQRY, CRTPF, CRTCMD,
+    CRTBNDDIR, CRTDTAARA, CRTDTAQ
+    ;
   }
 
   public static final  List<SourceType> IleSources = Arrays.asList(
@@ -86,7 +87,7 @@ public class CompilationPattern {
 
   public enum SourceType { 
     RPG, RPGLE, SQLRPGLE, CLP, CLLE, SQL, BND, DDS,
-    CMD, MNU, QMQRY
+    CMD, MNU, QMQRY, BNDDIR, DTAARA, DTAQ
     ;
 
     public static SourceType fromString(String value) {
@@ -113,6 +114,12 @@ public class CompilationPattern {
           return DftSrc.QCLSRC.name();
         case CMD:
           return DftSrc.QCMDSRC.name();
+        case BNDDIR:
+          return DftSrc.QBNDSRC.name();
+        case DTAARA:
+          return DftSrc.QDTAARA.name();
+        case DTAQ:
+          return DftSrc.QDTAQSRC.name();
         case DDS:
           switch (objectType) {
             case DSPF:
@@ -146,7 +153,7 @@ public class CompilationPattern {
   /* Default source files */
   public enum DftSrc { 
     QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC, QPRTFSRC,
-    QCMDSRC
+    QCMDSRC, QBNDSRC, QDTAARA, QDTAQSRC
   }
 
   /* Commands params as enums */
@@ -387,13 +394,28 @@ public class CompilationPattern {
 
     /* Source type: MNU */
     Map<ObjectType, CompCmd> mnuMap = new EnumMap<>(ObjectType.class);
-    mnuMap.put(ObjectType.MNU, CompCmd.CRTCMD);
+    mnuMap.put(ObjectType.MNU, CompCmd.CRTMNU);
     typeToCmdMap.put(SourceType.MNU, mnuMap);
 
     /* Source type: QMQRY */
     Map<ObjectType, CompCmd> qmqryMap = new EnumMap<>(ObjectType.class);
-    qmqryMap.put(ObjectType.QMQRY, CompCmd.CRTCMD);
+    qmqryMap.put(ObjectType.QMQRY, CompCmd.CRTQMQRY);
     typeToCmdMap.put(SourceType.QMQRY, qmqryMap);
+
+    /* Source type: BNDDIR */
+    Map<ObjectType, CompCmd> bndDirMap = new EnumMap<>(ObjectType.class);
+    bndDirMap.put(ObjectType.BNDDIR, CompCmd.CRTBNDDIR);
+    typeToCmdMap.put(SourceType.BNDDIR, bndDirMap);
+
+    /* Source type: DTAARA */
+    Map<ObjectType, CompCmd> dtaaraMap = new EnumMap<>(ObjectType.class);
+    dtaaraMap.put(ObjectType.DTAARA, CompCmd.CRTDTAARA);
+    typeToCmdMap.put(SourceType.DTAARA, dtaaraMap);
+
+    /* Source type: DTAQ */
+    Map<ObjectType, CompCmd> dtaqMap = new EnumMap<>(ObjectType.class);
+    dtaqMap.put(ObjectType.DTAQ, CompCmd.CRTDTAQ);
+    typeToCmdMap.put(SourceType.DTAQ, dtaqMap);
 
   }  
 
@@ -1283,7 +1305,6 @@ public class CompilationPattern {
     commandToPatternMap.put(SysCmd.CHGLIBL, ChgLibLPattern);
     commandToPatternMap.put(SysCmd.CHGCURLIB, ChgCurLibPattern);
     /* Bind dir */
-    commandToPatternMap.put(SysCmd.CRTBNDDIR, BndDirPattern);
     commandToPatternMap.put(SysCmd.ADDBNDDIRE, AddBndDirePattern);
     /* Objects */
     commandToPatternMap.put(SysCmd.DLTOBJ, DltObjPattern);
@@ -1293,9 +1314,6 @@ public class CompilationPattern {
     commandToPatternMap.put(SysCmd.RMVDIR, RmvDir_Pattern);
     /* Pase */
     commandToPatternMap.put(SysCmd.QSH, Qsh_Pattern);
-    /* Data */
-    commandToPatternMap.put(SysCmd.CRTDTAARA, CrtDtaAra_Pattern);
-    commandToPatternMap.put(SysCmd.CRTDTAQ, CrtDtaQ_Pattern);
     /* Messages */
     commandToPatternMap.put(SysCmd.CRTMSGF, CrtMsgF_Pattern);
     commandToPatternMap.put(SysCmd.ADDMSGD, AddMsgD_Pattern);
@@ -1337,6 +1355,12 @@ public class CompilationPattern {
     commandToPatternMap.put(CompCmd.CRTMNU, Mnu_Pattern);
     /* QMQRY */
     commandToPatternMap.put(CompCmd.CRTQMQRY, Qmqry_Pattern);
+    /* BNDDIR */
+    commandToPatternMap.put(CompCmd.CRTBNDDIR, BndDirPattern);
+    /* DTAARA */
+    commandToPatternMap.put(CompCmd.CRTDTAARA, CrtDtaAra_Pattern);
+    /* DTAQ */
+    commandToPatternMap.put(CompCmd.CRTDTAQ, CrtDtaQ_Pattern);
   }
 
   /* Return compilation command */
