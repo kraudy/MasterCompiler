@@ -129,6 +129,10 @@ public class Utilities {
       case CRTDTAQ:
         targetKey.put(ParamCmd.DTAQ, targetKey.getObjectName());
         break;
+    
+      case CRTMSGF:
+        targetKey.put(ParamCmd.MSGF, targetKey.getObjectName());
+        break;
 
       default:
         break;

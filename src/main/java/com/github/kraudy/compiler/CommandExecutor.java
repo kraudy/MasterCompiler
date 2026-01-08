@@ -123,7 +123,7 @@ public class CommandExecutor {
 
     /* Delete object without REPLACE = *YES */
   public void forceDeletion(TargetKey key) throws Exception {
-    if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ).contains(key.getObjectTypeEnum())) return;
+    if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF).contains(key.getObjectTypeEnum())) return;
 
     //TODO: For function deletion
     // for this, add method executeStatement that receives a sql string

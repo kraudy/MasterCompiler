@@ -55,9 +55,6 @@ public class CompilationPattern {
     QSH,
 
     // Messages
-    CRTMSGF,
-
-    // Messages
     ADDMSGD, 
 
     // Triggers
@@ -77,7 +74,7 @@ public class CompilationPattern {
   public enum CompCmd implements Command { 
     CRTRPGMOD, CRTSQLRPGI, CRTBNDRPG, CRTRPGPGM, CRTCLMOD, CRTBNDCL, CRTCLPGM, RUNSQLSTM, 
     CRTSRVPGM, CRTDSPF, CRTLF, CRTPRTF, CRTMNU, CRTQMQRY, CRTPF, CRTCMD,
-    CRTBNDDIR, CRTDTAARA, CRTDTAQ
+    CRTBNDDIR, CRTDTAARA, CRTDTAQ, CRTMSGF
     ;
   }
 
@@ -87,7 +84,7 @@ public class CompilationPattern {
 
   public enum SourceType { 
     RPG, RPGLE, SQLRPGLE, CLP, CLLE, SQL, BND, DDS,
-    CMD, MNU, QMQRY, BNDDIR, DTAARA, DTAQ
+    CMD, MNU, QMQRY, BNDDIR, DTAARA, DTAQ, MSGF
     ;
 
     public static SourceType fromString(String value) {
@@ -120,6 +117,8 @@ public class CompilationPattern {
           return DftSrc.QDTAARA.name();
         case DTAQ:
           return DftSrc.QDTAQSRC.name();
+        case MSGF:
+          return DftSrc.QMSGFSRC.name();
         case DDS:
           switch (objectType) {
             case DSPF:
@@ -143,7 +142,7 @@ public class CompilationPattern {
   /* Compiled objects types */
   public enum ObjectType { 
     PGM, SRVPGM, MODULE, TABLE, LF, INDEX, VIEW, ALIAS, PROCEDURE, FUNCTION, TRIGGER, SEQUENCE, PF, DSPF, PRTF,
-    CMD, MNU, QMQRY, DTAARA, DTAQ, BNDDIR
+    CMD, MNU, QMQRY, DTAARA, DTAQ, BNDDIR, MSGF,
     ;
     public String toParam(){
       return "*" + this.name();
@@ -153,7 +152,7 @@ public class CompilationPattern {
   /* Default source files */
   public enum DftSrc { 
     QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC, QPRTFSRC,
-    QCMDSRC, QBNDSRC, QDTAARA, QDTAQSRC
+    QCMDSRC, QBNDSRC, QDTAARA, QDTAQSRC, QMSGFSRC
   }
 
   /* Commands params as enums */
@@ -416,6 +415,11 @@ public class CompilationPattern {
     Map<ObjectType, CompCmd> dtaqMap = new EnumMap<>(ObjectType.class);
     dtaqMap.put(ObjectType.DTAQ, CompCmd.CRTDTAQ);
     typeToCmdMap.put(SourceType.DTAQ, dtaqMap);
+
+    /* Source type: MSGF */
+    Map<ObjectType, CompCmd> msgfMap = new EnumMap<>(ObjectType.class);
+    msgfMap.put(ObjectType.MSGF, CompCmd.CRTMSGF);
+    typeToCmdMap.put(SourceType.MSGF, msgfMap);
 
   }  
 
@@ -1315,7 +1319,6 @@ public class CompilationPattern {
     /* Pase */
     commandToPatternMap.put(SysCmd.QSH, Qsh_Pattern);
     /* Messages */
-    commandToPatternMap.put(SysCmd.CRTMSGF, CrtMsgF_Pattern);
     commandToPatternMap.put(SysCmd.ADDMSGD, AddMsgD_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
@@ -1361,6 +1364,8 @@ public class CompilationPattern {
     commandToPatternMap.put(CompCmd.CRTDTAARA, CrtDtaAra_Pattern);
     /* DTAQ */
     commandToPatternMap.put(CompCmd.CRTDTAQ, CrtDtaQ_Pattern);
+    /* MSGF */
+    commandToPatternMap.put(CompCmd.CRTMSGF, CrtMsgF_Pattern);
   }
 
   /* Return compilation command */

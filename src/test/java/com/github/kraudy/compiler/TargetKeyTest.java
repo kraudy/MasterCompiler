@@ -24,7 +24,7 @@ public class TargetKeyTest {
   }
 
   @Test
-  void testPgmRgpleCommand() {
+  void test_Pgm_Rgple_Command() {
     String cmd = new TargetKey("MYLIB.HELLO.PGM.RPGLE")
       .put(ParamCmd.PGM, "MYLIB/HELLO")
       .put(ParamCmd.SRCSTMF, "/home/sources/HELLO.RPGLE")
@@ -47,6 +47,17 @@ public class TargetKeyTest {
   }
 
   @Test
+  void test_Pgm_Clle_Command() {
+    String cmd = new TargetKey("MYLIB.HELLO.PGM.CLLE")
+      .put(ParamCmd.SRCSTMF, "/home/sources/HELLO.CLLE")
+      .getCommandString();
+
+    assertEquals(
+      "CRTBNDCL PGM(*CURLIB/HELLO) SRCSTMF(''/home/sources/HELLO.CLLE'') " +  
+      "OPTION(*EVENTF) REPLACE(*YES) DBGVIEW(*ALL) TGTCCSID(*JOB)", cmd);
+  }
+
+  @Test
   void test_Pgm_Rgp_Command() {
     String cmd = new TargetKey("MYLIB.HELLO.PGM.RPG")
       .put(ParamCmd.PGM, "MYLIB/HELLO")
@@ -66,7 +77,17 @@ public class TargetKeyTest {
   }
 
   @Test
-  void testPgmSqlRgpleCommand() {
+  void test_Clp_Rgp_Command() {
+    String cmd = new TargetKey("MYLIB.CLPHELLO.PGM.CLP")
+      .put(ParamCmd.SRCFILE, "MYLIB/PRACTICAS")
+      .getCommandString();
+
+    assertEquals(
+      "CRTCLPGM PGM(*CURLIB/CLPHELLO) SRCFILE(MYLIB/PRACTICAS) SRCMBR(CLPHELLO) OPTION(*LSTDBG) GENOPT(*LIST) REPLACE(*YES)", cmd);
+  }
+
+  @Test
+  void test_Pgm_SqlRgple_Command() {
     String cmd = new TargetKey("MYLIB.SQLHELLO.PGM.SQLRPGLE")
       .put(ParamCmd.OBJ, "*LIBL/SQLHELLO")
       .put(ParamCmd.SRCSTMF, "/home/sources/SQLHELLO.SQLRPGLE")
@@ -88,7 +109,7 @@ public class TargetKeyTest {
   }
 
   @Test
-  void testModRgpleCommand() {
+  void test_Mod_Rgple_Command() {
     String cmd = new TargetKey("MYLIB.MODHELLO.MODULE.RPGLE")
       .put(ParamCmd.MODULE, "MYLIB/MODHELLO")
       .put(ParamCmd.SRCSTMF, "/home/sources/MODHELLO.RPGLE")
@@ -105,21 +126,38 @@ public class TargetKeyTest {
   }
 
   @Test
-  void testDspfDdsCommand() {
-    String cmd = new TargetKey("MYLIB.DSPHELLO.DSPF.DDS")
-      .put(ParamCmd.FILE, "MYLIB/DSPHELLO")
-      .put(ParamCmd.SRCFILE, "MYLIB/QDSPFSRC")
-      .put(ParamCmd.SRCMBR, "DSPHELLO")
-      .put(ParamCmd.OPTION, "*EVENTF")
-      .put(ParamCmd.REPLACE, "*YES")
+  void test_Mod_Clle_Command() {
+    String cmd = new TargetKey("MYLIB.MODHELLO.MODULE.CLLE")
+      .put(ParamCmd.SRCSTMF, "/home/sources/MODHELLO.CLLE")
       .getCommandString();
 
     assertEquals(
-      "CRTDSPF FILE(MYLIB/DSPHELLO) SRCFILE(MYLIB/QDSPFSRC) SRCMBR(DSPHELLO) OPTION(*EVENTF) REPLACE(*YES)", cmd);
+      "CRTCLMOD MODULE(*CURLIB/MODHELLO) SRCSTMF(''/home/sources/MODHELLO.CLLE'') " +
+      "OPTION(*EVENTF) REPLACE(*YES) DBGVIEW(*ALL) TGTCCSID(*JOB)", cmd);
   }
 
   @Test
-  void testTableSqlCommand() {
+  void test_Dspf_Dds_Command() {
+    String cmd = new TargetKey("MYLIB.DSPHELLO.DSPF.DDS")
+      .put(ParamCmd.SRCFILE, "MYLIB/QDSPFSRC")
+      .getCommandString();
+
+    assertEquals(
+      "CRTDSPF FILE(*CURLIB/DSPHELLO) SRCFILE(MYLIB/QDSPFSRC) SRCMBR(DSPHELLO) OPTION(*EVENTF) REPLACE(*YES)", cmd);
+  }
+
+  @Test
+  void test_Pf_Dds_Command() {
+    String cmd = new TargetKey("MYLIB.PFHELLO.PF.DDS")
+      .put(ParamCmd.SRCFILE, "QPFSRC")
+      .getCommandString();
+
+    assertEquals(
+      "CRTPF FILE(*CURLIB/PFHELLO) SRCFILE(*LIBL/QPFSRC) SRCMBR(PFHELLO) OPTION(*EVENTF)", cmd);
+  }
+
+  @Test
+  void test_Table_Sql_Command() {
     String cmd = new TargetKey("MYLIB.SQLHELLO.TABLE.SQL")
       .put(ParamCmd.SRCSTMF, "/home/sources/SQLHELLO.SQL")
       .put(ParamCmd.COMMIT, "*NONE")
@@ -133,7 +171,7 @@ public class TargetKeyTest {
   }
 
   @Test
-  void testSrvPgmBndCommand() {
+  void test_SrvPgm_Bnd_Command() {
     String cmd = new TargetKey("MYLIB.SRVHELLO.SRVPGM.BND")
         .put(ParamCmd.SRVPGM, "MYLIB/SRVHELLO")
         .put(ParamCmd.MODULE, "*LIBL/MODHELLO1 *LIBL/MODHELLO2")
@@ -203,7 +241,7 @@ public class TargetKeyTest {
   }
 
   @Test
-  void testResolveSourceCcsidConflicts() {
+  void testResolve_SRCSTMF_TGTCCSID_Conflicts() {
     TargetKey key = new TargetKey("MYLIB.RPGHELLO.pgm.rpgle")
         .put(ParamCmd.SRCSTMF, "/home/sources/HELLO.rpgle")
         .ResolveConflicts();
