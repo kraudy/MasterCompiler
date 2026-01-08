@@ -53,8 +53,14 @@ public class CompilationPattern {
     CHGCURDIR, RMVDIR,
     // PASE
     QSH,
+
     // DATA
     CRTDTAARA,  CRTDTAQ,
+    // Messages
+    CRTMSGF,
+
+    // Messages
+    ADDMSGD, 
     ;
 
     public static SysCmd fromString(String value) {
@@ -126,7 +132,7 @@ public class CompilationPattern {
 
   /* Compiled objects types */
   public enum ObjectType { 
-    PGM, SRVPGM, MODULE, TABLE, LF, INDEX, VIEW, ALIAS, PROCEDURE, FUNCTION, PF, DSPF, PRTF,
+    PGM, SRVPGM, MODULE, TABLE, LF, INDEX, VIEW, ALIAS, PROCEDURE, FUNCTION, TRIGGER, SEQUENCE, PF, DSPF, PRTF,
     CMD, MNU, QMQRY
     ;
     public String toParam(){
@@ -221,8 +227,10 @@ public class CompilationPattern {
     DTAARA, LEN, VALUE, RMTDTAARA, RMTLOCNAME, LCLLOCNAME, MODE, RMTNETID,
 
     // CRTDTAQ
-    MAXLEN, FORCE, SEQ, SENDERID, AUTORCL
+    MAXLEN, FORCE, SEQ, SENDERID, AUTORCL,
 
+    // ADDMSGD
+    MSGID, MSG, SECLVL, SEV, FMT, VALUES, SPCVAL, RANGE, REL, DFT, DFTPGM, DMPLST, ALROPT, LOGPRB,
     ;
 
     /* Convert string to param enum */
@@ -293,7 +301,6 @@ public class CompilationPattern {
 
     // CRTDTAQ
     MAX16MB, MAX2GB, 
-
     ; 
 
     public static ValCmd fromString(String value) {
@@ -358,6 +365,8 @@ public class CompilationPattern {
     sqlMap.put(ObjectType.ALIAS, CompCmd.RUNSQLSTM);
     sqlMap.put(ObjectType.PROCEDURE, CompCmd.RUNSQLSTM);
     sqlMap.put(ObjectType.FUNCTION, CompCmd.RUNSQLSTM);
+    sqlMap.put(ObjectType.TRIGGER, CompCmd.RUNSQLSTM);
+    sqlMap.put(ObjectType.SEQUENCE, CompCmd.RUNSQLSTM);
     typeToCmdMap.put(SourceType.SQL, sqlMap);
 
     /* Source type: DDS */
@@ -479,6 +488,38 @@ public class CompilationPattern {
     ParamCmd.AUTORCL, 
     ParamCmd.TEXT,    
     ParamCmd.AUT
+  );
+
+  // CRTMSGF
+  public static final List<ParamCmd> CrtMsgF_Pattern = Arrays.asList(
+    ParamCmd.MSGF,
+    ParamCmd.TEXT,
+    ParamCmd.SIZE,
+    ParamCmd.AUT,
+    ParamCmd.CCSID
+  );
+
+  // ADDMSGD
+  public static final List<ParamCmd> AddMsgD_Pattern = Arrays.asList(
+    ParamCmd.MSGID,
+    ParamCmd.MSGF,
+    ParamCmd.MSG,
+    ParamCmd.SECLVL,
+    ParamCmd.SEV,
+    ParamCmd.FMT,
+    ParamCmd.TYPE,  
+    ParamCmd.LEN,    
+    ParamCmd.VALUES,
+    ParamCmd.SPCVAL,
+    ParamCmd.RANGE,
+    ParamCmd.REL,
+    ParamCmd.DFT,
+    ParamCmd.DFTPGM,
+    ParamCmd.DMPLST,
+    ParamCmd.LVL,
+    ParamCmd.ALROPT,
+    ParamCmd.LOGPRB,
+    ParamCmd.CCSID 
   );
 
   // OVRDBF
@@ -1252,6 +1293,9 @@ public class CompilationPattern {
     /* Data */
     commandToPatternMap.put(SysCmd.CRTDTAARA, CrtDtaAra_Pattern);
     commandToPatternMap.put(SysCmd.CRTDTAQ, CrtDtaQ_Pattern);
+    /* Messages */
+    commandToPatternMap.put(SysCmd.CRTMSGF, CrtMsgF_Pattern);
+    commandToPatternMap.put(SysCmd.ADDMSGD, AddMsgD_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);

@@ -315,6 +315,7 @@ public class Utilities {
       case FROMMBR:
       case TOSTMF:
       case DIR:
+      case MSG:
         return "''" + value + "''";
     
       case MODULE:
