@@ -61,6 +61,9 @@ public class CompilationPattern {
 
     // Messages
     ADDMSGD, 
+
+    // Triggers
+    //ADDPFTRG
     ;
 
     public static SysCmd fromString(String value) {
@@ -133,7 +136,7 @@ public class CompilationPattern {
   /* Compiled objects types */
   public enum ObjectType { 
     PGM, SRVPGM, MODULE, TABLE, LF, INDEX, VIEW, ALIAS, PROCEDURE, FUNCTION, TRIGGER, SEQUENCE, PF, DSPF, PRTF,
-    CMD, MNU, QMQRY
+    CMD, MNU, QMQRY, DTAARA, DTAQ, BNDDIR
     ;
     public String toParam(){
       return "*" + this.name();

@@ -2,6 +2,7 @@ package com.github.kraudy.compiler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
@@ -93,7 +94,8 @@ public class StreamCompilationIT {
     //masterCompilerTest("rpgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("clsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("dtasrc.yaml", "https://github.com/kraudy/McOnTobi.git");
-    masterCompilerTest("msgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+    //masterCompilerTest("msgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+    masterCompilerTest("sqlsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     
   }
 
@@ -265,6 +267,14 @@ public class StreamCompilationIT {
       // Delete compiled objects in reverse creation order (dependents first)
       for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
         TargetKey key = objectsToDelete.get(i);
+        if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
+          //TODO: use StatementExecution
+          continue;
+        }
+        if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
+          //TODO: use StatementExecution
+          continue;
+        }
         try {
           CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
             .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))

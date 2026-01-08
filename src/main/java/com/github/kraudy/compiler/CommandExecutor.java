@@ -115,13 +115,13 @@ public class CommandExecutor {
     try (Statement cmdStmt = connection.createStatement()) {
       cmdStmt.execute("CALL QSYS2.QCMDEXC('" + commandString + "')");
     } catch (SQLException e) {
-      logger.error("\nCommand failed: " + commandString);
+      logger.error("Command failed: " + commandString);
 
       String joblog = buildJoblogMessagesString(commandTime);
       throw new CompilerException("Command execution failed", e, commandString, commandTime, joblog);  // No target here
     }
 
-    logger.info("\nCommand successful: " + commandString);
+    logger.info("Command successful: " + commandString);
     if(verbose) logger.info(buildJoblogMessagesString(commandTime));
   }
 
@@ -140,7 +140,12 @@ public class CommandExecutor {
 
     /* Delete object without REPLACE = *YES */
   public void forceDeletion(TargetKey key) throws Exception {
+    //TODO: Add bnddir, dtaara, dtaq
     if (!Arrays.asList(ObjectType.PF, ObjectType.LF).contains(key.getObjectTypeEnum())) return;
+
+    //TODO: For function deletion
+    // for this, add method executeStatement that receives a sql string
+    //if (key.getObjectTypeEnum() == ObjectType.FUNCTION) DROP SPECIFIC FUNCTION ISOTODATE;
 
     CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
       .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))

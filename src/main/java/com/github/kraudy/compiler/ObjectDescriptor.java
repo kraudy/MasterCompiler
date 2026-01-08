@@ -8,6 +8,7 @@ import java.sql.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 
@@ -84,6 +85,32 @@ public class ObjectDescriptor {
   }
 
   public void objectExists(TargetKey key) throws SQLException {
+    if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
+      try (Statement stmt = connection.createStatement();
+          ResultSet rs = stmt.executeQuery(
+            "With " +
+            Utilities.CteLibraryList +
+            "SELECT 1 " + 
+            "FROM QSYS2.SYSFUNCS " +
+            "INNER JOIN Libs " +
+            "ON (SPECIFIC_SCHEMA = Libs.Libraries) " +
+            "WHERE SPECIFIC_NAME = '" + key.getObjectName() + "' " +
+            "LIMIT 1")) {
+        if (!rs.next()) {
+          if (verbose) logger.info("Function object not found: " + key.asString());
+          return;  
+        }
+
+        if (verbose) logger.info("Function object found: " + key.asString());
+        key.setObjectExists(true);
+        return;
+      }
+    }
+
+    if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
+      return;
+    }
+
     try (Statement stmt = connection.createStatement();
         ResultSet rs = stmt.executeQuery(
           "Select 1  " +

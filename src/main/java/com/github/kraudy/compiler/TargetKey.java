@@ -17,6 +17,7 @@ import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SourceType;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
+import com.ibm.as400.access.ReturnCodeException;
 
 /*
  * Simple POJO for compilation targets
@@ -347,8 +348,16 @@ public class TargetKey {
       case PF:
       case LF:
       case DSPF:
+      case TABLE:
+      case VIEW:
         return ParamCmd.FILE.toString();
-    
+
+      case PROCEDURE:
+        return ObjectType.PGM.toString();
+
+      case SEQUENCE:
+        return ObjectType.DTAARA.toString();
+
       default:
         break;
     }
@@ -367,7 +376,7 @@ public class TargetKey {
     }
     return this.objectType.name();
   }
-  
+
   public List<TargetKey> getDependedOnBy() {
     return Collections.unmodifiableList(dependedOnBy);
   }
