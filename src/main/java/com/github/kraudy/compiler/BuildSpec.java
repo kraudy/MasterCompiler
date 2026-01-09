@@ -19,6 +19,7 @@ public class BuildSpec {
 
   public String getBaseDirectory() { return baseDirectory; }
   public void setBaseDirectory(String baseDirectory) { this.baseDirectory = baseDirectory; }
+  //TODO: Add getTargetByMap()
 
   /* Global compilation command params */
   @JsonProperty(value = "defaults", required = false)

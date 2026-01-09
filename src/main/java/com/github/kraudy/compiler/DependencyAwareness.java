@@ -102,8 +102,8 @@ public class DependencyAwareness {
         sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
       }
 
-      //TODO: This for could also be the start for source dependency awarenees
       switch (target.getCompilationCommand()) {
+        /* Get srvpgm modules */
         case CRTSRVPGM:
           List<String> modulesList = target.getModulesNameList();
           if (modulesList.isEmpty()) break;
@@ -123,17 +123,22 @@ public class DependencyAwareness {
       
         case CRTBNDRPG:
         case CRTSQLRPGI:
-          //TODO: Scan source for BndDir
+          /*  Scan source for BndDir */
           Matcher m = BNDDIR_PATTERN.matcher(sourceCode);
 
           if (m.find()) {
             String bndDirName = m.group(1).toUpperCase(); // e.g., "SAMPLE"
-            if (verbose) {
-              logger.info("Scanned BNDDIR dep: " + target.asString() +
-                  " uses BNDDIR('" + bndDirName + "') ");
-            }
+            if (bndDirName.isEmpty()) break;
+            TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
+
+            /* Add bnddir as target child */
+            target.addChild(bndDirDep);
+            /* Add target as bnddir father */
+            bndDirDep.addFather(target);
+            if (verbose) logger.info("Scanned BNDDIR dep: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
           }
           break;
+          /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
 
         default:
           break;
