@@ -130,6 +130,8 @@ public class DependencyAwareness {
             String bndDirName = m.group(1).toUpperCase(); // e.g., "SAMPLE"
             if (bndDirName.isEmpty()) break;
             TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
+            if (bndDirDep == null) break;
+            if (!bndDirDep.isBndDir()) break;
 
             /* Add bnddir as target child */
             target.addChild(bndDirDep);

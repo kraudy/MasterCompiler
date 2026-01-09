@@ -102,9 +102,6 @@ public class StreamCompilationIT {
   private void masterCompilerTest(String yamlResourcePath, String gitRepoUrl) throws Exception {
     boolean errorFound = false;
 
-    /* Hold object list to delete */
-    List<TargetKey> objectsToDelete = new ArrayList<>();
-
     String testFolder = currentUser.getHomeDirectory() + "/" + "test_" + System.currentTimeMillis();
 
     BuildSpec spec = null;
@@ -124,9 +121,6 @@ public class StreamCompilationIT {
 
       spec = Utilities.deserializeYaml(remoteYamlFile);
 
-      // Collect for cleanup
-      objectsToDelete.addAll(spec.targets.keySet());
-
       /* Change cur dir to test dir */
       CommandObject chgCurDir = new CommandObject(SysCmd.CHGCURDIR)
         .put(ParamCmd.DIR, testFolder);
@@ -135,7 +129,8 @@ public class StreamCompilationIT {
       /* Run the compiler */
       MasterCompiler compiler = new MasterCompiler(
               system, connection, spec,
-              false, true, true, false, false
+              // dryRun, debug, verbose, clean, diff, noMigrate
+              false, true, true, true, false, false
       );
 
       compiler.build();
@@ -158,18 +153,6 @@ public class StreamCompilationIT {
         commandExecutor.executeCommand(rmvDir);
       } catch (CompilerException e) {
         System.out.println(e.getFullContext());
-      }
-
-      // Delete compiled objects in reverse creation order (dependents first)
-      for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
-        TargetKey key = objectsToDelete.get(i);
-        try {
-          CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
-            .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
-            .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
-
-          commandExecutor.executeCommand(dlt);
-        } catch (Exception ignored) {} // This prevents breaking the loop
       }
     }
 
@@ -210,7 +193,8 @@ public class StreamCompilationIT {
       // FIRST BUILD: Full (diff=false) - creates all objects, syncs timestamps
       MasterCompiler fullCompiler = new MasterCompiler(
         system, connection, spec,
-        false, true, true, false, false  // verbose=true for logs
+        // dryRun, debug, verbose, clean, diff, noMigrate
+        false, true, true, false, false, false  // verbose=true for logs
       );
       fullCompiler.build();
       assertFalse(fullCompiler.foundCompilationError(), "Full build failed");
@@ -235,7 +219,8 @@ public class StreamCompilationIT {
       // SECOND BUILD: Diff mode
       MasterCompiler diffCompiler = new MasterCompiler(
         system, connection, spec,
-        false, true, true, true, false  // diff=true
+        // dryRun, debug, verbose, clean, diff, noMigrate
+        false, true, true, true, true, false  // clean=true, diff=true
       );
       diffCompiler.build();
       errorFound = diffCompiler.foundCompilationError();
@@ -262,26 +247,6 @@ public class StreamCompilationIT {
         commandExecutor.executeCommand(rmvDir);
       } catch (CompilerException e) {
         System.out.println(e.getFullContext());
-      }
-
-      // Delete compiled objects in reverse creation order (dependents first)
-      for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
-        TargetKey key = objectsToDelete.get(i);
-        if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
-          //TODO: use StatementExecution
-          continue;
-        }
-        if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
-          //TODO: use StatementExecution
-          continue;
-        }
-        try {
-          CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
-            .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
-            .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
-
-          commandExecutor.executeCommand(dlt);
-        } catch (Exception ignored) {} // This prevents breaking the loop
       }
     }
   }

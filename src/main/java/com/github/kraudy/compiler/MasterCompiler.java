@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,6 +44,7 @@ public class MasterCompiler{
   private boolean dryRun = false;   // Compile commands without executing 
   private boolean debug = false;    // Debug flag
   private boolean verbose = false;  // Verbose output flag
+  private boolean clean = false;  // Delete spec objects after compilation
   private boolean diff = false;     // Diff build flag
   private boolean noMigrate = false;  // Source migration
 
@@ -67,7 +69,8 @@ public class MasterCompiler{
 
   }
 
-  public MasterCompiler(AS400 system, Connection connection, BuildSpec globalSpec, boolean dryRun, boolean debug, boolean verbose, boolean diff, boolean noMigrate) throws Exception {
+  public MasterCompiler(AS400 system, Connection connection, BuildSpec globalSpec, boolean dryRun, boolean debug, 
+        boolean verbose, boolean clean, boolean diff, boolean noMigrate) throws Exception {
     this(system, connection);
 
     /* Set params */
@@ -75,6 +78,7 @@ public class MasterCompiler{
     this.dryRun = dryRun;
     this.debug = debug;
     this.verbose = verbose;
+    this.clean = clean;
     this.diff = diff;
     this.noMigrate = noMigrate;
   }
@@ -146,9 +150,12 @@ public class MasterCompiler{
       logger.error("Unhandled Exception. Fail loudly", e);
 
     } finally {
+      if (clean) {
+        if (verbose) logger.info("Cleaning built objects");
+        clenBuiltObjects();
+      }
       /* Show chain of commands */
-      if (verbose) logger.info("\nChain of commands: {}", commandExec.getExecutionChain());
-
+      if (verbose) logger.info("Chain of commands: {}", commandExec.getExecutionChain());
     }
 
   }
@@ -263,6 +270,30 @@ public class MasterCompiler{
     return this.skippedCount;
   }
 
+  private void clenBuiltObjects(){
+    List<TargetKey> objectsToDelete = new ArrayList<>();
+    objectsToDelete.addAll(globalSpec.targets.keySet());
+    // Delete compiled objects in reverse creation order (dependents first)
+    for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
+      TargetKey key = objectsToDelete.get(i);
+      if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
+      //TODO: use StatementExecution
+      continue;
+      }
+      if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
+        //TODO: use StatementExecution
+        continue;
+      }
+      try {
+        CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
+          .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
+          .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
+
+        commandExec.executeCommand(dlt);
+      } catch (Exception ignored) {} // This prevents breaking the loop
+    }
+  }
+
   /* Update target's fathers source edit timestamp so they can be recompiled */
   private void updateFathersSourceTimeStamps(TargetKey childKey){
 
@@ -346,6 +377,7 @@ public class MasterCompiler{
             parser.isDryRun(),
             parser.isDebug(),
             parser.isVerbose(),
+            parser.Clean(),
             parser.isDiff(),
             parser.noMigrate()
         );

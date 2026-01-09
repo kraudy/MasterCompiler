@@ -26,12 +26,14 @@ public class ArgParser {
 
     validOptions.put("v", "verbose");
 
+    validOptions.put("c", "clean"); // Delete all created objects
+
     validOptions.put("diff", "diff");
 
   }
 
   private static final List<String> booleanOptions = Arrays.asList(
-    "dryRun", "debug", "verbose", "diff", "noMigrate"
+    "dryRun", "debug", "verbose", "clean", "diff", "noMigrate"
   );
 
   public ArgParser(String[] args) {
@@ -121,6 +123,10 @@ public class ArgParser {
 
   public boolean isVerbose() {
     return (boolean) options.getOrDefault("verbose", false);
+  }
+
+  public boolean Clean() {
+    return (boolean) options.getOrDefault("clean", false);
   }
 
   public boolean isDiff() {

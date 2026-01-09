@@ -177,6 +177,10 @@ public class TargetKey {
     return false;
   }
 
+  public boolean isBndDir() {
+    return this.objectType == ObjectType.BNDDIR;
+  }
+
   public boolean isModule() {
     return this.objectType == ObjectType.MODULE;
   }

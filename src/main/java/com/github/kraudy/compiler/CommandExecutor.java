@@ -45,7 +45,14 @@ public class CommandExecutor {
   /* Executes system commands */
   public void executeCommand(CommandObject command) throws Exception{
     Timestamp commandTime = getCurrentTime();
-    String commandString = (verbose) ? command.getCommandString() : command.getCommandStringWithoutSummary();
+    String commandString = "";
+    if (debug) {
+      /* Show each param's change history */
+      commandString = command.getCommandString();
+    } else {
+      commandString = command.getCommandStringWithoutSummary();
+    }
+
 
     try {
       executeCommand(commandString, commandTime);
@@ -66,7 +73,13 @@ public class CommandExecutor {
     if (key.objectExists()) forceDeletion(key);
 
     Timestamp commandTime = getCurrentTime();
-    String commandString = (verbose) ? key.getCommandString() : key.getCommandStringWithoutSummary();
+    String commandString = "";
+    if (debug) {
+      /* Show each param's change history */
+      commandString = key.getCommandString();
+    } else {
+      commandString = key.getCommandStringWithoutSummary();
+    }
 
     try {
       executeCommand(commandString, commandTime);
