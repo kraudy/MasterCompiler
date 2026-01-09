@@ -383,8 +383,16 @@ public class TargetKey {
     return this.objectType.name();
   }
 
+  public Integer getChildsCount() {
+    return getChildsList().size();
+  }
+
   public List<TargetKey> getChildsList() {
     return Collections.unmodifiableList(childs);
+  }
+
+  public Integer getFathersCount() {
+    return getFathersList().size();
   }
 
   public List<TargetKey> getFathersList() {

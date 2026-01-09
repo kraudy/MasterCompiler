@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.github.kraudy.compiler.BuildSpec.TargetSpec;
 import com.github.kraudy.compiler.CompilationPattern.Command;
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
@@ -267,6 +269,18 @@ public class Utilities {
       if (spec.targets == null || spec.targets.isEmpty()) {
         throw new IllegalArgumentException("YAML must define at least one target in 'targets' section.");
       }
+
+      /* Set specific target params */
+      for (Map.Entry<TargetKey, TargetSpec> entry : spec.targets.entrySet()) {
+        TargetKey key = entry.getKey();
+        BuildSpec.TargetSpec targetSpec = entry.getValue();
+
+        key.putAll(targetSpec.params);
+        
+      }
+
+      /* Set Targets list */
+      spec.setTargetsList(spec.targets.keySet());
 
     } catch (MismatchedInputException e) {
         throw new RuntimeException("Invalid or empty YAML content: " + e.getMessage(), e);

@@ -10,16 +10,34 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /*  
  *  Commmands patterns to be extracted from the build spec (YAML file )
  */
 public class BuildSpec {
   private String baseDirectory;  // Absolute path to the directory containing the YAML
+  private List<TargetKey> targetsList = new ArrayList<>();
 
   public String getBaseDirectory() { return baseDirectory; }
   public void setBaseDirectory(String baseDirectory) { this.baseDirectory = baseDirectory; }
   //TODO: Add getTargetByMap()
+  public void setTargetsList(Set<TargetKey> targetsSet) { this.targetsList.addAll(targetsSet);}
+  public List<TargetKey> getTargetsList() { return this.targetsList;}
+
+  public TargetKey getTargetKey(TargetKey key){
+    if (!contains(key)) return null;
+    int index = targetsList.indexOf(key);
+    
+    if (index == -1) return null;
+    
+    return targetsList.get(index);
+  }
+
+  public boolean contains(TargetKey key){
+    if (this.targetsList.contains(key)) return true;
+    return false;
+  }
 
   /* Global compilation command params */
   @JsonProperty(value = "defaults", required = false)

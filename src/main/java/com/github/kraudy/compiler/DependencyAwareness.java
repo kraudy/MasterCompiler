@@ -80,8 +80,13 @@ public class DependencyAwareness {
 
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
+
+      if (verbose) logger.info("Scannig sources: " + target.asString());
       /* If no stream file, continue, could try to migrate  */
-      if (!target.containsStreamFile()) continue;
+      if (!target.containsStreamFile()) {
+        if (verbose) logger.info("Target does not contains stream file to scan");
+        continue;
+      }
 
       /* Relative source path */
       String relPath = target.getStreamFile(); 

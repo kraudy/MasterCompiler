@@ -146,7 +146,7 @@
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
-              <excludedGroups>heavy,diff</excludedGroups>  <!-- Exclude the heavy one -->
+              <excludedGroups>heavy,diff,deps</excludedGroups>  <!-- Exclude the others -->
             </configuration>
           </plugin>
         </plugins>
@@ -160,7 +160,7 @@
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
-              <excludedGroups>fast,diff</excludedGroups>  <!-- Exclude the light one -->
+              <excludedGroups>fast,diff,deps</excludedGroups>  <!-- Exclude the others -->
             </configuration>
           </plugin>
         </plugins>
@@ -174,7 +174,21 @@
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
-              <excludedGroups>fast,heavy</excludedGroups>  <!-- Exclude the other two -->
+              <excludedGroups>fast,heavy,deps</excludedGroups>  <!-- Exclude the others -->
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <profile>
+      <id>integration-deps</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <excludedGroups>fast,heavy,diff</excludedGroups>  <!-- Exclude the others -->
             </configuration>
           </plugin>
         </plugins>

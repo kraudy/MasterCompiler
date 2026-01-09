@@ -2,6 +2,7 @@ package com.github.kraudy.compiler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.github.kraudy.compiler.BuildSpec.TargetSpec;
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
@@ -158,6 +159,61 @@ public class StreamCompilationIT {
 
     assertFalse(errorFound, "Integration Test compilation failed");
 
+  }
+
+  @Test
+  @Tag("deps")
+  void test_Deps_Build() throws Exception {
+
+    String testFolder = currentUser.getHomeDirectory() + "/test_" + System.currentTimeMillis();
+
+    BuildSpec spec = null;
+
+    try {
+      // Clone repo
+      System.out.println("Cloning repo for deps test: https://github.com/kraudy/McOnTobi.git");
+      CommandObject gitClone = new CommandObject(SysCmd.QSH)
+          .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/git clone https://github.com/kraudy/McOnTobi.git " + testFolder);
+      commandExecutor.executeCommand(gitClone);
+
+      // Load spec
+      String remoteYamlPath = testFolder + "/art200.yaml";
+      IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
+      spec = Utilities.deserializeYaml(remoteYamlFile);
+
+      // CHGCURDIR to repo root
+      CommandObject chgCurDir = new CommandObject(SysCmd.CHGCURDIR)
+          .put(ParamCmd.DIR, testFolder);
+      commandExecutor.executeCommand(chgCurDir);
+
+      DependencyAwareness depAwareness = new DependencyAwareness(system, true, true);
+
+      depAwareness.detectDependencies(spec);
+
+      TargetKey specTest = spec.getTargetKey(new TargetKey("CURLIB.FAM301.MODULE.RPGLE"));
+      assertNotNull(specTest, "Deps target should not be null");
+      assertEquals(3, specTest.getChildsCount(), "Childs of target " + specTest.asString() + " should be 3");
+
+      // ASSERTIONS: count dependencies
+
+    } catch (CompilerException e) {
+      System.out.println(e.getFullContext());
+    } finally {
+      /* Set cur dir back to free test dir */
+      CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
+        .put(ParamCmd.DIR, currentUser.getHomeDirectory());
+      commandExecutor.executeCommand(chgHome);
+
+      try {
+        CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
+          .put(ParamCmd.DIR, testFolder)
+          .put(ParamCmd.SUBTREE, ValCmd.ALL);
+
+        commandExecutor.executeCommand(rmvDir);
+      } catch (CompilerException e) {
+        System.out.println(e.getFullContext());
+      }
+    }
   }
 
   @Test
