@@ -242,7 +242,7 @@ public class StreamCompilationIT {
       assertFalse(errorFound, "Diff build failed");
 
       // ASSERTIONS: Only changed targets rebuilt, others skipped
-      int expectedRebuilt = changedRelativePaths.size();  // Assuming one target per file
+      int expectedRebuilt = changedRelativePaths.size() + 1;  // Add one for bnddir build
       assertEquals(expectedRebuilt, diffCompiler.getBuiltCount(), "Diff build should rebuild only changed sources");
       assertEquals(totalTargets - expectedRebuilt, diffCompiler.getSkippedCount(), "Diff build should skip unchanged");
 

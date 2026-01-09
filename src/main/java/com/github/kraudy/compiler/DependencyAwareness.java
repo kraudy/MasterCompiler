@@ -39,9 +39,16 @@ public class DependencyAwareness {
   private static final Pattern BNDDIR_PATTERN = Pattern.compile(
       "\\bBNDDIR\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
 
-  // Pattern for fixed-format F-spec file name (columns 7-16, case-insensitive)
+  /* Fixed-format F-spec: strict column logic
+   * - Exactly 5 characters (usually blanks) before the F (column 6)
+   * - F/f in column 6
+   * - Capture up to 10 characters for the file name (columns 7-16)
+   */
   private static final Pattern FIXED_F_SPEC = Pattern.compile(
-      "^\\s*[fF]\\s*([A-Z0-9$#@_]{0,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
+      //"^.{5}[fF](.{0,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
+      "^.{5}[fF](.{10})[IOUBC]", Pattern.CASE_INSENSITIVE);
+      //"^.{5}[fF]\\s*([A-Z0-9$#@_]{1,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
+      //"^.{5}[fF]([A-Z0-9$#@_]{1,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
 
   // Pattern for free-format DCL-F (captures the file name, possibly qualified)
   private static final Pattern FREE_DCL_F = Pattern.compile(
@@ -76,7 +83,9 @@ public class DependencyAwareness {
       /* If no stream file, continue, could try to migrate  */
       if (!target.containsStreamFile()) continue;
 
-      String relPath = target.getStreamFile();  // e.g., "QRPGLESRC/ADDNUM.RPGLE"
+      /* Relative source path */
+      String relPath = target.getStreamFile(); 
+      /* We need the base dir because IFSFile does not seems to work with curdir relative paths */
       String baseDir = globalSpec.getBaseDirectory();
       if (baseDir == null) throw new RuntimeException("Base directory not set in BuildSpec");
 
@@ -104,8 +113,10 @@ public class DependencyAwareness {
             if (modDep == null) continue;
             if (!modDep.isModule()) continue;
 
+             /* Add module dependency to SrvPgm */
+            target.addChild(modDep);
             /* Add SrvPgm dependency to module */
-            modDep.addDependedOnBy(target);
+            modDep.addFather(target);
             if (verbose) logger.info("Dependency: " + target.asString() + " depends on " + modDep.asString());
           }
           break;
@@ -141,12 +152,11 @@ public class DependencyAwareness {
             while (scanner.hasNextLine()) {
               String line = scanner.nextLine();
               Matcher fixedMatcher = FIXED_F_SPEC.matcher(line);
-              if (fixedMatcher.find()) {
-                String fileName = fixedMatcher.group(1).trim().toUpperCase();
-                if (!fileName.isEmpty()) {
-                  depFileNames.add(fileName);
-                }
-              }
+              if (!fixedMatcher.find())  continue;
+              String fileName = fixedMatcher.group(1).trim().toUpperCase();
+              //TODO: Check for /n or /t characters
+              if (fileName.isEmpty()) continue;
+              depFileNames.add(fileName);
             }
           }
 
@@ -174,7 +184,10 @@ public class DependencyAwareness {
               continue;
             }
             if (verbose) logger.info("File dependency: " + target.asString() +" depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
-            fileKey.addDependedOnBy(target);
+            /* Files are child of Target */
+            target.addChild(fileKey);
+            /* Target is father of files */
+            fileKey.addFather(target);
           }
 
           break;

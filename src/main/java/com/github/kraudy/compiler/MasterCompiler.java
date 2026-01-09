@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
@@ -36,7 +37,7 @@ public class MasterCompiler{
   private Migrator migrator;
   private ObjectDescriptor odes;
   private SourceDescriptor sourceDes;
-  private DependencyAwareness specDep;
+  private DependencyAwareness depAwareness;
 
   private BuildSpec globalSpec;     // global build spec
   private boolean dryRun = false;   // Compile commands without executing 
@@ -87,7 +88,7 @@ public class MasterCompiler{
     if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
 
     /* Init dependency awareness */
-    if (diff) specDep = new DependencyAwareness(system, debug, verbose);
+    if (diff) depAwareness = new DependencyAwareness(system, debug, verbose);
 
 
     /* Init source descriptor */
@@ -105,7 +106,7 @@ public class MasterCompiler{
 
       if(verbose) logger.info(showLibraryList());
 
-      if (diff) specDep.detectDependencies(globalSpec);
+      if (diff) depAwareness.detectDependencies(globalSpec);
 
       /* Build each target */
       buildTargets(globalSpec.targets);
@@ -166,6 +167,11 @@ public class MasterCompiler{
           if (verbose) logger.info("Skipping unchanged target: " + key.asString() + key.getTimestmaps());
           continue; 
         }
+        if (key.isChild()) {
+          /* Since child changed, fathers must be recompiled */
+          updateFathersSourceTimeStamps(key);
+        }
+        
       }
 
       this.builtCount++;
@@ -255,6 +261,31 @@ public class MasterCompiler{
 
   public int getSkippedCount() {
     return this.skippedCount;
+  }
+
+  /* Update target's fathers source edit timestamp so they can be recompiled */
+  private void updateFathersSourceTimeStamps(TargetKey childKey){
+
+    logger.info("Updating fathers source timestamp of child object (" + childKey.asString() + ")");
+
+    for(TargetKey fatherKey: childKey.getFathersList()){
+      /* if already updated, omit */
+      if (fatherKey.needsRebuild()) continue;
+      //TODO: Check lastSourceEdit and lastBuild
+      String relativePath = fatherKey.getStreamFile();
+      if (relativePath == null) {
+        //TODO: If needed, the update effect could be simultated of forced chaning las edit variable
+        logger.info("Father object (" + fatherKey.asString() + ") has not streamfile path for update");
+        continue;
+      }
+      /* use touch to update source stream file. bnddir, dtaara and dtaq have no source file*/
+      CommandObject touch = new CommandObject(SysCmd.QSH)
+            .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/touch " + globalSpec.getBaseDirectory() + relativePath);
+      
+      try {
+        commandExec.executeCommand(touch);
+      } catch (Exception ignore) {} // Omit exeption to not break for.
+    }
   }
 
   private String showLibraryList() throws SQLException{

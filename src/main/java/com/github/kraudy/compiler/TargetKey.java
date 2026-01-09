@@ -42,7 +42,8 @@ public class TargetKey {
   private boolean isOpm;               // Is this key opm?
   private boolean objectExists = false;        // Does the compiled object exists?
 
-  private final List<TargetKey> dependedOnBy = new ArrayList<>(); // Who depends on me (rebuild if I change)
+  private final List<TargetKey> childs = new ArrayList<>(); // List of child targets
+  private final List<TargetKey> fathers = new ArrayList<>(); // List of fathers targets
 
   public TargetKey(String key) {
     String[] parts = key.split("\\.");
@@ -188,6 +189,7 @@ public class TargetKey {
     return this.objectType == ObjectType.SRVPGM;
   }
 
+  /* Used for diff build */
   public boolean needsRebuild() {
     /* If no timestamp, rebuild */
     if (this.lastSourceEdit == null || this.lastBuild == null) {
@@ -377,17 +379,31 @@ public class TargetKey {
     return this.objectType.name();
   }
 
-  public List<TargetKey> getDependedOnBy() {
-    return Collections.unmodifiableList(dependedOnBy);
+  public List<TargetKey> getChildsList() {
+    return Collections.unmodifiableList(childs);
   }
 
-  public boolean isDependedOn() {
-    return !this.dependedOnBy.isEmpty();
+  public List<TargetKey> getFathersList() {
+    return Collections.unmodifiableList(fathers);
   }
 
-  public void addDependedOnBy(TargetKey dependent) {
-    if (dependent != null && !dependedOnBy.contains(dependent)) {
-      dependedOnBy.add(dependent);
+  public boolean isChild() {
+    return !this.fathers.isEmpty();
+  }
+
+  public boolean isFather() {
+    return !this.childs.isEmpty();
+  }
+
+  public void addChild(TargetKey child) {
+    if (child != null && !childs.contains(child)) {
+      childs.add(child);
+    }
+  }
+
+  public void addFather(TargetKey father) {
+    if (father != null && !fathers.contains(father)) {
+      fathers.add(father);
     }
   }
 
