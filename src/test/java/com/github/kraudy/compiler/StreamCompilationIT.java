@@ -177,7 +177,7 @@ public class StreamCompilationIT {
       commandExecutor.executeCommand(gitClone);
 
       // Load spec
-      String remoteYamlPath = testFolder + "/art200.yaml";
+      String remoteYamlPath = testFolder + "/test_deps.yaml";
       IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
       spec = Utilities.deserializeYaml(remoteYamlFile);
 
@@ -190,9 +190,17 @@ public class StreamCompilationIT {
 
       depAwareness.detectDependencies(spec);
 
-      TargetKey specTest = spec.getTargetKey(new TargetKey("CURLIB.FAM301.MODULE.RPGLE"));
-      assertNotNull(specTest, "Deps target should not be null");
-      assertEquals(3, specTest.getChildsCount(), "Childs of target " + specTest.asString() + " should be 3");
+      TargetKey depsFAM301 = spec.getTargetKey(new TargetKey("CURLIB.FAM301.MODULE.RPGLE"));
+      assertNotNull(depsFAM301, "Deps target should not be null");
+      assertEquals(3, depsFAM301.getChildsCount(), "Childs of target " + depsFAM301.asString() + " should be 3");
+
+      TargetKey depsFAM300 = spec.getTargetKey(new TargetKey("CURLIB.FAM300.MODULE.RPGLE"));
+      assertNotNull(depsFAM300, "Deps target should not be null");
+      assertEquals(1, depsFAM300.getChildsCount(), "Childs of target " + depsFAM300.asString() + " should be 1");
+
+      TargetKey depsART200 = spec.getTargetKey(new TargetKey("CURLIB.ART200.PGM.SQLRPGLE"));
+      assertNotNull(depsART200, "Deps target should not be null");
+      assertEquals(3, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 3");
 
       // ASSERTIONS: count dependencies
 

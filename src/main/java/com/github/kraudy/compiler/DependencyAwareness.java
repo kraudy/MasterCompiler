@@ -31,6 +31,7 @@ import com.ibm.as400.access.IFSFileInputStream;
 /*
  * Inffer object compilation 
  * We need dependency awareness for diff build
+ * For a dependency to be considered, it must be in the spec file, otherwise it is ignored.
  */
 public class DependencyAwareness {
   private static final Logger logger = LoggerFactory.getLogger(DependencyAwareness.class);
@@ -192,7 +193,7 @@ public class DependencyAwareness {
           for (String depFileName : depFileNames) {
             TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
             if (fileKey == null || !fileKey.isFile()) {
-              if (verbose) logger.info("Referenced file not a build target: " + depFileName + " (in " + target.asString() + ")");
+              if (verbose) logger.info("Referenced file not a target in the spec, ignored: " + depFileName + " (in " + target.asString() + ")");
               continue;
             }
             if (verbose) logger.info("File dependency: " + target.asString() +" depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
