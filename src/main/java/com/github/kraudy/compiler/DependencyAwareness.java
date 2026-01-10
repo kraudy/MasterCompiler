@@ -60,6 +60,14 @@ public class DependencyAwareness {
       "(FROM|JOIN|INTO|UPDATE|DELETE FROM|INSERT INTO)\\s+([\\w$#@_./]+)",
       Pattern.CASE_INSENSITIVE);
 
+  // Pattern for REF(filename) in DDS (for PF)
+  private static final Pattern DDS_REF_PATTERN = Pattern.compile(
+      "\\bREF\\s*\\(\\s*([A-Z0-9$#@_]{1,10})\\s*\\)", Pattern.CASE_INSENSITIVE);
+  
+  // Pattern for PFILE(basepf) in DDS (for LF)
+  private static final Pattern DDS_PFILE_PATTERN = Pattern.compile(
+      "\\bPFILE\\s*\\(\\s*([A-Z0-9$#@_]{1,10})\\s*\\)", Pattern.CASE_INSENSITIVE);
+
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
@@ -209,12 +217,65 @@ public class DependencyAwareness {
           break;
       }
 
-      //TODO: Another switch for files
+      /* Get PF and LF dependencies */
       switch (target.getCompilationCommand()) {
         case CRTLF:
+          Set<String> basePfNames = new HashSet<>();
+
+          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+            while (scanner.hasNextLine()) {
+              String line = scanner.nextLine();
+              Matcher pfileMatcher = DDS_PFILE_PATTERN.matcher(line);
+              while (pfileMatcher.find()) {
+                String basePfName = pfileMatcher.group(1).trim().toUpperCase();
+                if (!basePfName.isEmpty()) {
+                  basePfNames.add(basePfName);
+                }
+              }
+            }
+          }
+
+          for (String basePfName : basePfNames) {
+            TargetKey basePfKey = keyLookup.getOrDefault(basePfName + "." + ParamCmd.FILE.name(), null);
+            if (basePfKey == null || !basePfKey.isFile()) {
+              if (verbose) logger.info("Base PFILE not a build target: " + basePfName + " (in " + target.asString() + ")");
+              continue;
+            }
+            if (verbose) logger.info("PFILE dependency: " + target.asString() + " depends on base PF " + basePfKey.asString() + " (PFILE(" + basePfName + "))");
+            /* Files are child of Target */
+            target.addChild(basePfKey);
+            /* Target is father of files */
+            basePfKey.addFather(target);
+          }
           break;
       
         case CRTPF:
+          Set<String> refFileNames = new HashSet<>();
+
+          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+            while (scanner.hasNextLine()) {
+              String line = scanner.nextLine();
+              Matcher refMatcher = DDS_REF_PATTERN.matcher(line);
+              while (refMatcher.find()) {
+                String refFileName = refMatcher.group(1).trim().toUpperCase();
+                if (refFileName.isEmpty()) continue;
+                refFileNames.add(refFileName);
+              }
+            }
+          }
+
+          for (String refFileName : refFileNames) {
+            TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
+            if (refFileKey == null || !refFileKey.isFile()) {
+              if (verbose) logger.info("Referenced REF file not a build target: " + refFileName + " (in " + target.asString() + ")");
+              continue;
+            }
+            if (verbose) logger.info("REF dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REF(" + refFileName + "))");
+            /* Files are child of Target */
+            target.addChild(refFileKey);
+            /* Target is father of files */
+            refFileKey.addFather(target);
+          }
           break;
 
         default:

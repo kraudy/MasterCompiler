@@ -190,6 +190,7 @@ public class StreamCompilationIT {
 
       depAwareness.detectDependencies(spec);
 
+      /* Validate F spec fixed format */
       TargetKey depsFAM301 = spec.getTargetKey(new TargetKey("CURLIB.FAM301.MODULE.RPGLE"));
       assertNotNull(depsFAM301, "Deps target should not be null");
       assertEquals(3, depsFAM301.getChildsCount(), "Childs of target " + depsFAM301.asString() + " should be 3");
@@ -201,6 +202,33 @@ public class StreamCompilationIT {
       TargetKey depsART200 = spec.getTargetKey(new TargetKey("CURLIB.ART200.PGM.SQLRPGLE"));
       assertNotNull(depsART200, "Deps target should not be null");
       assertEquals(3, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 3");
+
+      /* Validate PF REF file */
+      TargetKey depsVATDEF = spec.getTargetKey(new TargetKey("CURLIB.VATDEF.PF.DDS"));
+      assertNotNull(depsVATDEF, "Deps target should not be null");
+      assertEquals(1, depsVATDEF.getChildsCount(), "Childs of target " + depsVATDEF.asString() + " should be 1");
+
+      TargetKey depsARTICLE = spec.getTargetKey(new TargetKey("CURLIB.ARTICLE.PF.DDS"));
+      assertNotNull(depsARTICLE, "Deps target should not be null");
+      assertEquals(1, depsARTICLE.getChildsCount(), "Childs of target " + depsARTICLE.asString() + " should be 1");
+
+      TargetKey depsFAMILLY = spec.getTargetKey(new TargetKey("CURLIB.FAMILLY.PF.DDS"));
+      assertNotNull(depsFAMILLY, "Deps target should not be null");
+      assertEquals(1, depsFAMILLY.getChildsCount(), "Childs of target " + depsFAMILLY.asString() + " should be 1");
+
+      /* Validate LF PFILE dependency */
+      TargetKey depsARTICLE1 = spec.getTargetKey(new TargetKey("CURLIB.ARTICLE1.LF.DDS"));
+      assertNotNull(depsARTICLE1, "Deps target should not be null");
+      assertEquals(1, depsARTICLE1.getChildsCount(), "Childs of target " + depsARTICLE1.asString() + " should be 1");
+
+      TargetKey depsARTICLE2 = spec.getTargetKey(new TargetKey("CURLIB.ARTICLE2.LF.DDS"));
+      assertNotNull(depsARTICLE2, "Deps target should not be null");
+      assertEquals(1, depsARTICLE2.getChildsCount(), "Childs of target " + depsARTICLE2.asString() + " should be 1");
+
+      TargetKey depsFAMILL1 = spec.getTargetKey(new TargetKey("CURLIB.FAMILL1.LF.DDS"));
+      assertNotNull(depsFAMILL1, "Deps target should not be null");
+      assertEquals(1, depsFAMILL1.getChildsCount(), "Childs of target " + depsFAMILL1.asString() + " should be 1");
+
 
       // ASSERTIONS: count dependencies
 
