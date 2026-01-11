@@ -70,7 +70,12 @@ public class CommandExecutor {
   /* Executes targets compilation commands */
   public void executeCommand(TargetKey key) throws Exception{
     /* If object exists and no REPLACE options exist, force delete */
-    if (key.objectExists()) forceDeletion(key);
+    if (key.objectExists()) {
+      /* Delete object without REPLACE = *YES */
+      if (Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF, ObjectType.TABLE).contains(key.getObjectTypeEnum())){
+        deleteObject(key);
+      }
+    }
 
     Timestamp commandTime = getCurrentTime();
     String commandString = "";
@@ -161,9 +166,7 @@ public class CommandExecutor {
     return currentTime;
   }
 
-    /* Delete object without REPLACE = *YES */
-  public void forceDeletion(TargetKey key) throws Exception {
-    if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF, ObjectType.TABLE).contains(key.getObjectTypeEnum())) return;
+  public void deleteObject(TargetKey key) throws Exception {
 
     if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
       executeStatement("DROP SPECIFIC FUNCTION " + key.getLibrary() + "." + key.getObjectName());
@@ -177,10 +180,7 @@ public class CommandExecutor {
       executeStatement("DROP TRIGGER " + key.getLibrary() + "." + key.getObjectName());
     }
 
-    if (key.getObjectTypeEnum() == ObjectType.TABLE) {
-      executeStatement("DROP TABLE " + key.getLibrary() + "." + key.getObjectName());
-    }
-
+    /* This also finds procedures which are of type PGM, and tables of type FILE */
     CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
       .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
       .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));

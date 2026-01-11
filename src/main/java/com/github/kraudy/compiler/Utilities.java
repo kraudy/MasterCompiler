@@ -83,6 +83,7 @@ public class Utilities {
       case CRTDSPF:
       case CRTPF:
       case CRTLF:
+      case CRTPRTF:
         targetKey.put(ParamCmd.FILE, targetKey.getQualifiedObject())
           .put(ParamCmd.FILE, targetKey.getQualifiedObject(ValCmd.CURLIB));
         break;
@@ -312,9 +313,10 @@ public class Utilities {
     if (node.isArray()) {
         List<String> elements = new ArrayList<>();
         node.elements().forEachRemaining(child -> {
-            if (!child.isNull()) {
-                elements.add(child.asText());
-            }
+            if (child.isNull()) return;
+            /* Try to get ValCmd from node */
+            try {  elements.add(ValCmd.fromString(child.asText()).toString()); }
+            catch (Exception ignored) { elements.add(child.asText()); }
         });
         return String.join(" ", elements).trim(); // Space sparated list
     }

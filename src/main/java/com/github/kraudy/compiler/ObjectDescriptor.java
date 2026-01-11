@@ -151,6 +151,7 @@ public class ObjectDescriptor {
       }
     }
 
+    /* This also finds procedures which are of type PGM */
     try (Statement stmt = connection.createStatement();
         ResultSet rs = stmt.executeQuery(
           "Select 1  " +

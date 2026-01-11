@@ -270,23 +270,7 @@ public class MasterCompiler{
     for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
       TargetKey key = objectsToDelete.get(i);
       try {
-        if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
-          commandExec.executeStatement("DROP SPECIFIC FUNCTION " + key.getLibrary() + "." + key.getObjectName());
-        }
-
-        if (key.getObjectTypeEnum() == ObjectType.INDEX) {
-          commandExec.executeStatement("DROP INDEX " + key.getLibrary() + "." + key.getObjectName());
-        }
-
-        if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
-          commandExec.executeStatement("DROP TRIGGER " + key.getLibrary() + "." + key.getObjectName());
-        }
-
-        CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
-          .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
-          .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
-
-        commandExec.executeCommand(dlt);
+        commandExec.deleteObject(key);
       } catch (Exception ignored) {} // This prevents breaking the loop
     }
   }

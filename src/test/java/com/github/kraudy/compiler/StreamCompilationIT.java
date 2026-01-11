@@ -102,6 +102,10 @@ public class StreamCompilationIT {
     //masterCompilerTest("apisql.yaml", "https://github.com/kraudy/McOnSJLennon");
     //masterCompilerTest("5250_Subfile.yaml", "https://github.com/kraudy/McOnSJLennon");
     //masterCompilerTest("base36.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("dateadj.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("date_udf.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("grp_job.yaml", "https://github.com/kraudy/McOnSJLennon");
+    masterCompilerTest("pgm_refs.yaml", "https://github.com/kraudy/McOnSJLennon");
     
   }
 

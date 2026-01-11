@@ -198,7 +198,8 @@ public class CompilationPattern {
     HOLD, SAVE, OUTPTY, USRDTA, SPLFOWN, USRDFNOPT, USRDFNDTA, USRDFNOBJ, TOSTMF, WSCST,
 
     // CRTCMD
-    CMD, REXSRCFILE, REXSRCMBR, REXCMDENV, REXEXITPGM, THDSAFE,
+    CMD, REXSRCFILE, REXSRCMBR, REXCMDENV, REXEXITPGM, THDSAFE, MLTTHDACN, VLDCKR, ALLOW, ALWLMTUSR, MAXPOS, PMTFILE,  
+    HLPSHELF, HLPPNLGRP, HLPID, HLPSCHIDX, PMTOVRPGM, ENBGUI,
 
     // CRTMNU
     MENU, TYPE, DSPF, MSGF, CMDLIN, DSPKEY, PRDLIB,
@@ -321,6 +322,13 @@ public class CompilationPattern {
 
     // ADDMSGD
     CHAR,
+
+    // CRTCMD
+    BATCH, INTERACT, BPGM, IPGM, BREXX, IREXX, EXEC, BMOD, IMOD, COMMAND, CPICOMM, EXECSQL,
+
+    // CRTPRTF
+    SCS, IPDS, LINE, AFPDSLINE, USERASCII, AFPDS, FRONTMGN, CONTENT, ABSOLUTE, STD, DRAFT, NLQ, FASTDRAFT, FNTCHRSET, INCH, CM, 
+    FRONTOVL, FILEEND, IMMED, JOBEND, CURUSRPRF, CURGRPPRF, JOBGRPPRF, FCFC, MACHINE,  
 
     ; 
 
@@ -1283,7 +1291,28 @@ public class CompilationPattern {
     ParamCmd.REXSRCMBR,  
     ParamCmd.REXCMDENV,  
     ParamCmd.REXEXITPGM,
-    ParamCmd.THDSAFE
+    ParamCmd.THDSAFE,
+    ParamCmd.MLTTHDACN,
+    ParamCmd.TEXT,
+    ParamCmd.OPTION,
+    ParamCmd.VLDCKR,
+    ParamCmd.MODE,
+    ParamCmd.ALLOW,
+    ParamCmd.ALWLMTUSR,
+    ParamCmd.MAXPOS,   
+    ParamCmd.PMTFILE,  
+    ParamCmd.MSGF,
+    ParamCmd.HLPSHELF, 
+    ParamCmd.HLPPNLGRP,
+    ParamCmd.HLPID,
+    ParamCmd.HLPSCHIDX,
+    ParamCmd.CURLIB,   
+    ParamCmd.PRDLIB,   
+    ParamCmd.PMTOVRPGM,
+    ParamCmd.AUT,      
+    ParamCmd.REPLACE,  
+    ParamCmd.ENBGUI,   
+    ParamCmd.TGTCCSID
   );
 
 

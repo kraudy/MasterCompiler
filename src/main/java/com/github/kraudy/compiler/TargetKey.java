@@ -354,6 +354,7 @@ public class TargetKey {
       case PF:
       case LF:
       case DSPF:
+      case PRTF:
       case TABLE:
       case VIEW:
         return ParamCmd.FILE.toString();
