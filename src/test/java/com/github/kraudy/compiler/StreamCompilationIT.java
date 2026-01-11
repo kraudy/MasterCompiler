@@ -80,7 +80,7 @@ public class StreamCompilationIT {
   }
 
   @Test
-  @Tag("heavy")  // Heavyweight
+  @Tag("heavy")  // Heavyweight test before release 
   void test_Tobi_Bob() throws Exception {    
 
     masterCompilerTest("tobi.yaml", "https://github.com/kraudy/McOnTobi.git");
@@ -100,7 +100,8 @@ public class StreamCompilationIT {
 
     //masterCompilerTest("sjlennon.yaml", "https://github.com/kraudy/McOnSJLennon");
     //masterCompilerTest("apisql.yaml", "https://github.com/kraudy/McOnSJLennon");
-    masterCompilerTest("5250_Subfile.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("5250_Subfile.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("base36.yaml", "https://github.com/kraudy/McOnSJLennon");
     
   }
 

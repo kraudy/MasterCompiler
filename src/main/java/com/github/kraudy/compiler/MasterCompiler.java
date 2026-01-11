@@ -115,16 +115,16 @@ public class MasterCompiler{
       /* Build each target */
       buildTargets(globalSpec.targets);
 
-      /* Execute global after */
-      if(!globalSpec.after.isEmpty()){
-        if (verbose) logger.info("Executing global after: " + globalSpec.after.size() + " commands found");
-        commandExec.executeCommand(globalSpec.after);
-      }
-
       /* Execute global success */
       if(!globalSpec.success.isEmpty()){
         if (verbose) logger.info("Executing global success: " + globalSpec.success.size() + " commands found");
         commandExec.executeCommand(globalSpec.success);
+      }
+
+      /* Execute global after */
+      if(!globalSpec.after.isEmpty()){
+        if (verbose) logger.info("Executing global after: " + globalSpec.after.size() + " commands found");
+        commandExec.executeCommand(globalSpec.after);
       }
       
     } catch (CompilerException e){
@@ -210,16 +210,16 @@ public class MasterCompiler{
         /* Execute compilation command */
         commandExec.executeCommand(key);
 
-        /* Per target after */
-        if(!targetSpec.after.isEmpty()){
-          if (verbose) logger.info("Executing target after: " + targetSpec.after.size() + " commands found");
-          commandExec.executeCommand(targetSpec.after);
-        } 
-
         /* Per target success */
         if(!targetSpec.success.isEmpty()){
           if (verbose) logger.info("Executing target success: " + targetSpec.success.size() + " commands found");
           commandExec.executeCommand(targetSpec.success);
+        } 
+
+        /* Per target after */
+        if(!targetSpec.after.isEmpty()){
+          if (verbose) logger.info("Executing target after: " + targetSpec.after.size() + " commands found");
+          commandExec.executeCommand(targetSpec.after);
         } 
 
       } catch (CompilerException e){
@@ -281,7 +281,7 @@ public class MasterCompiler{
         if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
           commandExec.executeStatement("DROP TRIGGER " + key.getLibrary() + "." + key.getObjectName());
         }
-        
+
         CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
           .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
           .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
