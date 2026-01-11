@@ -96,7 +96,11 @@ public class StreamCompilationIT {
     //masterCompilerTest("clsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("dtasrc.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("msgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
-    masterCompilerTest("sqlsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+    //masterCompilerTest("sqlsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
+
+    //masterCompilerTest("sjlennon.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("apisql.yaml", "https://github.com/kraudy/McOnSJLennon");
+    masterCompilerTest("5250_Subfile.yaml", "https://github.com/kraudy/McOnSJLennon");
     
   }
 

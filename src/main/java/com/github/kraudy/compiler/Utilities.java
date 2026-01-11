@@ -476,6 +476,7 @@ public class Utilities {
         break;
 
       case CRTSRVPGM:
+        /* SRCSTMF precedence over EXPORT */
         if (key.containsKey(ParamCmd.SRCSTMF) && 
             key.containsKey(ParamCmd.EXPORT)) {
           key.remove(ParamCmd.EXPORT); 

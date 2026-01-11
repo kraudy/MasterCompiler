@@ -140,7 +140,9 @@ public class CommandExecutor {
 
     //TODO: For function deletion
     // for this, add method executeStatement that receives a sql string
-    //if (key.getObjectTypeEnum() == ObjectType.FUNCTION) DROP SPECIFIC FUNCTION ISOTODATE;
+    //if (key.getObjectTypeEnum() == ObjectType.FUNCTION) DROP SPECIFIC FUNCTION function_name;
+
+    //if (key.getObjectTypeEnum() == ObjectType.TRIGGER) DROP TRIGGER trigger_name;;
 
     CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
       .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))

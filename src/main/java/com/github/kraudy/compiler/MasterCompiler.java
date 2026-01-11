@@ -273,6 +273,10 @@ public class MasterCompiler{
       //TODO: use StatementExecution
       continue;
       }
+      if (key.getObjectTypeEnum() == ObjectType.INDEX) {
+        //TODO: use StatementExecution
+        continue;
+      }
       if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
         //TODO: use StatementExecution
         continue;

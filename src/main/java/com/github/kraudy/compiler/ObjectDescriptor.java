@@ -107,8 +107,48 @@ public class ObjectDescriptor {
       }
     }
 
+    if (key.getObjectTypeEnum() == ObjectType.INDEX) {
+      try (Statement stmt = connection.createStatement();
+          ResultSet rs = stmt.executeQuery(
+            "With " +
+            Utilities.CteLibraryList +
+            "SELECT 1 " +
+            "FROM QSYS2.SYSINDEXES " +
+            "INNER JOIN Libs " +
+            "ON (SYSTEM_INDEX_SCHEMA = Libs.Libraries) " +
+            "WHERE SYSTEM_INDEX_NAME = '" + key.getObjectName() + "' " +
+            "LIMIT 1")) {
+        if (!rs.next()) {
+          if (verbose) logger.info("Function object not found: " + key.asString());
+          return;  
+        }
+
+        if (verbose) logger.info("Function object found: " + key.asString());
+        key.setObjectExists(true);
+        return;
+      }
+    }
+
     if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
-      return;
+      try (Statement stmt = connection.createStatement();
+          ResultSet rs = stmt.executeQuery(
+            "WITH " + 
+            Utilities.CteLibraryList +
+            " SELECT 1 " +
+            " FROM QSYS2.SYSTRIGGERS " +
+            " INNER JOIN Libs " +
+            "   ON TRIGGER_SCHEMA = Libs.Libraries " +
+            " WHERE TRIGGER_NAME = '" + key.getObjectName() + "' " +
+            " LIMIT 1")) {
+        if (!rs.next()) {
+          if (verbose) logger.info("Trigger object not found: " + key.asString());
+          return;  
+        }
+
+        if (verbose) logger.info("Trigger object found: " + key.asString());
+        key.setObjectExists(true);
+        return;
+      }
     }
 
     try (Statement stmt = connection.createStatement();
@@ -130,8 +170,8 @@ public class ObjectDescriptor {
       if (verbose) logger.info("Found object: " + key.asString());
       key.setObjectExists(true);
       return;
+    }
   }
-}
 
   /* *PGM */
   private void getPgmInfo(TargetKey key) throws SQLException {

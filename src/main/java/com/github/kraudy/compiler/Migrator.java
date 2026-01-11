@@ -35,12 +35,14 @@ public class Migrator {
 
   public void migrateSource(TargetKey key) throws Exception, SQLException{
     switch (key.getCompilationCommand()){
+      case CRTSRVPGM:
+        /* If Export and not Stream file, ignore migration */
+        if (key.containsKey(ParamCmd.EXPORT) && !key.containsStreamFile()) break;
       case CRTCLMOD:
       case CRTRPGMOD:
       case CRTBNDRPG:
       case CRTBNDCL:
       case CRTSQLRPGI:
-      case CRTSRVPGM:
       case RUNSQLSTM:
       case CRTCMD:
         /* 
