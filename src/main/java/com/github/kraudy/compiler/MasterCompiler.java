@@ -269,19 +269,19 @@ public class MasterCompiler{
     // Delete compiled objects in reverse creation order (dependents first)
     for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
       TargetKey key = objectsToDelete.get(i);
-      if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
-      //TODO: use StatementExecution
-      continue;
-      }
-      if (key.getObjectTypeEnum() == ObjectType.INDEX) {
-        //TODO: use StatementExecution
-        continue;
-      }
-      if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
-        //TODO: use StatementExecution
-        continue;
-      }
       try {
+        if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
+          commandExec.executeStatement("DROP SPECIFIC FUNCTION " + key.getLibrary() + "." + key.getObjectName());
+        }
+
+        if (key.getObjectTypeEnum() == ObjectType.INDEX) {
+          commandExec.executeStatement("DROP INDEX " + key.getLibrary() + "." + key.getObjectName());
+        }
+
+        if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
+          commandExec.executeStatement("DROP TRIGGER " + key.getLibrary() + "." + key.getObjectName());
+        }
+        
         CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
           .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
           .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));

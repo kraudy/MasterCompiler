@@ -121,6 +121,33 @@ public class CommandExecutor {
     if(verbose) logger.info(buildJoblogMessagesString(commandTime));
   }
 
+  /* Executes sql statements */
+  public void executeStatement(String statement) throws CompilerException {
+    Timestamp commandTime = getCurrentTime();
+
+    if (this.CmdExecutionChain.length() > 0) {
+      this.CmdExecutionChain.append(" => ");
+    }
+    this.CmdExecutionChain.append(statement);
+
+    /* Dry run just returns before executing the command */
+    if(dryRun){
+      return;
+    }
+
+    try (Statement cmdStmt = connection.createStatement()) {
+      cmdStmt.execute(statement);
+    } catch (SQLException e) {
+      logger.error("DB2 statement failed: " + statement);
+
+      String joblog = buildJoblogMessagesString(commandTime);
+      throw new CompilerException("DB2 statement execution failed", e, statement, commandTime, joblog);  // No target here
+    }
+
+    logger.info("DB2 statement successful: " + statement);
+    if(verbose) logger.info(buildJoblogMessagesString(commandTime));
+  }
+
   public Timestamp getCurrentTime(){
     Timestamp currentTime = null;
     try (Statement stmt = connection.createStatement();
@@ -138,11 +165,17 @@ public class CommandExecutor {
   public void forceDeletion(TargetKey key) throws Exception {
     if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF).contains(key.getObjectTypeEnum())) return;
 
-    //TODO: For function deletion
-    // for this, add method executeStatement that receives a sql string
-    //if (key.getObjectTypeEnum() == ObjectType.FUNCTION) DROP SPECIFIC FUNCTION function_name;
+    if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
+      executeStatement("DROP SPECIFIC FUNCTION " + key.getObjectName());
+    }
 
-    //if (key.getObjectTypeEnum() == ObjectType.TRIGGER) DROP TRIGGER trigger_name;;
+    if (key.getObjectTypeEnum() == ObjectType.INDEX) {
+      executeStatement("DROP INDEX   " + key.getObjectName());
+    }
+
+    if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
+      executeStatement("DROP TRIGGER " + key.getObjectName());
+    }
 
     CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
       .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
