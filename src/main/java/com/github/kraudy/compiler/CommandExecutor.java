@@ -163,18 +163,22 @@ public class CommandExecutor {
 
     /* Delete object without REPLACE = *YES */
   public void forceDeletion(TargetKey key) throws Exception {
-    if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF).contains(key.getObjectTypeEnum())) return;
+    if (!Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF, ObjectType.TABLE).contains(key.getObjectTypeEnum())) return;
 
     if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
-      executeStatement("DROP SPECIFIC FUNCTION " + key.getObjectName());
+      executeStatement("DROP SPECIFIC FUNCTION " + key.getLibrary() + "." + key.getObjectName());
     }
 
     if (key.getObjectTypeEnum() == ObjectType.INDEX) {
-      executeStatement("DROP INDEX   " + key.getObjectName());
+      executeStatement("DROP INDEX   " + key.getLibrary() + "." + key.getObjectName());
     }
 
     if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
-      executeStatement("DROP TRIGGER " + key.getObjectName());
+      executeStatement("DROP TRIGGER " + key.getLibrary() + "." + key.getObjectName());
+    }
+
+    if (key.getObjectTypeEnum() == ObjectType.TABLE) {
+      executeStatement("DROP TABLE " + key.getLibrary() + "." + key.getObjectName());
     }
 
     CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
