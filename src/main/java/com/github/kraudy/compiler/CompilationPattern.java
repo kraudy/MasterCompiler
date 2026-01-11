@@ -28,9 +28,9 @@ public class CompilationPattern {
   }
 
   // TODO: Add functionality to call programs.
-  public enum ExecCmd implements Command { 
-    CALL,
-  } 
+  //public enum ExecCmd implements Command { 
+  //  CALL,
+  //} 
 
   public enum SysCmd implements Command { 
     // Library commands
@@ -59,6 +59,10 @@ public class CompilationPattern {
 
     // Triggers
     //ADDPFTRG
+
+    // Pgms
+    CALL,
+
     ;
 
     public static SysCmd fromString(String value) {
@@ -240,6 +244,10 @@ public class CompilationPattern {
 
     // ADDMSGD
     MSGID, MSG, SECLVL, SEV, FMT, VALUES, SPCVAL, RANGE, REL, DFT, DFTPGM, DMPLST, ALROPT, LOGPRB,
+
+    // CALL
+    PARM,
+
     ;
 
     /* Convert string to param enum */
@@ -310,6 +318,10 @@ public class CompilationPattern {
 
     // CRTDTAQ
     MAX16MB, MAX2GB, 
+
+    // ADDMSGD
+    CHAR,
+
     ; 
 
     public static ValCmd fromString(String value) {
@@ -548,7 +560,13 @@ public class CompilationPattern {
     ParamCmd.LVL,
     ParamCmd.ALROPT,
     ParamCmd.LOGPRB,
-    ParamCmd.CCSID 
+    ParamCmd.CCSID
+  );
+
+  // CALL
+  public static final List<ParamCmd> Call_Pattern = Arrays.asList(
+    ParamCmd.PGM,
+    ParamCmd.PARM
   );
 
   // OVRDBF
@@ -1320,6 +1338,8 @@ public class CompilationPattern {
     commandToPatternMap.put(SysCmd.QSH, Qsh_Pattern);
     /* Messages */
     commandToPatternMap.put(SysCmd.ADDMSGD, AddMsgD_Pattern);
+    /* Pgms */
+    commandToPatternMap.put(SysCmd.CALL, Call_Pattern);
     /* Ovr */
     commandToPatternMap.put(SysCmd.OVRDBF, OvrDbfPattern);
     commandToPatternMap.put(SysCmd.OVRPRTF, OvrPrtfPattern);
