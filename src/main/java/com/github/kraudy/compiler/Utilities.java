@@ -19,7 +19,9 @@ import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.github.kraudy.compiler.BuildSpec.TargetSpec;
 import com.github.kraudy.compiler.CompilationPattern.Command;
+import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ErrMsg;
+import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
@@ -453,28 +455,7 @@ public class Utilities {
             }
           } catch (Exception ignore) {}
         }
-        /* *ALL value not valid for DBGVIEW for CRTSQLRPGI */
-        if (key.containsKey(ParamCmd.DBGVIEW)) {
-          String debugView = key.get(ParamCmd.DBGVIEW);
-          try{
-            if (ValCmd.ALL == ValCmd.fromString(debugView)){
-              key.put(ParamCmd.DBGVIEW, ValCmd.SOURCE.toString());
-            }
-          } catch (Exception ignore) {}
-        }
 
-        break;
-      
-      case CRTRPGPGM:
-        /* *NOEVENTF value not valid for OPTION for CRTRPGPGM */
-        if (key.containsKey(ParamCmd.OPTION)) {
-          String option = key.get(ParamCmd.OPTION);
-          try{
-            if (ValCmd.NOEVENTF == ValCmd.fromString(option)){
-              key.put(ParamCmd.OPTION, ValCmd.LSTDBG.toString());
-            }
-          } catch (Exception ignore) {}
-        } 
         break;
 
       case CRTSRVPGM:
@@ -482,6 +463,18 @@ public class Utilities {
         if (key.containsKey(ParamCmd.SRCSTMF) && 
             key.containsKey(ParamCmd.EXPORT)) {
           key.remove(ParamCmd.EXPORT); 
+        }
+        break;
+
+      case CRTDTAARA:
+        if (key.containsKey(ParamCmd.TYPE) && key.containsKey(ParamCmd.VALUE)){
+          String type = key.get(ParamCmd.TYPE);
+          String value = key.get(ParamCmd.VALUE);
+          try{
+            if (ValCmd.CHAR == ValCmd.fromString(type)){
+              key.put(ParamCmd.VALUE, "''" + value + "''");
+            }
+          } catch (Exception ignore) {}
         }
         break;
 
@@ -533,6 +526,80 @@ public class Utilities {
   public static boolean validateCommandParam(Command cmd, ParamCmd param) {
     if (!CompilationPattern.getCommandPattern(cmd).contains(param)) {
       return false;
+    }
+
+    return true;
+  }
+
+  public static boolean validateParamValue(CompCmd cmd, ParamCmd param, String value) {
+    ValCmd valOption;
+    try{
+      valOption = ValCmd.fromString(value);
+    } catch (Exception ignore) { return true;} // if not ValCmd, omit
+
+    if (cmd == CompCmd.CRTRPGPGM){
+      switch (param) {
+        case OPTION:
+          if (!Arrays.asList(ValCmd.SOURCE, ValCmd.NOSOURCE, ValCmd.SRC, ValCmd.NOSRC, ValCmd.XREF, ValCmd.NOXREF, 
+            ValCmd.GEN, ValCmd.NOGEN, ValCmd.DUMP, ValCmd.NODUMP,   ValCmd.SECLVL,   ValCmd.NOSECLVL, ValCmd.SRCDBG,  
+            ValCmd.NOSRCDBG, ValCmd.LSTDBG,   ValCmd.NOLSTDBG).contains(valOption))
+            return false;
+          break;
+      
+        default:
+          return true;
+      }
+    }
+
+    if (cmd == CompCmd.CRTCLPGM){
+      switch (param) {
+        case OPTION:
+          if (!Arrays.asList(ValCmd.SOURCE, ValCmd.NOSOURCE,ValCmd.SRC, ValCmd.NOSRC, ValCmd.XREF, ValCmd.NOXREF,  
+            ValCmd.GEN, ValCmd.NOGEN, ValCmd.SECLVL, ValCmd.NOSECLVL, ValCmd.SRCDBG, ValCmd.NOSRCDBG, 
+            ValCmd.LSTDBG, ValCmd.NOLSTDBG, ValCmd.DOSLTLVL, ValCmd.NODOSLTLVL).contains(valOption))
+            return false;
+          break;
+
+        default:
+          return true;
+      }
+    }
+
+    if (cmd == CompCmd.RUNSQLSTM){
+      switch (param) {
+        case OPTION:
+          if (!Arrays.asList(ValCmd.LIST, ValCmd.NOSRC, ValCmd.ERRLIST, ValCmd.NOLIST).contains(valOption))
+            return false;
+          break;
+          
+        case DBGVIEW:
+          if (!Arrays.asList(ValCmd.NONE, ValCmd.SOURCE, ValCmd.STMT, ValCmd.LIST).contains(valOption))
+            return false;
+          break;
+      
+        default:
+          return true;
+      }
+    }
+
+    if (cmd == CompCmd.CRTSQLRPGI){
+      switch (param) {
+        case OPTION:
+          if (!Arrays.asList(ValCmd.XREF, ValCmd.NOXREF, ValCmd.GEN, ValCmd.NOGEN, ValCmd.COMMA, ValCmd.PERIOD, ValCmd.JOB,     
+              ValCmd.SYSVAL,  ValCmd.SECLVL,  ValCmd.NOSECLVL,ValCmd.SEQSRC,  ValCmd.NOSEQSRC, ValCmd.EVENTF,     
+              ValCmd.NOEVENTF,  ValCmd.CVTDT, ValCmd.NOCVTDT,  ValCmd.SQL, ValCmd.SYS, ValCmd.OPTLOB,    
+              ValCmd.NOOPTLOB,  ValCmd.NOEXTIND,  ValCmd.EXTIND,    ValCmd.SYSTIME, ValCmd.NOSYSTIME).contains(valOption))
+            return false;
+          break;
+
+        case DBGVIEW:
+          if (!Arrays.asList(ValCmd.NONE, ValCmd.SOURCE, ValCmd.STMT, ValCmd.LIST).contains(valOption))
+            return false;
+          break;
+      
+        default:
+          return true;
+      }
     }
 
     return true;

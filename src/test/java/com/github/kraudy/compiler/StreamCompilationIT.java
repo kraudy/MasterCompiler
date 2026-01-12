@@ -105,7 +105,12 @@ public class StreamCompilationIT {
     //masterCompilerTest("dateadj.yaml", "https://github.com/kraudy/McOnSJLennon");
     //masterCompilerTest("date_udf.yaml", "https://github.com/kraudy/McOnSJLennon");
     //masterCompilerTest("grp_job.yaml", "https://github.com/kraudy/McOnSJLennon");
-    masterCompilerTest("pgm_refs.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("pgm_refs.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("prt_cl.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("printing.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("RcdLckDsp.yaml", "https://github.com/kraudy/McOnSJLennon");
+    //masterCompilerTest("sngchcfld.yaml", "https://github.com/kraudy/McOnSJLennon");
+    masterCompilerTest("usps_address.yaml", "https://github.com/kraudy/McOnSJLennon");
     
   }
 

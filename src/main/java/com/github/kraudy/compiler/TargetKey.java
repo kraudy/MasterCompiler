@@ -298,6 +298,11 @@ public class TargetKey {
       throw new IllegalArgumentException("Parameters " + param.name() + " not valid for command " + getCompilationCommandName());
     }
 
+    /* Is the provided value acceptable for this command? */
+    if (!Utilities.validateParamValue(this.compilationCommand, param, value)) {
+      throw new IllegalArgumentException("Value " + value + " for Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
+    }
+
     this.ParamCmdSequence.put(param, value);
 
     return this;
