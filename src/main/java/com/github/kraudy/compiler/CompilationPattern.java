@@ -342,6 +342,9 @@ public class CompilationPattern {
 
     // CRTCLPGM
     DOSLTLVL, NODOSLTLVL,
+
+    // CRTBNDCL
+    NOOPTIMIZE,
     ; 
 
     public static ValCmd fromString(String value) {

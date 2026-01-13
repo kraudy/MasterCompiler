@@ -602,6 +602,18 @@ public class Utilities {
       }
     }
 
+    if (cmd == CompCmd.CRTBNDCL){
+      switch (param) {
+        case OPTIMIZE:
+          if (!Arrays.asList(ValCmd.NONE, ValCmd.BASIC, ValCmd.FULL).contains(valOption))
+            return false;
+          break;
+      
+        default:
+          return true;
+      }
+    }
+
     return true;
   }
 

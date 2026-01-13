@@ -98,6 +98,7 @@ public class CommandExecutor {
 
     /* Set build time */
     key.setLastBuild(commandTime);
+    key.setObjectExists(true);
   }
 
   /* Executes system commands */

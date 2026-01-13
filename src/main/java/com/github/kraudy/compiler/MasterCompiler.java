@@ -269,6 +269,8 @@ public class MasterCompiler{
     // Delete compiled objects in reverse creation order (dependents first)
     for (int i = objectsToDelete.size() - 1; i >= 0; i--) {
       TargetKey key = objectsToDelete.get(i);
+      /* If object does not exists, omit */
+      if (!key.objectExists()) continue;
       try {
         commandExec.deleteObject(key);
       } catch (Exception ignored) {} // This prevents breaking the loop

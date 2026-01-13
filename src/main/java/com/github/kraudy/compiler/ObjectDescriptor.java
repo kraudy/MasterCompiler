@@ -248,7 +248,11 @@ public class ObjectDescriptor {
           if (!stgMdl.isEmpty()) key.put(ParamCmd.STGMDL, stgMdl);
 
           String optimize = rsObj.getString("OPTIMIZE").trim();
-          if (!optimize.isEmpty()) key.put(ParamCmd.OPTIMIZE, optimize);
+          if (!optimize.isEmpty())  {
+            try {
+              key.put(ParamCmd.OPTIMIZE, optimize);
+            } catch (Exception ignore) {}
+          }
 
         case CRTRPGPGM:
         case CRTCLPGM:
