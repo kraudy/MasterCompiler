@@ -273,15 +273,6 @@ public class Utilities {
         throw new IllegalArgumentException("YAML must define at least one target in 'targets' section.");
       }
 
-      /* Set specific target params */
-      for (Map.Entry<TargetKey, TargetSpec> entry : spec.targets.entrySet()) {
-        TargetKey key = entry.getKey();
-        BuildSpec.TargetSpec targetSpec = entry.getValue();
-
-        key.putAll(targetSpec.params);
-        
-      }
-
       /* Set Targets list */
       spec.setTargetsList(spec.targets.keySet());
 

@@ -89,16 +89,25 @@ public class DependencyAwareness {
 
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
+      BuildSpec.TargetSpec targetSpec = entry.getValue();
 
       if (verbose) logger.info("Scannig sources: " + target.asString());
       /* If no stream file, continue, could try to migrate  */
-      if (!target.containsStreamFile()) {
+
+      String relPath = "";
+      /* Add SrcStmF, this is needed by source dependency */
+      /* Relative source path */
+      if (target.containsStreamFile()) {
+        relPath = target.getStreamFile(); 
+      }else if (targetSpec.params.containsKey(ParamCmd.SRCSTMF)){
+        relPath = targetSpec.params.get(ParamCmd.SRCSTMF);
+      }
+
+      if (relPath.isEmpty()){
         if (verbose) logger.info("Target does not contains stream file to scan");
         continue;
       }
 
-      /* Relative source path */
-      String relPath = target.getStreamFile(); 
       /* We need the base dir because IFSFile does not seems to work with curdir relative paths */
       String baseDir = globalSpec.getBaseDirectory();
       if (baseDir == null) throw new RuntimeException("Base directory not set in BuildSpec");

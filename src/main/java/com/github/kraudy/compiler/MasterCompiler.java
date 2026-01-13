@@ -204,6 +204,10 @@ public class MasterCompiler{
         /* Set global defaults params per target */
         key.putAll(globalSpec.defaults);
 
+        /* Set target specific params */
+        key.putAll(targetSpec.params);
+
+
         /* Migrate source file */
         if (!noMigrate) migrator.migrateSource(key);
 

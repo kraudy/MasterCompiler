@@ -81,7 +81,7 @@ public class StreamCompilationIT {
 
   @Test
   @Tag("heavy")  // Heavyweight test before release 
-  void test_Tobi_Bob() throws Exception {    
+  void test_Compile_Hevy() throws Exception {    
 
     //masterCompilerTest("tobi.yaml", "https://github.com/kraudy/McOnTobi.git");
     masterCompilerTest("sjlennon.yaml", "https://github.com/kraudy/McOnSJLennon");
@@ -90,7 +90,7 @@ public class StreamCompilationIT {
 
   @Test
   @Tag("fast")  // Ligther
-  void test_Diff() throws Exception {    
+  void test_Compile_Fast() throws Exception {    
 
     //masterCompilerTest("art200.yaml", "https://github.com/kraudy/McOnTobi.git");
     //masterCompilerTest("rpgsrc.yaml", "https://github.com/kraudy/McOnTobi.git");
@@ -244,8 +244,6 @@ public class StreamCompilationIT {
       assertNotNull(depsFAMILL1, "Deps target should not be null");
       assertEquals(1, depsFAMILL1.getChildsCount(), "Childs of target " + depsFAMILL1.asString() + " should be 1");
 
-
-      // ASSERTIONS: count dependencies
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
