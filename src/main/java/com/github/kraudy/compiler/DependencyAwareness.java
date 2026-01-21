@@ -68,6 +68,11 @@ public class DependencyAwareness {
   private static final Pattern DDS_PFILE_PATTERN = Pattern.compile(
       "\\bPFILE\\s*\\(\\s*([A-Z0-9$#@_]{1,10})\\s*\\)", Pattern.CASE_INSENSITIVE);
 
+  private static final Pattern DDS_REFFLD_PATTERN = Pattern.compile(
+    "REFFLD\\s*\\(\\s*([A-Z0-9$#@_]{1,10}(?:/[A-Z0-9$#@_]{1,10})?)"
+    + "(?:\\s+(?:(?:\\*LIBL|[A-Z0-9$#@_]{1,10})/)?([A-Z0-9$#@_]{1,10}))?\\s*\\)",
+    Pattern.CASE_INSENSITIVE);
+
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
@@ -99,7 +104,7 @@ public class DependencyAwareness {
       /* Relative source path */
       if (target.containsStreamFile()) {
         relPath = target.getStreamFile(); 
-      }else if (targetSpec.params.containsKey(ParamCmd.SRCSTMF)){
+      } else if (targetSpec.params.containsKey(ParamCmd.SRCSTMF)){
         relPath = targetSpec.params.get(ParamCmd.SRCSTMF);
       }
 
@@ -280,6 +285,37 @@ public class DependencyAwareness {
               continue;
             }
             if (verbose) logger.info("REF dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REF(" + refFileName + "))");
+            /* Files are child of Target */
+            target.addChild(refFileKey);
+            /* Target is father of files */
+            refFileKey.addFather(target);
+          }
+          break;
+
+        case CRTDSPF:
+        case CRTPRTF:
+          Set<String> reffldFilesNames = new HashSet<>();
+
+          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+            while (scanner.hasNextLine()) {
+              String line = scanner.nextLine();
+              Matcher reffldMatcher = DDS_REFFLD_PATTERN.matcher(line);
+              while (reffldMatcher.find()) {
+                String refFileName = reffldMatcher.group(2);
+                if (refFileName != null && !refFileName.trim().isEmpty()) {
+                  reffldFilesNames.add(refFileName.trim().toUpperCase());
+                }
+              }
+            }
+          }
+
+          for (String refFileName : reffldFilesNames) {
+            TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
+            if (refFileKey == null || !refFileKey.isFile()) {
+              if (verbose) logger.info("Referenced REFFLD file not a build target: " + refFileName + " (in " + target.asString() + ")");
+              continue;
+            }
+            if (verbose) logger.info("REFFLD dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REFFLD(... " + refFileName + "))");
             /* Files are child of Target */
             target.addChild(refFileKey);
             /* Target is father of files */

@@ -192,7 +192,7 @@ public class StreamCompilationIT {
       commandExecutor.executeCommand(gitClone);
 
       // Load spec
-      String remoteYamlPath = testFolder + "/test_deps.yaml";
+      String remoteYamlPath = testFolder + "/tobi.yaml";
       IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
       spec = Utilities.deserializeYaml(remoteYamlFile);
 
