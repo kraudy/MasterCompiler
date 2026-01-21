@@ -244,6 +244,11 @@ public class StreamCompilationIT {
       assertNotNull(depsFAMILL1, "Deps target should not be null");
       assertEquals(1, depsFAMILL1.getChildsCount(), "Childs of target " + depsFAMILL1.asString() + " should be 1");
 
+      /* Validate DSPF, PRTF  REFFLD dependency */
+      TargetKey depsART200D = spec.getTargetKey(new TargetKey("CURLIB.ART200D.DSPF.DDS"));
+      assertNotNull(depsART200D, "Deps target should not be null");
+      assertEquals(2, depsART200D.getChildsCount(), "Childs of target " + depsART200D.asString() + " should be 2");
+
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
