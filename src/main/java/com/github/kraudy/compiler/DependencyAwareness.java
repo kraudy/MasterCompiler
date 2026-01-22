@@ -82,18 +82,20 @@ public class DependencyAwareness {
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
+  private final Map<String, TargetKey> keyLookup;
 
   public DependencyAwareness(AS400 system, boolean debug, boolean verbose) {
     this.system = system;
     this.debug = debug;
     this.verbose = verbose;
+    this.keyLookup = new HashMap<>();
   }
 
   public void detectDependencies(BuildSpec globalSpec) throws Exception{
 
     if (verbose) logger.info("Detecting source object dependencies");
     /* This let us map name string to object name. TODO: There has to be a better way of doing this */
-    Map<String, TargetKey> keyLookup = new HashMap<>();
+    //Map<String, TargetKey> keyLookup = new HashMap<>();
     for (TargetKey k : globalSpec.targets.keySet()) {
       keyLookup.put(k.asMapKey(), k);
     }
@@ -223,18 +225,7 @@ public class DependencyAwareness {
           /* Collect unique file names referenced in the source */
           Set<String> depFileNames = new HashSet<>();
 
-          /* 1. Fixed-format F-specs */
-          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
-            while (scanner.hasNextLine()) {
-              String line = scanner.nextLine();
-              Matcher fixedMatcher = FIXED_F_SPEC.matcher(line);
-              if (!fixedMatcher.find())  continue;
-              String fileName = fixedMatcher.group(1).trim().toUpperCase();
-              //TODO: Check for /n or /t characters
-              if (fileName.isEmpty()) continue;
-              depFileNames.add(fileName);
-            }
-          }
+          getFixedFormatFilesDependencies(target, sourceCode);
 
           /* 2. Free-format DCL-F */
           Matcher freeMatcher = FREE_DCL_F.matcher(sourceCode);
@@ -397,5 +388,42 @@ public class DependencyAwareness {
           break;
       }
     }
-}
+  }
+
+  /* 1. Fixed-format F-specs */
+  private void getFixedFormatFilesDependencies(TargetKey target, String sourceCode){
+    Set<String> depFileNames = new HashSet<>();
+
+    /* 1. Fixed-format F-specs */
+    try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+      while (scanner.hasNextLine()) {
+        String line = scanner.nextLine();
+        Matcher fixedMatcher = FIXED_F_SPEC.matcher(line);
+        if (!fixedMatcher.find())  continue;
+        String fileName = fixedMatcher.group(1).trim().toUpperCase();
+        //TODO: Check for /n or /t characters
+        if (fileName.isEmpty()) continue;
+        depFileNames.add(fileName);
+      }
+    }
+
+    addFileDependencies(target, depFileNames);
+
+  }
+
+  private void addFileDependencies(TargetKey target, Set<String> fileNames) {
+    for (String depFileName : fileNames) {
+      TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
+      if (fileKey == null || !fileKey.isFile()) {
+        if (verbose) logger.info("Referenced FILE not a build target, ignored: " + depFileName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logger.info("FILE dependency: " + target.asString() + " depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
+      /* Files are child of Target */
+      target.addChild(fileKey);
+      /* Target is father of files */
+      fileKey.addFather(target);
+    }
+  }
+
 }
