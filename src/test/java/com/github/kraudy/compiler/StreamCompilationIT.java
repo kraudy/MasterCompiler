@@ -205,6 +205,11 @@ public class StreamCompilationIT {
 
       depAwareness.detectDependencies(spec);
 
+      /* Validate F spec free format */
+      TargetKey depsVAT300 = spec.getTargetKey(new TargetKey("CURLIB.VAT300.MODULE.RPGLE"));
+      assertNotNull(depsVAT300, "Deps target should not be null");
+      assertEquals(1, depsVAT300.getChildsCount(), "Childs of target " + depsVAT300.asString() + " should be 1");
+
       /* Validate F spec fixed format */
       TargetKey depsFAM301 = spec.getTargetKey(new TargetKey("CURLIB.FAM301.MODULE.RPGLE"));
       assertNotNull(depsFAM301, "Deps target should not be null");
@@ -217,7 +222,7 @@ public class StreamCompilationIT {
       // This also finds BndDir y ExtPgm
       TargetKey depsART200 = spec.getTargetKey(new TargetKey("CURLIB.ART200.PGM.SQLRPGLE"));
       assertNotNull(depsART200, "Deps target should not be null");
-      assertEquals(5, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 5: 2 Files, 1 Dspf, 1 Bnddir, 1 ExtPgm");
+      assertEquals(6, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 6: 2 Files, 1 Dspf, 1 Table, 1 Bnddir, 1 ExtPgm");
 
       /* Validate PF REF file */
       TargetKey depsVATDEF = spec.getTargetKey(new TargetKey("CURLIB.VATDEF.PF.DDS"));
@@ -254,6 +259,24 @@ public class StreamCompilationIT {
       assertNotNull(depsFAM301D, "Deps target should not be null");
       assertEquals(1, depsFAM301D.getChildsCount(), "REFFLD Childs of target " + depsFAM301D.asString() + " should be 1");
 
+      TargetKey depsORD100D = spec.getTargetKey(new TargetKey("CURLIB.ORD100D.DSPF.DDS"));
+      assertNotNull(depsORD100D, "Deps target should not be null");
+      assertEquals(3, depsORD100D.getChildsCount(), "REFFLD Childs of target " + depsORD100D.asString() + " should be 3");
+
+      /* Various validations */
+      TargetKey depsART201 = spec.getTargetKey(new TargetKey("CURLIB.ART201.PGM.RPGLE"));
+      assertNotNull(depsART201, "Deps target should not be null");
+      assertEquals(3, depsART201.getChildsCount(), "REFFLD Childs of target " + depsART201.asString() + " should be 3");
+
+      TargetKey depsART202 = spec.getTargetKey(new TargetKey("CURLIB.ART202.PGM.RPGLE"));
+      assertNotNull(depsART202, "Deps target should not be null");
+      assertEquals(3, depsART202.getChildsCount(), "Childs of target " + depsART202.asString() + " should be 3");
+
+      TargetKey depsORD201 = spec.getTargetKey(new TargetKey("CURLIB.ORD201.PGM.SQLRPGLE"));
+      assertNotNull(depsORD201, "Deps target should not be null");
+      assertEquals(10, depsORD201.getChildsCount(), "Childs of target " + depsORD201.asString() + " should be 10");
+
+      //TODO: CURLIB.VAT300.MODULE.RPGLE do this one
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());

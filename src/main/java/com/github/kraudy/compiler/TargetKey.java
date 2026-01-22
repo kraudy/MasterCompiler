@@ -382,6 +382,7 @@ public class TargetKey {
       case PF:
       case LF:
       case DSPF:
+      case TABLE:
         return ParamCmd.FILE.name();
     
       default:

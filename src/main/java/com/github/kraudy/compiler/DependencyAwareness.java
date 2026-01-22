@@ -53,7 +53,8 @@ public class DependencyAwareness {
 
   // Pattern for free-format DCL-F (captures the file name, possibly qualified)
   private static final Pattern FREE_DCL_F = Pattern.compile(
-      "\\bDCL-F\\s+([\\w$#@_./]+)", Pattern.CASE_INSENSITIVE);
+      //"\\bDCL-F\\s+([\\w$#@_./]+)", Pattern.CASE_INSENSITIVE);
+      "DCL-F\\s+([A-Z0-9$#@_./]+?)\\s+", Pattern.CASE_INSENSITIVE);
 
   // Pattern for embedded SQL table references (FROM, JOIN, INTO, UPDATE, DELETE FROM, INSERT INTO)
   private static final Pattern SQL_TABLE = Pattern.compile(
@@ -170,7 +171,7 @@ public class DependencyAwareness {
             target.addChild(bndDirDep);
             /* Add target as bnddir father */
             bndDirDep.addFather(target);
-            if (verbose) logger.info("Scanned BNDDIR dep: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
+            if (verbose) logger.info("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
           }
           break;
           /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
@@ -238,17 +239,25 @@ public class DependencyAwareness {
           /* 2. Free-format DCL-F */
           Matcher freeMatcher = FREE_DCL_F.matcher(sourceCode);
           while (freeMatcher.find()) {
-            String rawName = freeMatcher.group(1);
-            String fileName = rawName.replaceAll(".*/", "").replaceAll(".*.", "").trim();
+            String rawName = freeMatcher.group(1).trim().toUpperCase();
+            if (rawName.isEmpty()) continue;
+
+            // Strip library if qualified (handles MYLIB/MYFILE or rare MYLIB.MYFILE)
+            String fileName = rawName.replaceAll("^.*[\\/.]", "");
+            if (fileName.isEmpty()) continue;
             depFileNames.add(fileName);
           }
 
           /* 3. Embedded SQL table references */
           Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
           while (sqlMatcher.find()) {
-            String rawName = sqlMatcher.group(2);
-            String tableName = rawName.replaceAll(".*/", "").replaceAll(".*.", "").trim();
+            String rawName = sqlMatcher.group(2).trim().toUpperCase();
+            if (rawName.isEmpty()) continue;
+
+            String tableName = rawName.replaceAll("^.*[\\/.]", "");
+            if (tableName.isEmpty()) continue;
             depFileNames.add(tableName);
+
           }
 
           /* Add dependencies for each referenced file that is also a build target */
@@ -258,7 +267,7 @@ public class DependencyAwareness {
               if (verbose) logger.info("Referenced file not a target in the spec, ignored: " + depFileName + " (in " + target.asString() + ")");
               continue;
             }
-            if (verbose) logger.info("File dependency: " + target.asString() +" depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
+            if (verbose) logger.info("FILE dependency: " + target.asString() +" depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
             /* Files are child of Target */
             target.addChild(fileKey);
             /* Target is father of files */
