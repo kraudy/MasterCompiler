@@ -274,7 +274,7 @@ public class StreamCompilationIT {
 
       TargetKey depsORD201 = spec.getTargetKey(new TargetKey("CURLIB.ORD201.PGM.SQLRPGLE"));
       assertNotNull(depsORD201, "Deps target should not be null");
-      assertEquals(10, depsORD201.getChildsCount(), "Childs of target " + depsORD201.asString() + " should be 10");
+      assertEquals(11, depsORD201.getChildsCount(), "Childs of target " + depsORD201.asString() + " should be 11");
 
       //TODO: CURLIB.VAT300.MODULE.RPGLE do this one
 

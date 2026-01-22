@@ -169,9 +169,10 @@ public class TargetKey {
     switch (this.objectType) {
       case PF:
       case LF:
-      case PRTF:
       case DSPF:
+      case PRTF:
       case TABLE:
+      case VIEW:
         return true;
     }
     return false;
@@ -382,7 +383,9 @@ public class TargetKey {
       case PF:
       case LF:
       case DSPF:
+      case PRTF:
       case TABLE:
+      case VIEW:
         return ParamCmd.FILE.name();
     
       default:

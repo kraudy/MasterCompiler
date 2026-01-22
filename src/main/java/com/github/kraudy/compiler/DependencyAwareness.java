@@ -217,47 +217,21 @@ public class DependencyAwareness {
           break;
       }
 
-      /* Get files */
+      /* Get f spec files */
       switch (target.getCompilationCommand()) {
         case CRTBNDRPG:
         case CRTSQLRPGI:
         case CRTRPGMOD:
-          /* Collect unique file names referenced in the source */
-          Set<String> depFileNames = new HashSet<>();
-
           getFixedFormatFilesDependencies(target, sourceCode);
 
-          getFreeFormatFileDependencies(target, sourceCode);          
-
-          /* 3. Embedded SQL table references */
-          Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
-          while (sqlMatcher.find()) {
-            String rawName = sqlMatcher.group(2).trim().toUpperCase();
-            if (rawName.isEmpty()) continue;
-
-            String tableName = rawName.replaceAll("^.*[\\/.]", "");
-            if (tableName.isEmpty()) continue;
-            depFileNames.add(tableName);
-
-          }
-
-          /* Add dependencies for each referenced file that is also a build target */
-          for (String depFileName : depFileNames) {
-            TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
-            if (fileKey == null || !fileKey.isFile()) {
-              if (verbose) logger.info("Referenced file not a target in the spec, ignored: " + depFileName + " (in " + target.asString() + ")");
-              continue;
-            }
-            if (verbose) logger.info("FILE dependency: " + target.asString() +" depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
-            /* Files are child of Target */
-            target.addChild(fileKey);
-            /* Target is father of files */
-            fileKey.addFather(target);
-          }
-
+          getFreeFormatFileDependencies(target, sourceCode);    
           break;
+      }
 
-        default:
+      /* Get sql embedded dependencies */
+      switch (target.getCompilationCommand()) {
+        case CRTSQLRPGI:
+          getEmbeddedSqlDependencies(target, sourceCode);          
           break;
       }
 
@@ -418,6 +392,25 @@ public class DependencyAwareness {
     addFileDependencies(target, depFileNames);
   }
 
+  /* 3. Embedded SQL table references */
+  private void getEmbeddedSqlDependencies(TargetKey target, String sourceCode){
+    Set<String> depFileNames = new HashSet<>();
+
+    Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
+    while (sqlMatcher.find()) {
+      String rawName = sqlMatcher.group(2).trim().toUpperCase();
+      if (rawName.isEmpty()) continue;
+
+      String tableName = rawName.replaceAll("^.*[\\/.]", "");
+      if (tableName.isEmpty()) continue;
+      depFileNames.add(tableName);
+
+    }
+
+    addFileDependencies(target, depFileNames);
+  }
+
+  /* Add dependencies for each referenced file that is also a build target */
   private void addFileDependencies(TargetKey target, Set<String> fileNames) {
     for (String depFileName : fileNames) {
       TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
