@@ -247,7 +247,11 @@ public class StreamCompilationIT {
       /* Validate DSPF, PRTF  REFFLD dependency */
       TargetKey depsART200D = spec.getTargetKey(new TargetKey("CURLIB.ART200D.DSPF.DDS"));
       assertNotNull(depsART200D, "Deps target should not be null");
-      assertEquals(2, depsART200D.getChildsCount(), "Childs of target " + depsART200D.asString() + " should be 2");
+      assertEquals(2, depsART200D.getChildsCount(), "REFFLD Childs of target " + depsART200D.asString() + " should be 2");
+
+      TargetKey depsFAM301D = spec.getTargetKey(new TargetKey("CURLIB.FAM301D.DSPF.DDS"));
+      assertNotNull(depsFAM301D, "Deps target should not be null");
+      assertEquals(1, depsFAM301D.getChildsCount(), "REFFLD Childs of target " + depsFAM301D.asString() + " should be 1");
 
 
     } catch (CompilerException e) {
