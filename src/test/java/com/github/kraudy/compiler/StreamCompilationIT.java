@@ -214,9 +214,10 @@ public class StreamCompilationIT {
       assertNotNull(depsFAM300, "Deps target should not be null");
       assertEquals(1, depsFAM300.getChildsCount(), "Childs of target " + depsFAM300.asString() + " should be 1");
 
+      // This also finds BndDir y ExtPgm
       TargetKey depsART200 = spec.getTargetKey(new TargetKey("CURLIB.ART200.PGM.SQLRPGLE"));
       assertNotNull(depsART200, "Deps target should not be null");
-      assertEquals(3, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 3");
+      assertEquals(5, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 5: 2 Files, 1 Dspf, 1 Bnddir, 1 ExtPgm");
 
       /* Validate PF REF file */
       TargetKey depsVATDEF = spec.getTargetKey(new TargetKey("CURLIB.VATDEF.PF.DDS"));

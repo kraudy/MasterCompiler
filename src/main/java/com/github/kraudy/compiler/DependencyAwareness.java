@@ -68,10 +68,15 @@ public class DependencyAwareness {
   private static final Pattern DDS_PFILE_PATTERN = Pattern.compile(
       "\\bPFILE\\s*\\(\\s*([A-Z0-9$#@_]{1,10})\\s*\\)", Pattern.CASE_INSENSITIVE);
 
+  /* Pattern for REFFLD(filename) in DDS (for DSPF, PRTF) */
   private static final Pattern DDS_REFFLD_PATTERN = Pattern.compile(
     "REFFLD\\s*\\(\\s*([A-Z0-9$#@_]{1,10}(?:/[A-Z0-9$#@_]{1,10})?)"
     + "(?:\\s+(?:(?:\\*LIBL|[A-Z0-9$#@_]{1,10})/)?([A-Z0-9$#@_]{1,10}))?\\s*\\)",
     Pattern.CASE_INSENSITIVE);
+
+  /* Pattern for Extpgm(pgm) in  */
+  private static final Pattern EXTPGM_PATTERN = Pattern.compile(
+    "\\bEXTPGM\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
 
   private final AS400 system;
   private final boolean debug;
@@ -170,6 +175,41 @@ public class DependencyAwareness {
           break;
           /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
 
+        default:
+          break;
+      }
+
+      /* Get extpgm */
+      switch (target.getCompilationCommand()) {
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+        case CRTRPGMOD:
+          /* Collect unique external program names referenced via EXTPGM */
+        Set<String> extPgmNames = new HashSet<>();
+
+        Matcher extpgmMatcher = EXTPGM_PATTERN.matcher(sourceCode);
+        while (extpgmMatcher.find()) {
+          String pgmName = extpgmMatcher.group(1).trim().toUpperCase();
+          if (!pgmName.isEmpty()) {
+            extPgmNames.add(pgmName);
+          }
+        }
+
+        /* Add dependencies for each referenced *PGM that is also a build target */
+        for (String pgmName : extPgmNames) {
+          TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
+          if (pgmKey == null || !pgmKey.isProgram()) { 
+            if (verbose) logger.info("Referenced EXTPGM program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
+            continue;
+          }
+          if (verbose) logger.info("EXTPGM dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (EXTPGM('" + pgmName + "'))");
+          /* Files are child of Target */
+          target.addChild(pgmKey);
+          /* Target is father of files */
+          pgmKey.addFather(target);
+        }
+          break;
+      
         default:
           break;
       }

@@ -324,7 +324,8 @@ public class TargetKey {
 
   public String asMapKey() {
     /* We use  getObjectType to handle different file types*/
-    return objectName + "." + getObjectType(); // + "." + sourceType.name(); // Should add the source type
+    //return objectName + "." + getObjectType(); // + "." + sourceType.name(); // Should add the source type
+    return objectName + "." + getObjectTypeName(); // + "." + sourceType.name(); // Should add the source type
   }
 
   public String asFileName() {
