@@ -227,17 +227,7 @@ public class DependencyAwareness {
 
           getFixedFormatFilesDependencies(target, sourceCode);
 
-          /* 2. Free-format DCL-F */
-          Matcher freeMatcher = FREE_DCL_F.matcher(sourceCode);
-          while (freeMatcher.find()) {
-            String rawName = freeMatcher.group(1).trim().toUpperCase();
-            if (rawName.isEmpty()) continue;
-
-            // Strip library if qualified (handles MYLIB/MYFILE or rare MYLIB.MYFILE)
-            String fileName = rawName.replaceAll("^.*[\\/.]", "");
-            if (fileName.isEmpty()) continue;
-            depFileNames.add(fileName);
-          }
+          getFreeFormatFileDependencies(target, sourceCode);          
 
           /* 3. Embedded SQL table references */
           Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
@@ -408,7 +398,24 @@ public class DependencyAwareness {
     }
 
     addFileDependencies(target, depFileNames);
+  }
 
+  /* 2. Free-format DCL-F */
+  private void getFreeFormatFileDependencies(TargetKey target, String sourceCode){
+    Set<String> depFileNames = new HashSet<>();
+
+    Matcher freeMatcher = FREE_DCL_F.matcher(sourceCode);
+    while (freeMatcher.find()) {
+      String rawName = freeMatcher.group(1).trim().toUpperCase();
+      if (rawName.isEmpty()) continue;
+
+      // Strip library if qualified (handles MYLIB/MYFILE or rare MYLIB.MYFILE)
+      String fileName = rawName.replaceAll("^.*[\\/.]", "");
+      if (fileName.isEmpty()) continue;
+      depFileNames.add(fileName);
+    }
+
+    addFileDependencies(target, depFileNames);
   }
 
   private void addFileDependencies(TargetKey target, Set<String> fileNames) {
