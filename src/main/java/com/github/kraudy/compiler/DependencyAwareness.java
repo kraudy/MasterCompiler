@@ -162,22 +162,9 @@ public class DependencyAwareness {
       
         case CRTBNDRPG:
         case CRTSQLRPGI:
+        case CRTRPGMOD:
           /*  Scan source for BndDir */
-          Matcher m = BNDDIR_PATTERN.matcher(sourceCode);
-
-          if (m.find()) {
-            String bndDirName = m.group(1).toUpperCase(); // e.g., "SAMPLE"
-            if (bndDirName.isEmpty()) break;
-            TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
-            if (bndDirDep == null) break;
-            if (!bndDirDep.isBndDir()) break;
-
-            /* Add bnddir as target child */
-            target.addChild(bndDirDep);
-            /* Add target as bnddir father */
-            bndDirDep.addFather(target);
-            if (verbose) logger.info("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
-          }
+          getBndDirDependencies(target, sourceCode);
           break;
           /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
 
@@ -191,32 +178,7 @@ public class DependencyAwareness {
         case CRTSQLRPGI:
         case CRTRPGMOD:
           /* Collect unique external program names referenced via EXTPGM */
-        Set<String> extPgmNames = new HashSet<>();
-
-        Matcher extpgmMatcher = EXTPGM_PATTERN.matcher(sourceCode);
-        while (extpgmMatcher.find()) {
-          String pgmName = extpgmMatcher.group(1).trim().toUpperCase();
-          if (!pgmName.isEmpty()) {
-            extPgmNames.add(pgmName);
-          }
-        }
-
-        /* Add dependencies for each referenced *PGM that is also a build target */
-        for (String pgmName : extPgmNames) {
-          TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
-          if (pgmKey == null || !pgmKey.isProgram()) { 
-            if (verbose) logger.info("Referenced EXTPGM program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
-            continue;
-          }
-          if (verbose) logger.info("EXTPGM dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (EXTPGM('" + pgmName + "'))");
-          /* Files are child of Target */
-          target.addChild(pgmKey);
-          /* Target is father of files */
-          pgmKey.addFather(target);
-        }
-          break;
-      
-        default:
+          getExtPgmDependencies(target, sourceCode);
           break;
       }
 
@@ -281,6 +243,50 @@ public class DependencyAwareness {
         default:
           break;
       }
+    }
+  }
+
+  private void getBndDirDependencies(TargetKey target, String sourceCode){
+    Matcher m = BNDDIR_PATTERN.matcher(sourceCode);
+
+    if (!m.find()) return;
+
+    String bndDirName = m.group(1).toUpperCase(); // e.g., "SAMPLE"
+    if (bndDirName.isEmpty()) return;
+    TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
+    if (bndDirDep == null) return;
+    if (!bndDirDep.isBndDir()) return;
+
+    /* Add bnddir as target child */
+    target.addChild(bndDirDep);
+    /* Add target as bnddir father */
+    bndDirDep.addFather(target);
+    if (verbose) logger.info("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
+  
+  }
+
+  private void getExtPgmDependencies(TargetKey target, String sourceCode){
+    Set<String> extPgmNames = new HashSet<>();
+
+    Matcher extpgmMatcher = EXTPGM_PATTERN.matcher(sourceCode);
+    while (extpgmMatcher.find()) {
+      String pgmName = extpgmMatcher.group(1).trim().toUpperCase();
+      if (pgmName.isEmpty()) continue;
+      extPgmNames.add(pgmName);
+    }
+
+    /* Add dependencies for each referenced *PGM that is also a build target */
+    for (String pgmName : extPgmNames) {
+      TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
+      if (pgmKey == null || !pgmKey.isProgram()) { 
+        if (verbose) logger.info("Referenced EXTPGM program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logger.info("EXTPGM dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (EXTPGM('" + pgmName + "'))");
+      /* Files are child of Target */
+      target.addChild(pgmKey);
+      /* Target is father of files */
+      pgmKey.addFather(target);
     }
   }
 
