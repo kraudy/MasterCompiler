@@ -219,6 +219,11 @@ public class StreamCompilationIT {
       assertNotNull(depsFAM300, "Deps target should not be null");
       assertEquals(1, depsFAM300.getChildsCount(), "Childs of target " + depsFAM300.asString() + " should be 1");
 
+      // fixed format rpg opm
+      TargetKey depsCOU200 = spec.getTargetKey(new TargetKey("CURLIB.COU200.PGM.RPG"));
+      assertNotNull(depsCOU200, "Deps target should not be null");
+      assertEquals(2, depsCOU200.getChildsCount(), "Childs of target " + depsCOU200.asString() + " should be 2");
+
       // This also finds BndDir y ExtPgm
       TargetKey depsART200 = spec.getTargetKey(new TargetKey("CURLIB.ART200.PGM.SQLRPGLE"));
       assertNotNull(depsART200, "Deps target should not be null");

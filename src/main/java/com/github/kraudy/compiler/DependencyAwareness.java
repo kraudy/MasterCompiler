@@ -46,8 +46,11 @@ public class DependencyAwareness {
    * - Capture up to 10 characters for the file name (columns 7-16)
    */
   private static final Pattern FIXED_F_SPEC = Pattern.compile(
+      //"^.{5}[fF](.{10})[IOUBC]", Pattern.CASE_INSENSITIVE);
+      "^.{5}[fF]\\s*([A-Z0-9$#@_]{1,10})\\b", Pattern.CASE_INSENSITIVE);
+      //"^.{5}[fF]\\s+([A-Z0-9$#@_]{1,10})\\s+[A-Z0-9$#@_\\-]*[IOUBC]", Pattern.CASE_INSENSITIVE);
+
       //"^.{5}[fF](.{0,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
-      "^.{5}[fF](.{10})[IOUBC]", Pattern.CASE_INSENSITIVE);
       //"^.{5}[fF]\\s*([A-Z0-9$#@_]{1,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
       //"^.{5}[fF]([A-Z0-9$#@_]{1,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
 
@@ -226,6 +229,10 @@ public class DependencyAwareness {
 
           getFreeFormatFileDependencies(target, sourceCode);    
           break;
+
+        case CRTRPGPGM:
+          getFixedFormatFilesDependencies(target, sourceCode);
+          break;
       }
 
       /* Get sql embedded dependencies */
@@ -238,93 +245,16 @@ public class DependencyAwareness {
       /* Get PF and LF dependencies */
       switch (target.getCompilationCommand()) {
         case CRTLF:
-          Set<String> basePfNames = new HashSet<>();
-
-          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
-            while (scanner.hasNextLine()) {
-              String line = scanner.nextLine();
-              Matcher pfileMatcher = DDS_PFILE_PATTERN.matcher(line);
-              while (pfileMatcher.find()) {
-                String basePfName = pfileMatcher.group(1).trim().toUpperCase();
-                if (!basePfName.isEmpty()) {
-                  basePfNames.add(basePfName);
-                }
-              }
-            }
-          }
-
-          for (String basePfName : basePfNames) {
-            TargetKey basePfKey = keyLookup.getOrDefault(basePfName + "." + ParamCmd.FILE.name(), null);
-            if (basePfKey == null || !basePfKey.isFile()) {
-              if (verbose) logger.info("Base PFILE not a build target: " + basePfName + " (in " + target.asString() + ")");
-              continue;
-            }
-            if (verbose) logger.info("PFILE dependency: " + target.asString() + " depends on base PF " + basePfKey.asString() + " (PFILE(" + basePfName + "))");
-            /* Files are child of Target */
-            target.addChild(basePfKey);
-            /* Target is father of files */
-            basePfKey.addFather(target);
-          }
+          getLfPFILEDependencies(target, sourceCode);
           break;
       
         case CRTPF:
-          Set<String> refFileNames = new HashSet<>();
-
-          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
-            while (scanner.hasNextLine()) {
-              String line = scanner.nextLine();
-              Matcher refMatcher = DDS_REF_PATTERN.matcher(line);
-              while (refMatcher.find()) {
-                String refFileName = refMatcher.group(1).trim().toUpperCase();
-                if (refFileName.isEmpty()) continue;
-                refFileNames.add(refFileName);
-              }
-            }
-          }
-
-          for (String refFileName : refFileNames) {
-            TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
-            if (refFileKey == null || !refFileKey.isFile()) {
-              if (verbose) logger.info("Referenced REF file not a build target: " + refFileName + " (in " + target.asString() + ")");
-              continue;
-            }
-            if (verbose) logger.info("REF dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REF(" + refFileName + "))");
-            /* Files are child of Target */
-            target.addChild(refFileKey);
-            /* Target is father of files */
-            refFileKey.addFather(target);
-          }
+          getPfREFDependencies(target, sourceCode);
           break;
 
         case CRTDSPF:
         case CRTPRTF:
-          Set<String> reffldFilesNames = new HashSet<>();
-
-          try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
-            while (scanner.hasNextLine()) {
-              String line = scanner.nextLine();
-              Matcher reffldMatcher = DDS_REFFLD_PATTERN.matcher(line);
-              while (reffldMatcher.find()) {
-                String refFileName = reffldMatcher.group(2);
-                if (refFileName != null && !refFileName.trim().isEmpty()) {
-                  reffldFilesNames.add(refFileName.trim().toUpperCase());
-                }
-              }
-            }
-          }
-
-          for (String refFileName : reffldFilesNames) {
-            TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
-            if (refFileKey == null || !refFileKey.isFile()) {
-              if (verbose) logger.info("Referenced REFFLD file not a build target: " + refFileName + " (in " + target.asString() + ")");
-              continue;
-            }
-            if (verbose) logger.info("REFFLD dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REFFLD(... " + refFileName + "))");
-            /* Files are child of Target */
-            target.addChild(refFileKey);
-            /* Target is father of files */
-            refFileKey.addFather(target);
-          }
+          geDdsREFFLDDependencies(target, sourceCode);
           break;
 
         default:
@@ -354,6 +284,95 @@ public class DependencyAwareness {
     }
   }
 
+  private void getLfPFILEDependencies(TargetKey target, String sourceCode){
+    Set<String> basePfNames = new HashSet<>();
+
+    try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+      while (scanner.hasNextLine()) {
+        String line = scanner.nextLine();
+        Matcher pfileMatcher = DDS_PFILE_PATTERN.matcher(line);
+        while (pfileMatcher.find()) {
+          String basePfName = pfileMatcher.group(1).trim().toUpperCase();
+          if (!basePfName.isEmpty()) {
+            basePfNames.add(basePfName);
+          }
+        }
+      }
+    }
+
+    for (String basePfName : basePfNames) {
+      TargetKey basePfKey = keyLookup.getOrDefault(basePfName + "." + ParamCmd.FILE.name(), null);
+      if (basePfKey == null || !basePfKey.isFile()) {
+        if (verbose) logger.info("Base PFILE not a build target: " + basePfName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logger.info("PFILE dependency: " + target.asString() + " depends on base PF " + basePfKey.asString() + " (PFILE(" + basePfName + "))");
+      /* Files are child of Target */
+      target.addChild(basePfKey);
+      /* Target is father of files */
+      basePfKey.addFather(target);
+    }
+  }
+
+  private void getPfREFDependencies(TargetKey target, String sourceCode){
+    Set<String> refFileNames = new HashSet<>();
+
+    try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+      while (scanner.hasNextLine()) {
+        String line = scanner.nextLine();
+        Matcher refMatcher = DDS_REF_PATTERN.matcher(line);
+        while (refMatcher.find()) {
+          String refFileName = refMatcher.group(1).trim().toUpperCase();
+          if (refFileName.isEmpty()) continue;
+          refFileNames.add(refFileName);
+        }
+      }
+    }
+
+    for (String refFileName : refFileNames) {
+      TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
+      if (refFileKey == null || !refFileKey.isFile()) {
+        if (verbose) logger.info("Referenced REF file not a build target: " + refFileName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logger.info("REF dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REF(" + refFileName + "))");
+      /* Files are child of Target */
+      target.addChild(refFileKey);
+      /* Target is father of files */
+      refFileKey.addFather(target);
+    }
+  }
+
+  private void geDdsREFFLDDependencies(TargetKey target, String sourceCode){
+    Set<String> reffldFilesNames = new HashSet<>();
+
+    try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
+      while (scanner.hasNextLine()) {
+        String line = scanner.nextLine();
+        Matcher reffldMatcher = DDS_REFFLD_PATTERN.matcher(line);
+        while (reffldMatcher.find()) {
+          String refFileName = reffldMatcher.group(2);
+          if (refFileName != null && !refFileName.trim().isEmpty()) {
+            reffldFilesNames.add(refFileName.trim().toUpperCase());
+          }
+        }
+      }
+    }
+
+    for (String refFileName : reffldFilesNames) {
+      TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
+      if (refFileKey == null || !refFileKey.isFile()) {
+        if (verbose) logger.info("Referenced REFFLD file not a build target: " + refFileName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logger.info("REFFLD dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REFFLD(... " + refFileName + "))");
+      /* Files are child of Target */
+      target.addChild(refFileKey);
+      /* Target is father of files */
+      refFileKey.addFather(target);
+    }
+  }
+
   /* 1. Fixed-format F-specs */
   private void getFixedFormatFilesDependencies(TargetKey target, String sourceCode){
     Set<String> depFileNames = new HashSet<>();
@@ -365,8 +384,12 @@ public class DependencyAwareness {
         Matcher fixedMatcher = FIXED_F_SPEC.matcher(line);
         if (!fixedMatcher.find())  continue;
         String fileName = fixedMatcher.group(1).trim().toUpperCase();
-        //TODO: Check for /n or /t characters
+        fileName = fileName.replaceAll("[\\t\\n]", ""); // Remove /t /n
         if (fileName.isEmpty()) continue;
+        // Skip non-files
+        //if (fileName.matches("(?i)SFL.*|CTL.*|KEY.*|INFO.*|INDDS|INFDS|RENAME|SFILE|RRN.*|OPT.*")) {
+        //  continue;
+        //}
         depFileNames.add(fileName);
       }
     }
