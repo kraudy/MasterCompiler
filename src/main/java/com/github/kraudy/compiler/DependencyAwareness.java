@@ -134,115 +134,119 @@ public class DependencyAwareness {
 
       IFSFile sourceFile = new IFSFile(system, fullPath);
       
-      if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + relPath);
+      if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
 
-      String sourceCode;
-      try (InputStream stream = new IFSFileInputStream(sourceFile)) {
-        sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-      }
+      processTarget(target, sourceFile);
+    }
+  }
 
-      switch (target.getCompilationCommand()) {
-        /* Get srvpgm modules */
-        case CRTSRVPGM:
-          List<String> modulesList = target.getModulesNameList();
-          if (modulesList.isEmpty()) break;
+  private void processTarget(TargetKey target, IFSFile sourceFile) throws Exception{
+    String sourceCode;
+    try (InputStream stream = new IFSFileInputStream(sourceFile)) {
+      sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+    }
 
-          for (String mod : modulesList) {
-            TargetKey modDep = keyLookup.getOrDefault(mod + "." + ObjectType.MODULE.name(), null);
-            if (modDep == null) continue;
-            if (!modDep.isModule()) continue;
+    switch (target.getCompilationCommand()) {
+      /* Get srvpgm modules */
+      case CRTSRVPGM:
+        List<String> modulesList = target.getModulesNameList();
+        if (modulesList.isEmpty()) break;
 
-             /* Add module dependency to SrvPgm */
-            target.addChild(modDep);
-            /* Add SrvPgm dependency to module */
-            modDep.addFather(target);
-            if (verbose) logger.info("Dependency: " + target.asString() + " depends on " + modDep.asString());
-          }
-          break;
-      
-        case CRTBNDRPG:
-        case CRTSQLRPGI:
-        case CRTRPGMOD:
-          /*  Scan source for BndDir */
-          getBndDirDependencies(target, sourceCode);
-          break;
-          /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
+        for (String mod : modulesList) {
+          TargetKey modDep = keyLookup.getOrDefault(mod + "." + ObjectType.MODULE.name(), null);
+          if (modDep == null) continue;
+          if (!modDep.isModule()) continue;
 
-        default:
-          break;
-      }
+            /* Add module dependency to SrvPgm */
+          target.addChild(modDep);
+          /* Add SrvPgm dependency to module */
+          modDep.addFather(target);
+          if (verbose) logger.info("Dependency: " + target.asString() + " depends on " + modDep.asString());
+        }
+        break;
+    
+      case CRTBNDRPG:
+      case CRTSQLRPGI:
+      case CRTRPGMOD:
+        /*  Scan source for BndDir */
+        getBndDirDependencies(target, sourceCode);
+        break;
+        /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
 
-      /* Get extpgm */
-      switch (target.getCompilationCommand()) {
-        case CRTBNDRPG:
-        case CRTSQLRPGI:
-        case CRTRPGMOD:
-          /* Collect unique external program names referenced via EXTPGM */
-          getExtPgmDependencies(target, sourceCode);
-          break;
-      }
+      default:
+        break;
+    }
 
-      /* Get f spec files */
-      switch (target.getCompilationCommand()) {
-        case CRTBNDRPG:
-        case CRTSQLRPGI:
-        case CRTRPGMOD:
-          getFixedFormatFilesDependencies(target, sourceCode);
+    /* Get extpgm */
+    switch (target.getCompilationCommand()) {
+      case CRTBNDRPG:
+      case CRTSQLRPGI:
+      case CRTRPGMOD:
+        /* Collect unique external program names referenced via EXTPGM */
+        getExtPgmDependencies(target, sourceCode);
+        break;
+    }
 
-          getFreeFormatFileDependencies(target, sourceCode);    
-          break;
+    /* Get f spec files */
+    switch (target.getCompilationCommand()) {
+      case CRTBNDRPG:
+      case CRTSQLRPGI:
+      case CRTRPGMOD:
+        getFixedFormatFilesDependencies(target, sourceCode);
 
-        case CRTRPGPGM:
-          getFixedFormatFilesDependencies(target, sourceCode);
-          break;
-      }
+        getFreeFormatFileDependencies(target, sourceCode);    
+        break;
 
-      /* Get sql embedded dependencies */
-      switch (target.getCompilationCommand()) {
-        case CRTSQLRPGI:
-          getEmbeddedSqlDependencies(target, sourceCode);          
-          break;
-      }
+      case CRTRPGPGM:
+        getFixedFormatFilesDependencies(target, sourceCode);
+        break;
+    }
 
-      /* Get PF and LF dependencies */
-      switch (target.getCompilationCommand()) {
-        case CRTLF:
-          getLfPFILEDependencies(target, sourceCode);
-          break;
-      
-        case CRTPF:
-          getPfREFDependencies(target, sourceCode);
-          break;
+    /* Get sql embedded dependencies */
+    switch (target.getCompilationCommand()) {
+      case CRTSQLRPGI:
+        getEmbeddedSqlDependencies(target, sourceCode);          
+        break;
+    }
 
-        case CRTDSPF:
-        case CRTPRTF:
-          geDdsREFFLDDependencies(target, sourceCode);
-          break;
+    /* Get PF and LF dependencies */
+    switch (target.getCompilationCommand()) {
+      case CRTLF:
+        getLfPFILEDependencies(target, sourceCode);
+        break;
+    
+      case CRTPF:
+        getPfREFDependencies(target, sourceCode);
+        break;
 
-        default:
-          break;
-      }
+      case CRTDSPF:
+      case CRTPRTF:
+        geDdsREFFLDDependencies(target, sourceCode);
+        break;
 
-      //TODO: Another switch for opm
-      switch (target.getCompilationCommand()) {
-        case CRTRPGPGM:
-          break;
-      
-        case CRTCLPGM:
-          break;
+      default:
+        break;
+    }
 
-        default:
-          break;
-      }
+    //TODO: Another switch for opm
+    switch (target.getCompilationCommand()) {
+      case CRTRPGPGM:
+        break;
+    
+      case CRTCLPGM:
+        break;
 
-      //TODO: Another switch for SQL
-      switch (target.getCompilationCommand()) {
-        case RUNSQLSTM:
-          break;
+      default:
+        break;
+    }
 
-        default:
-          break;
-      }
+    //TODO: Another switch for SQL
+    switch (target.getCompilationCommand()) {
+      case RUNSQLSTM:
+        break;
+
+      default:
+        break;
     }
   }
 
