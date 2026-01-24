@@ -2,28 +2,23 @@ package com.github.kraudy.compiler;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.sql.Connection;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
-import com.github.kraudy.compiler.CompilationPattern.SourceType;
-import com.github.kraudy.compiler.CompilationPattern.SysCmd;
-import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.IFSFile;
 import com.ibm.as400.access.IFSFileInputStream;
@@ -87,6 +82,10 @@ public class DependencyAwareness {
   private final boolean verbose;
   private final Map<String, TargetKey> keyLookup;
 
+  private final ConcurrentHashMap<TargetKey, List<String>> targetLogs = new ConcurrentHashMap<>();
+  private final AtomicInteger processed = new AtomicInteger();
+  private int totalTargets = 0;
+
   public DependencyAwareness(AS400 system, boolean debug, boolean verbose) {
     this.system = system;
     this.debug = debug;
@@ -98,16 +97,20 @@ public class DependencyAwareness {
 
     if (verbose) logger.info("Detecting source object dependencies");
     /* This let us map name string to object name. TODO: There has to be a better way of doing this */
-    //Map<String, TargetKey> keyLookup = new HashMap<>();
+
+    this.totalTargets = globalSpec.targets.size();
+
+    keyLookup.clear();
     for (TargetKey k : globalSpec.targets.keySet()) {
       keyLookup.put(k.asMapKey(), k);
     }
+
+    List<CompletableFuture<Void>> futures = new ArrayList<>();
 
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-      if (verbose) logger.info("Scannig sources: " + target.asString());
       /* If no stream file, continue, could try to migrate  */
 
       String relPath = "";
@@ -120,7 +123,7 @@ public class DependencyAwareness {
       }
 
       if (relPath.isEmpty()){
-        if (verbose) logger.info("Target does not contains stream file to scan");
+        if (verbose) logger.info("Target " + target.asString() + " does not contains stream file to scan");
         continue;
       }
 
@@ -136,121 +139,164 @@ public class DependencyAwareness {
       
       if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
 
-      processTarget(target, sourceFile);
+      CompletableFuture<Void> future = processTargetAsync(target, sourceFile);
+      futures.add(future);
+
+      //processTarget(target, sourceFile);
     }
+
+    // Wait for all
+    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+    // Print logs in original order
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey target = entry.getKey();
+      List<String> logs = targetLogs.getOrDefault(target, List.of());
+      if (logs.size() == 0) {
+        logger.info(target.asString() + ": No dependencies found");
+        continue;
+      }
+      for (String log : logs) {
+        logger.info(log);
+      }
+      if (logs.size() == 1) {
+        logger.info("No dependencies found");
+        continue;
+      }
+    }
+
   }
 
-  private void processTarget(TargetKey target, IFSFile sourceFile) throws Exception{
-    String sourceCode;
-    try (InputStream stream = new IFSFileInputStream(sourceFile)) {
-      sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+  //TODO: resolvePath
+
+  private CompletableFuture<Void> processTargetAsync(TargetKey target, IFSFile sourceFile) {
+  return CompletableFuture.runAsync(() -> {
+    List<String> logs = new ArrayList<>();
+    try {
+      if (verbose) logs.add("Scannig sources: " + target.asString());
+
+      String sourceCode;
+      try (InputStream stream = new IFSFileInputStream(sourceFile)) {
+        sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+      }
+
+      logs.add("Dependencies of " + target.asString());
+
+      switch (target.getCompilationCommand()) {
+        /* Get srvpgm modules */
+        case CRTSRVPGM:
+          List<String> modulesList = target.getModulesNameList();
+          if (modulesList.isEmpty()) break;
+
+          for (String mod : modulesList) {
+            TargetKey modDep = keyLookup.getOrDefault(mod + "." + ObjectType.MODULE.name(), null);
+            if (modDep == null) continue;
+            if (!modDep.isModule()) continue;
+
+              /* Add module dependency to SrvPgm */
+            target.addChild(modDep);
+            /* Add SrvPgm dependency to module */
+            modDep.addFather(target);
+            if (verbose) logs.add("Dependency: " + target.asString() + " depends on " + modDep.asString());
+          }
+          break;
+      
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+        case CRTRPGMOD:
+          /*  Scan source for BndDir */
+          getBndDirDependencies(target, sourceCode, logs);
+          break;
+          /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
+
+        default:
+          break;
+      }
+
+      /* Get extpgm */
+      switch (target.getCompilationCommand()) {
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+        case CRTRPGMOD:
+          /* Collect unique external program names referenced via EXTPGM */
+          getExtPgmDependencies(target, sourceCode, logs);
+          break;
+      }
+
+      /* Get f spec files */
+      switch (target.getCompilationCommand()) {
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+        case CRTRPGMOD:
+          getFixedFormatFilesDependencies(target, sourceCode, logs);
+
+          getFreeFormatFileDependencies(target, sourceCode, logs);    
+          break;
+
+        case CRTRPGPGM:
+          getFixedFormatFilesDependencies(target, sourceCode, logs);
+          break;
+      }
+
+      /* Get sql embedded dependencies */
+      switch (target.getCompilationCommand()) {
+        case CRTSQLRPGI:
+          getEmbeddedSqlDependencies(target, sourceCode, logs);          
+          break;
+      }
+
+      /* Get PF and LF dependencies */
+      switch (target.getCompilationCommand()) {
+        case CRTLF:
+          getLfPFILEDependencies(target, sourceCode, logs);
+          break;
+      
+        case CRTPF:
+          getPfREFDependencies(target, sourceCode, logs);
+          break;
+
+        case CRTDSPF:
+        case CRTPRTF:
+          geDdsREFFLDDependencies(target, sourceCode, logs);
+          break;
+
+        default:
+          break;
+      }
+
+      //TODO: Another switch for opm
+      switch (target.getCompilationCommand()) {
+        case CRTRPGPGM:
+          break;
+      
+        case CRTCLPGM:
+          break;
+
+        default:
+          break;
+      }
+
+      //TODO: Another switch for SQL
+      switch (target.getCompilationCommand()) {
+        case RUNSQLSTM:
+          break;
+
+        default:
+          break;
+      }
+    } catch (Exception e) {
+      logs.add("ERROR processing " + target.asString() + ": " + e.getMessage());
+    } finally {
+      targetLogs.put(target, logs);  // Store for later ordered printing
+      int count = processed.incrementAndGet();
+      double percent = count * 100.0 / totalTargets;
+      logger.info("Processed {} of {} targets ({}%)", count, totalTargets, String.format("%.1f", percent));
     }
-
-    switch (target.getCompilationCommand()) {
-      /* Get srvpgm modules */
-      case CRTSRVPGM:
-        List<String> modulesList = target.getModulesNameList();
-        if (modulesList.isEmpty()) break;
-
-        for (String mod : modulesList) {
-          TargetKey modDep = keyLookup.getOrDefault(mod + "." + ObjectType.MODULE.name(), null);
-          if (modDep == null) continue;
-          if (!modDep.isModule()) continue;
-
-            /* Add module dependency to SrvPgm */
-          target.addChild(modDep);
-          /* Add SrvPgm dependency to module */
-          modDep.addFather(target);
-          if (verbose) logger.info("Dependency: " + target.asString() + " depends on " + modDep.asString());
-        }
-        break;
-    
-      case CRTBNDRPG:
-      case CRTSQLRPGI:
-      case CRTRPGMOD:
-        /*  Scan source for BndDir */
-        getBndDirDependencies(target, sourceCode);
-        break;
-        /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
-
-      default:
-        break;
     }
-
-    /* Get extpgm */
-    switch (target.getCompilationCommand()) {
-      case CRTBNDRPG:
-      case CRTSQLRPGI:
-      case CRTRPGMOD:
-        /* Collect unique external program names referenced via EXTPGM */
-        getExtPgmDependencies(target, sourceCode);
-        break;
-    }
-
-    /* Get f spec files */
-    switch (target.getCompilationCommand()) {
-      case CRTBNDRPG:
-      case CRTSQLRPGI:
-      case CRTRPGMOD:
-        getFixedFormatFilesDependencies(target, sourceCode);
-
-        getFreeFormatFileDependencies(target, sourceCode);    
-        break;
-
-      case CRTRPGPGM:
-        getFixedFormatFilesDependencies(target, sourceCode);
-        break;
-    }
-
-    /* Get sql embedded dependencies */
-    switch (target.getCompilationCommand()) {
-      case CRTSQLRPGI:
-        getEmbeddedSqlDependencies(target, sourceCode);          
-        break;
-    }
-
-    /* Get PF and LF dependencies */
-    switch (target.getCompilationCommand()) {
-      case CRTLF:
-        getLfPFILEDependencies(target, sourceCode);
-        break;
-    
-      case CRTPF:
-        getPfREFDependencies(target, sourceCode);
-        break;
-
-      case CRTDSPF:
-      case CRTPRTF:
-        geDdsREFFLDDependencies(target, sourceCode);
-        break;
-
-      default:
-        break;
-    }
-
-    //TODO: Another switch for opm
-    switch (target.getCompilationCommand()) {
-      case CRTRPGPGM:
-        break;
-    
-      case CRTCLPGM:
-        break;
-
-      default:
-        break;
-    }
-
-    //TODO: Another switch for SQL
-    switch (target.getCompilationCommand()) {
-      case RUNSQLSTM:
-        break;
-
-      default:
-        break;
-    }
+    );
   }
 
-  private void getBndDirDependencies(TargetKey target, String sourceCode){
+  private void getBndDirDependencies(TargetKey target, String sourceCode, List<String> logs){
     Matcher m = BNDDIR_PATTERN.matcher(sourceCode);
 
     if (!m.find()) return;
@@ -265,11 +311,11 @@ public class DependencyAwareness {
     target.addChild(bndDirDep);
     /* Add target as bnddir father */
     bndDirDep.addFather(target);
-    if (verbose) logger.info("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
+    if (verbose) logs.add("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
   
   }
 
-  private void getExtPgmDependencies(TargetKey target, String sourceCode){
+  private void getExtPgmDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> extPgmNames = new HashSet<>();
 
     Matcher extpgmMatcher = EXTPGM_PATTERN.matcher(sourceCode);
@@ -283,10 +329,10 @@ public class DependencyAwareness {
     for (String pgmName : extPgmNames) {
       TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
       if (pgmKey == null || !pgmKey.isProgram()) { 
-        if (verbose) logger.info("Referenced EXTPGM program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
+        if (verbose) logs.add("Referenced EXTPGM program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
         continue;
       }
-      if (verbose) logger.info("EXTPGM dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (EXTPGM('" + pgmName + "'))");
+      if (verbose) logs.add("EXTPGM dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (EXTPGM('" + pgmName + "'))");
       /* Files are child of Target */
       target.addChild(pgmKey);
       /* Target is father of files */
@@ -294,7 +340,7 @@ public class DependencyAwareness {
     }
   }
 
-  private void getLfPFILEDependencies(TargetKey target, String sourceCode){
+  private void getLfPFILEDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> basePfNames = new HashSet<>();
 
     try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
@@ -313,10 +359,10 @@ public class DependencyAwareness {
     for (String basePfName : basePfNames) {
       TargetKey basePfKey = keyLookup.getOrDefault(basePfName + "." + ParamCmd.FILE.name(), null);
       if (basePfKey == null || !basePfKey.isFile()) {
-        if (verbose) logger.info("Base PFILE not a build target: " + basePfName + " (in " + target.asString() + ")");
+        if (verbose) logs.add("Base PFILE not a build target: " + basePfName + " (in " + target.asString() + ")");
         continue;
       }
-      if (verbose) logger.info("PFILE dependency: " + target.asString() + " depends on base PF " + basePfKey.asString() + " (PFILE(" + basePfName + "))");
+      if (verbose) logs.add("PFILE dependency: " + target.asString() + " depends on base PF " + basePfKey.asString() + " (PFILE(" + basePfName + "))");
       /* Files are child of Target */
       target.addChild(basePfKey);
       /* Target is father of files */
@@ -324,7 +370,7 @@ public class DependencyAwareness {
     }
   }
 
-  private void getPfREFDependencies(TargetKey target, String sourceCode){
+  private void getPfREFDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> refFileNames = new HashSet<>();
 
     try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
@@ -342,10 +388,10 @@ public class DependencyAwareness {
     for (String refFileName : refFileNames) {
       TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
       if (refFileKey == null || !refFileKey.isFile()) {
-        if (verbose) logger.info("Referenced REF file not a build target: " + refFileName + " (in " + target.asString() + ")");
+        if (verbose) logs.add("Referenced REF file not a build target: " + refFileName + " (in " + target.asString() + ")");
         continue;
       }
-      if (verbose) logger.info("REF dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REF(" + refFileName + "))");
+      if (verbose) logs.add("REF dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REF(" + refFileName + "))");
       /* Files are child of Target */
       target.addChild(refFileKey);
       /* Target is father of files */
@@ -353,7 +399,7 @@ public class DependencyAwareness {
     }
   }
 
-  private void geDdsREFFLDDependencies(TargetKey target, String sourceCode){
+  private void geDdsREFFLDDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> reffldFilesNames = new HashSet<>();
 
     try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
@@ -372,10 +418,10 @@ public class DependencyAwareness {
     for (String refFileName : reffldFilesNames) {
       TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
       if (refFileKey == null || !refFileKey.isFile()) {
-        if (verbose) logger.info("Referenced REFFLD file not a build target: " + refFileName + " (in " + target.asString() + ")");
+        if (verbose) logs.add("Referenced REFFLD file not a build target: " + refFileName + " (in " + target.asString() + ")");
         continue;
       }
-      if (verbose) logger.info("REFFLD dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REFFLD(... " + refFileName + "))");
+      if (verbose) logs.add("REFFLD dependency: " + target.asString() + " references file " + refFileKey.asString() + " (REFFLD(... " + refFileName + "))");
       /* Files are child of Target */
       target.addChild(refFileKey);
       /* Target is father of files */
@@ -384,7 +430,7 @@ public class DependencyAwareness {
   }
 
   /* 1. Fixed-format F-specs */
-  private void getFixedFormatFilesDependencies(TargetKey target, String sourceCode){
+  private void getFixedFormatFilesDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> depFileNames = new HashSet<>();
 
     /* 1. Fixed-format F-specs */
@@ -404,11 +450,11 @@ public class DependencyAwareness {
       }
     }
 
-    addFileDependencies(target, depFileNames);
+    addFileDependencies(target, depFileNames, logs);
   }
 
   /* 2. Free-format DCL-F */
-  private void getFreeFormatFileDependencies(TargetKey target, String sourceCode){
+  private void getFreeFormatFileDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> depFileNames = new HashSet<>();
 
     Matcher freeMatcher = FREE_DCL_F.matcher(sourceCode);
@@ -422,11 +468,11 @@ public class DependencyAwareness {
       depFileNames.add(fileName);
     }
 
-    addFileDependencies(target, depFileNames);
+    addFileDependencies(target, depFileNames, logs);
   }
 
   /* 3. Embedded SQL table references */
-  private void getEmbeddedSqlDependencies(TargetKey target, String sourceCode){
+  private void getEmbeddedSqlDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> depFileNames = new HashSet<>();
 
     Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
@@ -440,18 +486,18 @@ public class DependencyAwareness {
 
     }
 
-    addFileDependencies(target, depFileNames);
+    addFileDependencies(target, depFileNames, logs);
   }
 
   /* Add dependencies for each referenced file that is also a build target */
-  private void addFileDependencies(TargetKey target, Set<String> fileNames) {
+  private void addFileDependencies(TargetKey target, Set<String> fileNames, List<String> logs) {
     for (String depFileName : fileNames) {
       TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
       if (fileKey == null || !fileKey.isFile()) {
-        if (verbose) logger.info("Referenced FILE not a build target, ignored: " + depFileName + " (in " + target.asString() + ")");
+        if (verbose) logs.add("Referenced FILE not a build target, ignored: " + depFileName + " (in " + target.asString() + ")");
         continue;
       }
-      if (verbose) logger.info("FILE dependency: " + target.asString() + " depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
+      if (verbose) logs.add("FILE dependency: " + target.asString() + " depends on file " + fileKey.asString() + " (referenced as " + depFileName + ")");
       /* Files are child of Target */
       target.addChild(fileKey);
       /* Target is father of files */
