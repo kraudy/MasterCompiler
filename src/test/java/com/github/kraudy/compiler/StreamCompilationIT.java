@@ -291,6 +291,11 @@ public class StreamCompilationIT {
       assertNotNull(depsORD900, "Deps target should not be null");
       assertEquals(2, depsORD900.getChildsCount(), "Childs of target " + depsORD900.asString() + " should be 2. 1 file, 1 dtaara");
 
+      /* Extname */
+      TargetKey depsORD700 = spec.getTargetKey(new TargetKey("curlib.ORD700.PGM.RPGLE"));
+      assertNotNull(depsORD700, "Deps target should not be null");
+      assertEquals(3, depsORD700.getChildsCount(), "Childs of target " + depsORD700.asString() + " should be 3. 1 Bnddir, 1 file, 1 extname");
+
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
     } finally {

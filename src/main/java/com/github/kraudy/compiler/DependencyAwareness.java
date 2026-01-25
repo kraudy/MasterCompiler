@@ -39,6 +39,9 @@ public class DependencyAwareness {
   private static final Pattern DTAARA_PATTERN = Pattern.compile(
     "\\bDTAARA\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern EXTNAME_PATTERN = Pattern.compile(
+    "\\bEXTNAME\\s*\\(\\s*['\"]?([A-Z0-9$#@_]{1,10})['\"]?\\s*\\)", Pattern.CASE_INSENSITIVE);
+
   /* Fixed-format F-spec: strict column logic
    * - Exactly 5 characters (usually blanks) before the F (column 6)
    * - F/f in column 6
@@ -230,7 +233,7 @@ public class DependencyAwareness {
           break;
       }
 
-      /* Get dtaara */
+      /* Get dtaara and extname */
       switch (target.getCompilationCommand()) {
         case CRTBNDRPG:
         case CRTSQLRPGI:
@@ -238,6 +241,9 @@ public class DependencyAwareness {
         case CRTRPGPGM:
           /* Collect dtaara referenced via DTAARA */
           getDtaAraDependencies(target, sourceCode, logs);
+
+          /* Collect EXTNAME */
+          getExtNameDependencies(target, sourceCode, logs);
           break;
       }
 
@@ -358,15 +364,36 @@ public class DependencyAwareness {
   
   }
 
+  private void getExtNameDependencies(TargetKey target, String sourceCode, List<String> logs) {
+    Set<String> extNameFiles = new HashSet<>();
+
+    Matcher matcher = EXTNAME_PATTERN.matcher(sourceCode);
+    while (matcher.find()) {
+      String fileName = matcher.group(1).trim().toUpperCase();
+      if (fileName.isEmpty()) continue;
+      extNameFiles.add(fileName);
+    }
+
+    for (String fileName : extNameFiles) {
+      TargetKey fileKey = keyLookup.getOrDefault(fileName + "." + ParamCmd.FILE.name(), null);
+      if (fileKey == null || !fileKey.isFile()) {
+        if (verbose) logs.add("Referenced EXTNAME file not a build target, ignored: " + fileName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logs.add("EXTNAME dependency: " + target.asString() + " uses record format from file " + fileKey.asString() + " (EXTNAME(" + fileName + "))");
+      target.addChild(fileKey);
+      fileKey.addFather(target);
+    }
+  }
+
   private void getDtaAraDependencies(TargetKey target, String sourceCode, List<String> logs) {
     Set<String> dtaAraNames = new HashSet<>();
 
     Matcher matcher = DTAARA_PATTERN.matcher(sourceCode);
     while (matcher.find()) {
       String name = matcher.group(1).trim().toUpperCase();
-      if (!name.isEmpty()) {
-        dtaAraNames.add(name);
-      }
+      if (name.isEmpty()) continue;
+      dtaAraNames.add(name);
     }
 
     for (String name : dtaAraNames) {
