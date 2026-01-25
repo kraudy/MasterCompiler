@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.IFSFile;
 import com.ibm.as400.access.IFSFileInputStream;
@@ -83,17 +84,18 @@ public class DependencyAwareness {
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
-  private final Map<String, TargetKey> keyLookup;
+  private final Map<String, TargetKey> keyLookup = new HashMap<>();
 
   private final ConcurrentHashMap<TargetKey, List<String>> targetLogs = new ConcurrentHashMap<>();
   private final AtomicInteger processed = new AtomicInteger();
   private int totalTargets = 0;
 
+  private final Map<String, String> fileOverrideMap = new HashMap<>();  // overriddenName -> actualToFile
+
   public DependencyAwareness(AS400 system, boolean debug, boolean verbose) {
     this.system = system;
     this.debug = debug;
     this.verbose = verbose;
-    this.keyLookup = new HashMap<>();
   }
 
   public void detectDependencies(BuildSpec globalSpec) throws Exception{
@@ -107,6 +109,9 @@ public class DependencyAwareness {
     for (TargetKey k : globalSpec.targets.keySet()) {
       keyLookup.put(k.asMapKey(), k);
     }
+
+    /* Build override map */
+    buildFileOverrideMap(globalSpec);
 
     List<CompletableFuture<Void>> futures = new ArrayList<>();
 
@@ -145,7 +150,6 @@ public class DependencyAwareness {
       CompletableFuture<Void> future = processTargetAsync(target, sourceFile);
       futures.add(future);
 
-      //processTarget(target, sourceFile);
     }
 
     // Wait for all
@@ -308,6 +312,31 @@ public class DependencyAwareness {
     }
     }
     );
+  }
+
+  private void buildFileOverrideMap(BuildSpec globalSpec) {
+    // Global before hooks
+    populateOverrideMap(globalSpec.before);
+
+    // Per-target before hooks
+    for (BuildSpec.TargetSpec spec : globalSpec.targets.values()) {
+      populateOverrideMap(spec.before);
+    }
+  }
+
+  private void populateOverrideMap(List<CommandObject> commands) {
+    //if (!commands.contains(new CommandObject(SysCmd.OVRDBF))) return;
+
+    for (CommandObject cmd : commands) {
+      if (cmd.getSystemCommand() != SysCmd.OVRDBF) continue;
+      String overridden = cmd.get(ParamCmd.FILE);     // "tmpdetord"
+      String actual = cmd.get(ParamCmd.TOFILE).replaceAll("^.*[\\/]", "");       // "detord"
+      if (overridden == null || actual == null) continue; 
+      overridden = overridden.toUpperCase();
+      actual = actual.toUpperCase();
+      this.fileOverrideMap.put(overridden, actual);
+      if (verbose) logger.info("Detected OVRDBF: {} -> {}", overridden, actual);
+  }
   }
 
   private void getBndDirDependencies(TargetKey target, String sourceCode, List<String> logs){
@@ -532,6 +561,11 @@ public class DependencyAwareness {
   /* Add dependencies for each referenced file that is also a build target */
   private void addFileDependencies(TargetKey target, Set<String> fileNames, List<String> logs) {
     for (String depFileName : fileNames) {
+      String override = this.fileOverrideMap.getOrDefault(depFileName, null);
+      if (override != null) {
+        if (verbose) logs.add("Change override " + depFileName + " for actual file " + override);
+        depFileName = override; // Change override name to actual file
+      }
       TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
       if (fileKey == null || !fileKey.isFile()) {
         if (verbose) logs.add("Referenced FILE not a build target, ignored: " + depFileName + " (in " + target.asString() + ")");

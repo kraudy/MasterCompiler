@@ -110,6 +110,11 @@ public class CommandObject {
       return getCommandStringWithoutSummary().equals(str);
     }
 
+    if (obj instanceof SysCmd) {
+      SysCmd command = (SysCmd) obj;
+      return this.systemCommand == command;
+    }
+
     /* If the other object is not a CommandObject, return false */
     if (!(obj instanceof CommandObject)) return false;
 
