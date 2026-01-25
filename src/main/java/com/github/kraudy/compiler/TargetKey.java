@@ -178,6 +178,10 @@ public class TargetKey {
     return false;
   }
 
+  public boolean isDtaara() {
+    return this.objectType == ObjectType.DTAARA;
+  }
+
   public boolean isBndDir() {
     return this.objectType == ObjectType.BNDDIR;
   }

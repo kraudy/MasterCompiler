@@ -281,7 +281,11 @@ public class StreamCompilationIT {
       assertNotNull(depsORD201, "Deps target should not be null");
       assertEquals(11, depsORD201.getChildsCount(), "Childs of target " + depsORD201.asString() + " should be 11");
 
-      //TODO: CURLIB.VAT300.MODULE.RPGLE do this one
+      /* dtaara */
+      TargetKey depsORD100 = spec.getTargetKey(new TargetKey("curlib.ORD100.PGM.RPGLE"));
+      assertNotNull(depsORD100, "Deps target should not be null");
+      // 1 deps is missing because Tmpdetord uses a ovrdbf
+      assertEquals(6, depsORD100.getChildsCount(), "Childs of target " + depsORD100.asString() + " should be 7 but 6 for now. 4 files, 1 bnddir, 1 extpgm, 1 dtaara");
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());

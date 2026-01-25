@@ -35,6 +35,9 @@ public class DependencyAwareness {
   private static final Pattern BNDDIR_PATTERN = Pattern.compile(
       "\\bBNDDIR\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
 
+  private static final Pattern DTAARA_PATTERN = Pattern.compile(
+    "\\bDTAARA\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
+
   /* Fixed-format F-spec: strict column logic
    * - Exactly 5 characters (usually blanks) before the F (column 6)
    * - F/f in column 6
@@ -223,6 +226,17 @@ public class DependencyAwareness {
           break;
       }
 
+      /* Get dtaara */
+      switch (target.getCompilationCommand()) {
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+        case CRTRPGMOD:
+        case CRTRPGPGM:
+          /* Collect dtaara referenced via DTAARA */
+          getDtaAraDependencies(target, sourceCode, logs);
+          break;
+      }
+
       /* Get f spec files */
       switch (target.getCompilationCommand()) {
         case CRTBNDRPG:
@@ -313,6 +327,32 @@ public class DependencyAwareness {
     bndDirDep.addFather(target);
     if (verbose) logs.add("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
   
+  }
+
+  private void getDtaAraDependencies(TargetKey target, String sourceCode, List<String> logs) {
+    Set<String> dtaAraNames = new HashSet<>();
+
+    Matcher matcher = DTAARA_PATTERN.matcher(sourceCode);
+    while (matcher.find()) {
+      String name = matcher.group(1).trim().toUpperCase();
+      if (!name.isEmpty()) {
+        dtaAraNames.add(name);
+      }
+    }
+
+    for (String name : dtaAraNames) {
+      TargetKey dtaKey = keyLookup.getOrDefault(name + "." + ObjectType.DTAARA.name(), null);
+
+      if (dtaKey == null || !dtaKey.isDtaara()) {
+        if (verbose) logs.add("Referenced DTAARA not a build target, ignored: " + name + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logs.add("DTAARA dependency: " + target.asString() + " uses DTAARA('" + name + "')");
+      /* Dtaara are child of Target */
+      target.addChild(dtaKey);
+      /* Target is father of dtaara */
+      dtaKey.addFather(target);
+    }
   }
 
   private void getExtPgmDependencies(TargetKey target, String sourceCode, List<String> logs){
