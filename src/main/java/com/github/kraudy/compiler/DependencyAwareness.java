@@ -66,6 +66,10 @@ public class DependencyAwareness {
       "(FROM|JOIN|INTO|UPDATE|DELETE FROM|INSERT INTO)\\s+([\\w$#@_./]+)",
       Pattern.CASE_INSENSITIVE);
 
+  private static final Pattern SQL_FROM_JOIN_PATTERN = Pattern.compile(
+    "\\b(FROM|JOIN)\\s+([\"']?[A-Z0-9$#@_./]+[\"']?(?:\\s+(?:INNER|LEFT|RIGHT|FULL)?\\s*(?:OUTER)?\\s*JOIN|\\s*,|\\s+ON|\\s+AS\\s+\\w+)?)",
+    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
   // Pattern for REF(filename) in DDS (for PF)
   private static final Pattern DDS_REF_PATTERN = Pattern.compile(
       "\\bREF\\s*\\(\\s*([A-Z0-9$#@_]{1,10})\\s*\\)", Pattern.CASE_INSENSITIVE);
@@ -300,14 +304,15 @@ public class DependencyAwareness {
           break;
       }
 
-      //TODO: Another switch for SQL
       switch (target.getCompilationCommand()) {
         case RUNSQLSTM:
-          break;
-
-        default:
+          // Existing embedded if needed
+          getEmbeddedSqlDependencies(target, sourceCode, logs);  // Keep for procedures/functions
+          // New DDL detection
+          getSqlDdlTableDependencies(target, sourceCode, logs);
           break;
       }
+      
     } catch (Exception e) {
       logs.add("ERROR processing " + target.asString() + ": " + e.getMessage());
     } finally {
@@ -583,6 +588,58 @@ public class DependencyAwareness {
     }
 
     addFileDependencies(target, depFileNames, logs);
+  }
+
+  private void getSqlDdlTableDependencies(TargetKey target, String sourceCode, List<String> logs) {
+    Set<String> tableNames = new HashSet<>();
+
+    // First pass: broad capture after FROM/JOIN
+    Matcher matcher = SQL_FROM_JOIN_PATTERN.matcher(sourceCode);
+    while (matcher.find()) {
+      String rawTable = matcher.group(2).trim().toUpperCase();
+      // Strip quotes
+      rawTable = rawTable.replaceAll("^[\"']|[\"']$", "");
+      // Strip schema/lib if qualified
+      String tableName = rawTable.replaceAll("^.*[\\/.]", "");
+      if (!tableName.isEmpty()) {
+        tableNames.add(tableName);
+      }
+    }
+
+    // Second pass: fallback for comma-separated old style (if not caught)
+    // Simple split on FROM ... WHERE/GROUP/ORDER
+    int fromIdx = sourceCode.toUpperCase().indexOf("FROM");
+    if (fromIdx != -1) {
+      String fromClause = sourceCode.substring(fromIdx + 4);
+      int endIdx = fromClause.toUpperCase().indexOf("WHERE");
+      if (endIdx == -1) endIdx = fromClause.toUpperCase().indexOf("GROUP BY");
+      if (endIdx == -1) endIdx = fromClause.toUpperCase().indexOf("ORDER BY");
+      if (endIdx == -1) endIdx = fromClause.length();
+      fromClause = fromClause.substring(0, endIdx);
+
+      // Split on commas (old style)
+      for (String part : fromClause.split(",")) {
+        String table = part.trim().toUpperCase()
+            .replaceAll("^[\"']|[\"']$", "")  // quotes
+            .replaceAll("^.*[\\/.]", "");     // schema
+        if (!table.isEmpty() && table.matches("[A-Z0-9$#@_]{1,10}")) {
+          tableNames.add(table);
+        }
+      }
+    }
+
+    // Add as file deps
+    for (String tableName : tableNames) {
+      TargetKey tableKey = keyLookup.getOrDefault(tableName + "." + ParamCmd.FILE.name(), null);
+      // Or if SQL tables: tableName + ".TABLE.SQL" or ".PF.DDS"
+      if (tableKey == null || !tableKey.isFile()) {
+        if (verbose) logs.add("Referenced SQL table not a build target, ignored: " + tableName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logs.add("SQL TABLE dependency: " + target.asString() + " references table " + tableKey.asString() + " (table " + tableName + ")");
+      target.addChild(tableKey);
+      tableKey.addFather(target);
+    }
   }
 
   /* Add dependencies for each referenced file that is also a build target */

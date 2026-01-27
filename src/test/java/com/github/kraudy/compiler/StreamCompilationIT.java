@@ -296,6 +296,15 @@ public class StreamCompilationIT {
       assertNotNull(depsORD700, "Deps target should not be null");
       assertEquals(3, depsORD700.getChildsCount(), "Childs of target " + depsORD700.asString() + " should be 3. 1 Bnddir, 1 file, 1 extname");
 
+      /* SQL dependencies */
+      TargetKey depsARTLSTDAT = spec.getTargetKey(new TargetKey("curlib.ARTLSTDAT.VIEW.SQL"));
+      assertNotNull(depsARTLSTDAT, "Deps target should not be null");
+      assertEquals(3, depsARTLSTDAT.getChildsCount(), "Childs of target " + depsARTLSTDAT.asString() + " should be 3. 3 tables");
+
+      TargetKey depsORDERCUS = spec.getTargetKey(new TargetKey("curlib.ORDERCUS.view.sql"));
+      assertNotNull(depsORDERCUS, "Deps target should not be null");
+      assertEquals(3, depsORDERCUS.getChildsCount(), "Childs of target " + depsORDERCUS.asString() + " should be 3 tables. DETORD, ORDER, CUSTOMER");
+
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
     } finally {
