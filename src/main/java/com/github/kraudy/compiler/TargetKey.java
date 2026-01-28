@@ -423,15 +423,17 @@ public class TargetKey {
   }
 
   public void addChild(TargetKey child) {
-    if (child != null && !childs.contains(child)) {
-      childs.add(child);
-    }
+    if (child == null) return; /* Prevents nulls */
+    if (child.equals(this)) return; /* Prevents cycles */
+    if (childs.contains(child)) return; /* Prevents cylces */
+    childs.add(child);
   }
 
   public void addFather(TargetKey father) {
-    if (father != null && !fathers.contains(father)) {
-      fathers.add(father);
-    }
+    if (father == null) return; /* Prevents nulls */
+    if (father.equals(this)) return; /* Prevents cycles */
+    if (fathers.contains(father)) return; /* Prevents cycles */
+    fathers.add(father);
   }
 
   public List<String> getModulesNameList() {
@@ -446,8 +448,6 @@ public class TargetKey {
       if (mod.isEmpty()) continue;
 
       String modName = mod.replaceAll(".*/", "").trim(); // strip lib if present
-      if (modName.isEmpty()) continue;
-
       if (modName.isEmpty()) continue;
 
       modList.add(modName);

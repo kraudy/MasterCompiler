@@ -305,6 +305,10 @@ public class StreamCompilationIT {
       assertNotNull(depsORDERCUS, "Deps target should not be null");
       assertEquals(3, depsORDERCUS.getChildsCount(), "Childs of target " + depsORDERCUS.asString() + " should be 3 tables. DETORD, ORDER, CUSTOMER");
 
+      TargetKey depsART801 = spec.getTargetKey(new TargetKey("curlib.ART801.procedure.sql"));
+      assertNotNull(depsART801, "Deps target should not be null");
+      assertEquals(4, depsART801.getChildsCount(), "Childs of target " + depsART801.asString() + " should be 4 tables. ARTICLE, DETORD, ORDER, CUSTOMER");
+
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
     } finally {
