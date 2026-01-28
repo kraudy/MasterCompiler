@@ -63,12 +63,19 @@ public class DependencyAwareness {
 
   // Pattern for embedded SQL table references (FROM, JOIN, INTO, UPDATE, DELETE FROM, INSERT INTO)
   private static final Pattern SQL_TABLE = Pattern.compile(
-      "(FROM|JOIN|INTO|UPDATE|DELETE FROM|INSERT INTO)\\s+([\\w$#@_./]+)",
-      Pattern.CASE_INSENSITIVE);
+    "(FROM|JOIN|INTO|UPDATE|DELETE FROM|INSERT INTO)\\s+([\"']?[\\w$#@_./]+[\"']?)",
+    Pattern.CASE_INSENSITIVE);
 
+  // Improved: captures table + optional implicit alias, stops before comma or explicit join parts
   private static final Pattern SQL_FROM_JOIN_PATTERN = Pattern.compile(
-    "\\b(FROM|JOIN)\\s+([\"']?[A-Z0-9$#@_./]+[\"']?(?:\\s+(?:INNER|LEFT|RIGHT|FULL)?\\s*(?:OUTER)?\\s*JOIN|\\s*,|\\s+ON|\\s+AS\\s+\\w+)?)",
-    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+      "\\b(FROM|JOIN)\\s+([\"']?[A-Z0-9$#@_./]+[\"']?)(\\s+[A-Z0-9$#@_]+)?"
+      + "(?:\\s+(?:INNER|LEFT|RIGHT|FULL)?\\s*(?:OUTER)?\\s*JOIN|\\s+ON|\\s+AS\\s+[A-Z0-9$#@_]+)?",
+      Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+  // New: for additional comma-separated tables (quoted + optional implicit alias)
+  private static final Pattern COMMA_TABLE_PATTERN = Pattern.compile(
+      "\\s*,\\s*([\"']?[A-Z0-9$#@_./]+[\"']?)(\\s+[A-Z0-9$#@_]+)?",
+      Pattern.CASE_INSENSITIVE);
 
   // Pattern for REF(filename) in DDS (for PF)
   private static final Pattern DDS_REF_PATTERN = Pattern.compile(
@@ -312,7 +319,7 @@ public class DependencyAwareness {
           getSqlDdlTableDependencies(target, sourceCode, logs);
           break;
       }
-      
+
     } catch (Exception e) {
       logs.add("ERROR processing " + target.asString() + ": " + e.getMessage());
     } finally {
@@ -579,6 +586,7 @@ public class DependencyAwareness {
     Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
     while (sqlMatcher.find()) {
       String rawName = sqlMatcher.group(2).trim().toUpperCase();
+      rawName = rawName.replaceAll("^[\"']|[\"']$", "");
       if (rawName.isEmpty()) continue;
 
       String tableName = rawName.replaceAll("^.*[\\/.]", "");
@@ -593,39 +601,29 @@ public class DependencyAwareness {
   private void getSqlDdlTableDependencies(TargetKey target, String sourceCode, List<String> logs) {
     Set<String> tableNames = new HashSet<>();
 
-    // First pass: broad capture after FROM/JOIN
-    Matcher matcher = SQL_FROM_JOIN_PATTERN.matcher(sourceCode);
-    while (matcher.find()) {
-      String rawTable = matcher.group(2).trim().toUpperCase();
-      // Strip quotes
-      rawTable = rawTable.replaceAll("^[\"']|[\"']$", "");
-      // Strip schema/lib if qualified
-      String tableName = rawTable.replaceAll("^.*[\\/.]", "");
-      if (!tableName.isEmpty()) {
-        tableNames.add(tableName);
-      }
-    }
-
-    // Second pass: fallback for comma-separated old style (if not caught)
-    // Simple split on FROM ... WHERE/GROUP/ORDER
-    int fromIdx = sourceCode.toUpperCase().indexOf("FROM");
-    if (fromIdx != -1) {
-      String fromClause = sourceCode.substring(fromIdx + 4);
-      int endIdx = fromClause.toUpperCase().indexOf("WHERE");
-      if (endIdx == -1) endIdx = fromClause.toUpperCase().indexOf("GROUP BY");
-      if (endIdx == -1) endIdx = fromClause.toUpperCase().indexOf("ORDER BY");
-      if (endIdx == -1) endIdx = fromClause.length();
-      fromClause = fromClause.substring(0, endIdx);
-
-      // Split on commas (old style)
-      for (String part : fromClause.split(",")) {
-        String table = part.trim().toUpperCase()
-            .replaceAll("^[\"']|[\"']$", "")  // quotes
-            .replaceAll("^.*[\\/.]", "");     // schema
-        if (!table.isEmpty() && table.matches("[A-Z0-9$#@_]{1,10}")) {
-          tableNames.add(table);
+    Matcher fromMatcher = SQL_FROM_JOIN_PATTERN.matcher(sourceCode);
+    while (fromMatcher.find()) {
+        String rawTable = fromMatcher.group(2).trim().toUpperCase();
+        rawTable = rawTable.replaceAll("^[\"']|[\"']$", "");  // Strip quotes
+        String tableName = rawTable.replaceAll("^.*[\\/.]", "");  // Strip schema/lib
+        if (!tableName.isEmpty() && tableName.matches("[A-Z0-9$#@_]{1,10}")) {
+            tableNames.add(tableName);
         }
-      }
+
+        // Chain comma-separated tables from current position
+        int pos = fromMatcher.end();
+        Matcher commaMatcher = COMMA_TABLE_PATTERN.matcher(sourceCode);
+        commaMatcher.region(pos, sourceCode.length());
+        while (commaMatcher.find()) {
+            String rawCommaTable = commaMatcher.group(1).trim().toUpperCase();
+            rawCommaTable = rawCommaTable.replaceAll("^[\"']|[\"']$", "");
+            String commaTableName = rawCommaTable.replaceAll("^.*[\\/.]", "");
+            if (!commaTableName.isEmpty() && commaTableName.matches("[A-Z0-9$#@_]{1,10}")) {
+                tableNames.add(commaTableName);
+            }
+            pos = commaMatcher.end();
+            commaMatcher.region(pos, sourceCode.length());
+        }
     }
 
     // Add as file deps

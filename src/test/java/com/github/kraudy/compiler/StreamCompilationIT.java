@@ -300,7 +300,7 @@ public class StreamCompilationIT {
       TargetKey depsARTLSTDAT = spec.getTargetKey(new TargetKey("curlib.ARTLSTDAT.VIEW.SQL"));
       assertNotNull(depsARTLSTDAT, "Deps target should not be null");
       assertEquals(3, depsARTLSTDAT.getChildsCount(), "Childs of target " + depsARTLSTDAT.asString() + " should be 3. 3 tables");
-
+      
       TargetKey depsORDERCUS = spec.getTargetKey(new TargetKey("curlib.ORDERCUS.view.sql"));
       assertNotNull(depsORDERCUS, "Deps target should not be null");
       assertEquals(3, depsORDERCUS.getChildsCount(), "Childs of target " + depsORDERCUS.asString() + " should be 3 tables. DETORD, ORDER, CUSTOMER");
