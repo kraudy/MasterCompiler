@@ -95,6 +95,14 @@ public class DependencyAwareness {
   private static final Pattern EXTPGM_PATTERN = Pattern.compile(
     "\\bEXTPGM\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
 
+   // Pattern 1: CALL PGM(ORD100) or CALL PGM('MYLIB/ORD100') 
+  private static final Pattern CALL_PGM_PATTERN = Pattern.compile(
+    "\\bCALL\\s+PGM\\s*\\(\\s*['\"]?([^'\"\\)]+)['\"]?\\s*\\)",Pattern.CASE_INSENSITIVE);
+
+  // Pattern 2: OPM-style CALL ORD100C or CALL 'ORD100C' (optionally followed by PARM)
+  private static final Pattern CALL_DIRECT_PGM_PATTERN = Pattern.compile(
+      "\\bCALL\\s+(['\"]?)([A-Z0-9$#@_]{1,10})\\1(?:\\s+PARM|\\s|$)",Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
@@ -203,6 +211,8 @@ public class DependencyAwareness {
 
       logs.add("Dependencies of " + target.asString());
 
+      //TODO: Improve this.
+      /* Get srvpgm module dependencies */
       switch (target.getCompilationCommand()) {
         /* Get srvpgm modules */
         case CRTSRVPGM:
@@ -229,9 +239,6 @@ public class DependencyAwareness {
           getBndDirDependencies(target, sourceCode, logs);
           break;
           /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
-
-        default:
-          break;
       }
 
       /* Get extpgm */
@@ -244,7 +251,7 @@ public class DependencyAwareness {
           break;
       }
 
-      /* Get dtaara and extname */
+      /* Get dtaara and extname dependencies */
       switch (target.getCompilationCommand()) {
         case CRTBNDRPG:
         case CRTSQLRPGI:
@@ -258,7 +265,7 @@ public class DependencyAwareness {
           break;
       }
 
-      /* Get f spec files */
+      /* Get f spec files dependencies */
       switch (target.getCompilationCommand()) {
         case CRTBNDRPG:
         case CRTSQLRPGI:
@@ -273,7 +280,7 @@ public class DependencyAwareness {
           break;
       }
 
-      /* Get sql embedded dependencies */
+      /* Get SQLRPGLE embedded dependencies */
       switch (target.getCompilationCommand()) {
         case CRTSQLRPGI:
           getEmbeddedSqlDependencies(target, sourceCode, logs);          
@@ -294,23 +301,17 @@ public class DependencyAwareness {
         case CRTPRTF:
           geDdsREFFLDDependencies(target, sourceCode, logs);
           break;
-
-        default:
-          break;
       }
 
-      //TODO: Another switch for opm
+      /* Get CLP, CLLE dependencies */
       switch (target.getCompilationCommand()) {
-        case CRTRPGPGM:
-          break;
-      
+        case CRTBNDCL:      
         case CRTCLPGM:
-          break;
-
-        default:
+          getClCallDependencies(target, sourceCode, logs);
           break;
       }
 
+      /* Get SQL dependencies */
       switch (target.getCompilationCommand()) {
         case RUNSQLSTM:
           // Existing embedded if needed
@@ -420,6 +421,40 @@ public class DependencyAwareness {
       target.addChild(dtaKey);
       /* Target is father of dtaara */
       dtaKey.addFather(target);
+    }
+  }
+
+  private void getClCallDependencies(TargetKey target, String sourceCode, List<String> logs) {
+    Set<String> calledPgms = new HashSet<>();
+
+    Matcher m = CALL_PGM_PATTERN.matcher(sourceCode);
+    while (m.find()) {
+      String full = m.group(1).trim().toUpperCase();
+      // Strip library if qualified (MYLIB/PGM -> PGM)
+      String pgm = full.replaceAll("^.*[\\/]", "");
+      if (!pgm.isEmpty() && pgm.matches("[A-Z0-9$#@_]{1,10}")) {
+        calledPgms.add(pgm);
+      }
+    }
+
+    m = CALL_DIRECT_PGM_PATTERN.matcher(sourceCode);
+    while (m.find()) {
+      String pgm = m.group(2).toUpperCase();
+      if (!pgm.isEmpty()) {
+        calledPgms.add(pgm);
+      }
+    }
+
+    // Add dependencies (similar to EXTPGM logic)
+    for (String pgmName : calledPgms) {
+      TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
+      if (pgmKey == null || !pgmKey.isProgram()) {
+        if (verbose) logs.add("Called CL program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logs.add("CL CALL dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (CALL " + pgmName + ")");
+      target.addChild(pgmKey);
+      pgmKey.addFather(target);
     }
   }
 

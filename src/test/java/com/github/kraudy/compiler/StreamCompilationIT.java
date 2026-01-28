@@ -309,6 +309,16 @@ public class StreamCompilationIT {
       assertNotNull(depsART801, "Deps target should not be null");
       assertEquals(4, depsART801.getChildsCount(), "Childs of target " + depsART801.asString() + " should be 4 tables. ARTICLE, DETORD, ORDER, CUSTOMER");
 
+      /* CLP, CLLE dependencies */
+      TargetKey depsOPM = spec.getTargetKey(new TargetKey("curlib.OPM.pgm.CLP"));
+      assertNotNull(depsOPM, "Deps target should not be null");
+      assertEquals(1, depsOPM.getChildsCount(), "Childs of target " + depsOPM.asString() + " should be 1 CALL. ORD100C");
+
+      TargetKey depsORD100C2 = spec.getTargetKey(new TargetKey("curlib.ORD100C2.PGM.CLLE"));
+      assertNotNull(depsORD100C2, "Deps target should not be null");
+      assertEquals(1, depsORD100C2.getChildsCount(), "Childs of target " + depsORD100C2.asString() + " should be 1 CALL. ORD100");
+
+
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
     } finally {
