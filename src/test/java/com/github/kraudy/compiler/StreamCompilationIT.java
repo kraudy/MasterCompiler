@@ -179,7 +179,74 @@ public class StreamCompilationIT {
   @Test
   @Tag("deps")
   void test_Deps_Build() throws Exception {
+    //test_McOnTobi_Deps();
+    test_Sjlennon_Deps();
+  }
 
+  void test_Sjlennon_Deps() throws Exception {
+    String testFolder = currentUser.getHomeDirectory() + "/test_" + System.currentTimeMillis();
+
+    BuildSpec spec = null;
+
+    try {
+      // Clone repo    
+      System.out.println("Cloning repo for deps test: https://github.com/kraudy/McOnSJLennon.git");
+      CommandObject gitClone = new CommandObject(SysCmd.QSH)
+          .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/git clone https://github.com/kraudy/McOnSJLennon.git " + testFolder);
+      commandExecutor.executeCommand(gitClone);
+
+      // Load spec
+      String remoteYamlPath = testFolder + "/sjlennon.yaml";
+      IFSFile remoteYamlFile = new IFSFile(system, remoteYamlPath);
+      spec = Utilities.deserializeYaml(remoteYamlFile);
+
+      // CHGCURDIR to repo root
+      CommandObject chgCurDir = new CommandObject(SysCmd.CHGCURDIR)
+          .put(ParamCmd.DIR, testFolder);
+      commandExecutor.executeCommand(chgCurDir);
+
+      DependencyAwareness depAwareness = new DependencyAwareness(system, true, true);
+
+      depAwareness.detectDependencies(spec);
+
+      TargetKey depsGETOBJUR = spec.getTargetKey(new TargetKey("curlib.GETOBJUR.pgm.RPGLE"));
+      assertNotNull(depsGETOBJUR, "Deps target should not be null");
+      assertEquals(1, depsGETOBJUR.getChildsCount(), "Childs of target " + depsGETOBJUR.asString() + " should be 1 File. GETOBJUP");
+
+      TargetKey depsGETOBJUC = spec.getTargetKey(new TargetKey("curlib.GETOBJUC.pgm.CLLE"));
+      assertNotNull(depsGETOBJUC, "Deps target should not be null");
+      assertEquals(1, depsGETOBJUC.getChildsCount(), "Childs of target " + depsGETOBJUC.asString() + " should be 1 CALL. GETOBJUR");
+
+      TargetKey depsT9ALLOCMNY = spec.getTargetKey(new TargetKey("CURLIB.T9ALLOCMNY.PGM.CLP"));
+      assertNotNull(depsT9ALLOCMNY, "Deps target should not be null");
+      assertEquals(1, depsT9ALLOCMNY.getChildsCount(), "Childs of target " + depsT9ALLOCMNY.asString() + " should be 1 CALL. T9ALLOC1");
+
+      TargetKey depsSRV_SQL = spec.getTargetKey(new TargetKey("CURLIB.SRV_SQL.MODULE.SQLRPGLE"));
+      assertNotNull(depsSRV_SQL, "Deps target should not be null");
+      assertEquals(1, depsSRV_SQL.getChildsCount(), "Childs of target " + depsSRV_SQL.asString() + " should be 1 BNDDIR. UTIL_BND");
+
+
+    } catch (CompilerException e) {
+      System.out.println(e.getFullContext());
+    } finally {
+      /* Set cur dir back to free test dir */
+      CommandObject chgHome = new CommandObject(SysCmd.CHGCURDIR)
+        .put(ParamCmd.DIR, currentUser.getHomeDirectory());
+      commandExecutor.executeCommand(chgHome);
+
+      try {
+        CommandObject rmvDir = new CommandObject(SysCmd.RMVDIR)
+          .put(ParamCmd.DIR, testFolder)
+          .put(ParamCmd.SUBTREE, ValCmd.ALL);
+
+        commandExecutor.executeCommand(rmvDir);
+      } catch (CompilerException e) {
+        System.out.println(e.getFullContext());
+      }
+    }
+  }
+
+  void test_McOnTobi_Deps() throws Exception {
     String testFolder = currentUser.getHomeDirectory() + "/test_" + System.currentTimeMillis();
 
     BuildSpec spec = null;
