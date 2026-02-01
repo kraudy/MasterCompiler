@@ -48,17 +48,10 @@ public class DependencyAwareness {
    * - Capture up to 10 characters for the file name (columns 7-16)
    */
   private static final Pattern FIXED_F_SPEC = Pattern.compile(
-      //"^.{5}[fF](.{10})[IOUBC]", Pattern.CASE_INSENSITIVE);
       "^.{5}[fF]\\s*([A-Z0-9$#@_]{1,10})\\b", Pattern.CASE_INSENSITIVE);
-      //"^.{5}[fF]\\s+([A-Z0-9$#@_]{1,10})\\s+[A-Z0-9$#@_\\-]*[IOUBC]", Pattern.CASE_INSENSITIVE);
-
-      //"^.{5}[fF](.{0,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
-      //"^.{5}[fF]\\s*([A-Z0-9$#@_]{1,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
-      //"^.{5}[fF]([A-Z0-9$#@_]{1,10})\\s*[IOUBC]", Pattern.CASE_INSENSITIVE);
 
   // Pattern for free-format DCL-F (captures the file name, possibly qualified)
   private static final Pattern FREE_DCL_F = Pattern.compile(
-      //"\\bDCL-F\\s+([\\w$#@_./]+)", Pattern.CASE_INSENSITIVE);
       "DCL-F\\s+([A-Z0-9$#@_./]+?)\\s+", Pattern.CASE_INSENSITIVE);
 
   // Pattern for embedded SQL table references (FROM, JOIN, INTO, UPDATE, DELETE FROM, INSERT INTO)
@@ -73,7 +66,7 @@ public class DependencyAwareness {
       Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
   // New: for additional comma-separated tables (quoted + optional implicit alias)
-  private static final Pattern COMMA_TABLE_PATTERN = Pattern.compile(
+  private static final Pattern SQL_COMMA_TABLE_PATTERN = Pattern.compile(
       "\\s*,\\s*([\"']?[A-Z0-9$#@_./]+[\"']?)(\\s+[A-Z0-9$#@_]+)?",
       Pattern.CASE_INSENSITIVE);
 
@@ -359,22 +352,25 @@ public class DependencyAwareness {
   }
 
   private void getBndDirDependencies(TargetKey target, String sourceCode, List<String> logs){
+    Set<String> bndDirNames = new HashSet<>();
     Matcher m = BNDDIR_PATTERN.matcher(sourceCode);
 
-    if (!m.find()) return;
+    /* Get multiple bnddir */
+    while (m.find()) {  // ← changed from if(!find()) to while
+      String bndDirName = m.group(1).toUpperCase();
+      if (bndDirName.isEmpty()) continue;
+      bndDirNames.add(bndDirName);
+    }
 
-    String bndDirName = m.group(1).toUpperCase(); // e.g., "SAMPLE"
-    if (bndDirName.isEmpty()) return;
-    TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
-    if (bndDirDep == null) return;
-    if (!bndDirDep.isBndDir()) return;
+    for (String bndDirName : bndDirNames) {
+      TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
+      if (bndDirDep == null) return;
+      if (!bndDirDep.isBndDir()) return;
 
-    /* Add bnddir as target child */
-    target.addChild(bndDirDep);
-    /* Add target as bnddir father */
-    bndDirDep.addFather(target);
-    if (verbose) logs.add("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
-  
+      target.addChild(bndDirDep);
+      bndDirDep.addFather(target);
+      if (verbose) logs.add("BNDDIR dependency: " + target.asString() + " uses BNDDIR('" + bndDirName + "') ");
+    }
   }
 
   private void getExtNameDependencies(TargetKey target, String sourceCode, List<String> logs) {
@@ -647,7 +643,7 @@ public class DependencyAwareness {
 
         // Chain comma-separated tables from current position
         int pos = fromMatcher.end();
-        Matcher commaMatcher = COMMA_TABLE_PATTERN.matcher(sourceCode);
+        Matcher commaMatcher = SQL_COMMA_TABLE_PATTERN.matcher(sourceCode);
         commaMatcher.region(pos, sourceCode.length());
         while (commaMatcher.find()) {
             String rawCommaTable = commaMatcher.group(1).trim().toUpperCase();

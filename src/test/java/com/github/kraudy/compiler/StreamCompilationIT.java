@@ -211,7 +211,7 @@ public class StreamCompilationIT {
 
       TargetKey depsGETOBJUR = spec.getTargetKey(new TargetKey("curlib.GETOBJUR.pgm.RPGLE"));
       assertNotNull(depsGETOBJUR, "Deps target should not be null");
-      assertEquals(1, depsGETOBJUR.getChildsCount(), "Childs of target " + depsGETOBJUR.asString() + " should be 1 File. GETOBJUP");
+      assertEquals(4, depsGETOBJUR.getChildsCount(), "Childs of target " + depsGETOBJUR.asString() + " should be 4. 1 FILE GETOBJUP, 3 EXTPGM GETJOBTR, SRTUSRSPC, GETOBJUR");
 
       TargetKey depsGETOBJUC = spec.getTargetKey(new TargetKey("curlib.GETOBJUC.pgm.CLLE"));
       assertNotNull(depsGETOBJUC, "Deps target should not be null");
