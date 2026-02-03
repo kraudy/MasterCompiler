@@ -364,8 +364,10 @@ public class DependencyAwareness {
 
     for (String bndDirName : bndDirNames) {
       TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
-      if (bndDirDep == null) return;
-      if (!bndDirDep.isBndDir()) return;
+      if (bndDirDep == null || !bndDirDep.isBndDir()) {
+        if (verbose) logs.add("Referenced BNDDIR not a build target, ignored: " + bndDirName + " (in " + target.asString() + ")");
+        continue;
+      }
 
       target.addChild(bndDirDep);
       bndDirDep.addFather(target);
@@ -428,24 +430,22 @@ public class DependencyAwareness {
       String full = m.group(1).trim().toUpperCase();
       // Strip library if qualified (MYLIB/PGM -> PGM)
       String pgm = full.replaceAll("^.*[\\/]", "");
-      if (!pgm.isEmpty() && pgm.matches("[A-Z0-9$#@_]{1,10}")) {
-        calledPgms.add(pgm);
-      }
+      if (pgm.isEmpty()) continue;
+      if (!pgm.matches("[A-Z0-9$#@_]{1,10}")) continue;
+      calledPgms.add(pgm);
     }
 
     m = CALL_DIRECT_PGM_PATTERN.matcher(sourceCode);
     while (m.find()) {
       String pgm = m.group(2).toUpperCase();
-      if (!pgm.isEmpty()) {
-        calledPgms.add(pgm);
-      }
+      if (pgm.isEmpty()) continue;
+      calledPgms.add(pgm);
     }
 
-    // Add dependencies (similar to EXTPGM logic)
     for (String pgmName : calledPgms) {
       TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
       if (pgmKey == null || !pgmKey.isProgram()) {
-        if (verbose) logs.add("Called CL program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
+        if (verbose) logs.add("Referenced CALL CL program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
         continue;
       }
       if (verbose) logs.add("CL CALL dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (CALL " + pgmName + ")");

@@ -179,8 +179,8 @@ public class StreamCompilationIT {
   @Test
   @Tag("deps")
   void test_Deps_Build() throws Exception {
-    //test_McOnTobi_Deps();
-    test_Sjlennon_Deps();
+    test_McOnTobi_Deps();
+    //test_Sjlennon_Deps();
   }
 
   void test_Sjlennon_Deps() throws Exception {
