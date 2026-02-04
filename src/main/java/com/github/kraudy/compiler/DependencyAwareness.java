@@ -107,6 +107,8 @@ public class DependencyAwareness {
 
   private final Map<String, String> fileOverrideMap = new HashMap<>();  // overriddenName -> actualToFile
 
+  private final ConcurrentHashMap<String, TargetKey> exportedProcToModule = new ConcurrentHashMap<>();
+
   public DependencyAwareness(AS400 system, boolean debug, boolean verbose) {
     this.system = system;
     this.debug = debug;
@@ -128,35 +130,60 @@ public class DependencyAwareness {
     /* Build override map */
     buildFileOverrideMap(globalSpec);
 
-    List<CompletableFuture<Void>> futures = new ArrayList<>();
+    /* We need the base dir because IFSFile does not seems to work with curdir relative paths */
+    String baseDir = globalSpec.getBaseDirectory();
+    if (baseDir == null) throw new RuntimeException("Base directory not set in BuildSpec");
 
+    // Phase 1: Process only modules to populate the export map
+    //List<CompletableFuture<Void>> moduleFutures = new ArrayList<>();
+    //for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+    //  TargetKey target = entry.getKey();
+
+    //  /* If not a module, omit */
+    //  if (!target.isModule()) continue;
+    //  /* If not stream file,  */
+    //  if (!target.containsStreamFile()) continue;
+
+    //  String fullPath = target.getStreamFile();
+
+    //  IFSFile sourceFile = new IFSFile(system, fullPath);
+    //  
+    //  if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
+
+    //  moduleFutures.add(collectExportedProcedures(target, sourceFile));  // will call collectExportedProcedures
+
+    //}
+    //CompletableFuture.allOf(moduleFutures.toArray(new CompletableFuture[0])).join();
+    ///* Show modules logs */
+    //showLogs(globalSpec);
+
+    /* Set source stream file for every target */
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-      /* If no stream file, continue, could try to migrate  */
+      if (target.containsStreamFile()) continue;
+      if (!targetSpec.params.containsKey(ParamCmd.SRCSTMF)) continue;
+      
+      String relPath = targetSpec.params.get(ParamCmd.SRCSTMF);
 
-      String relPath = "";
-      /* Add SrcStmF, this is needed by source dependency */
-      /* Relative source path */
-      if (target.containsStreamFile()) {
-        relPath = target.getStreamFile(); 
-      } else if (targetSpec.params.containsKey(ParamCmd.SRCSTMF)){
-        relPath = targetSpec.params.get(ParamCmd.SRCSTMF);
-      }
+      if (relPath.isEmpty()) continue;
 
-      if (relPath.isEmpty()){
+      target.setStreamSourceFile(relPath);
+    }
+
+    List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey target = entry.getKey();
+
+      /* If not source file, omit */
+      if (!target.containsStreamFile()) {
         if (verbose) logger.info("Target " + target.asString() + " does not contains stream file to scan");
         continue;
       }
 
-      /* We need the base dir because IFSFile does not seems to work with curdir relative paths */
-      String baseDir = globalSpec.getBaseDirectory();
-      if (baseDir == null) throw new RuntimeException("Base directory not set in BuildSpec");
-
-      String fullPath = relPath.startsWith("/")
-        ? relPath
-        : (baseDir.endsWith("/") ? baseDir : baseDir + "/") + relPath;
+      String fullPath =  baseDir + "/" + target.getStreamFile();
 
       IFSFile sourceFile = new IFSFile(system, fullPath);
       
@@ -170,6 +197,11 @@ public class DependencyAwareness {
     // Wait for all
     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
+    showLogs(globalSpec);
+
+  }
+
+  private void showLogs(BuildSpec globalSpec){
     // Print logs in original order
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
@@ -187,9 +219,61 @@ public class DependencyAwareness {
       }
     }
 
+    /* Reset logs after show */
+    targetLogs.clear();
   }
 
   //TODO: resolvePath
+  private CompletableFuture<Void> collectExportedProcedures(TargetKey target, IFSFile sourceFile) {
+  return CompletableFuture.runAsync(() -> {
+    List<String> logs = new ArrayList<>();
+
+    try{ 
+      if (verbose) logs.add("Scannig sources: " + target.asString());
+
+        String sourceCode;
+        try (InputStream stream = new IFSFileInputStream(sourceFile)) {
+          sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        logs.add("Dependencies of " + target.asString());
+
+      // Pattern for free-format: dcl-proc ProcName export;  (EXPORT can appear after name or params)
+      // We capture the word immediately after dcl-proc as the procedure name
+      Pattern exportProcPattern = Pattern.compile(
+          "\\bdcl-proc\\s+([A-Z0-9_]+)\\b.*?\\bexport\\b",
+          Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+      Matcher matcher = exportProcPattern.matcher(sourceCode);
+      Set<String> exportedProcs = new HashSet<>();
+
+      while (matcher.find()) {
+        String procName = matcher.group(1).toUpperCase();
+        if (procName.isEmpty()) continue;
+        exportedProcs.add(procName);
+
+        // Store in map (overwrite if conflict – or collect list and warn later)
+        TargetKey previous = exportedProcToModule.put(procName, target);
+        if (previous != null && !previous.equals(target)) {
+          logs.add("WARNING: Procedure " + procName + " exported by multiple modules: " +
+                  previous.asString() + " and " + target.asString() + " – using last one");
+        }
+      }
+
+      if (verbose && !exportedProcs.isEmpty()) {
+        logs.add("Exported procedures in " + target.asString() + ": " + exportedProcs);
+      }
+    } catch (Exception e) {
+      logs.add("ERROR processing " + target.asString() + ": " + e.getMessage());
+    } finally {
+      targetLogs.put(target, logs);  // Store for later ordered printing
+      int count = processed.incrementAndGet();
+      double percent = count * 100.0 / totalTargets;
+      logger.info("Processed {} of {} targets ({}%)", count, totalTargets, String.format("%.1f", percent));
+    }
+    }
+    );
+  }
 
   private CompletableFuture<Void> processTargetAsync(TargetKey target, IFSFile sourceFile) {
   return CompletableFuture.runAsync(() -> {
@@ -326,6 +410,7 @@ public class DependencyAwareness {
     );
   }
 
+  /* This only works if you have the spec */
   private void buildFileOverrideMap(BuildSpec globalSpec) {
     // Global before hooks
     populateOverrideMap(globalSpec.before);
@@ -634,27 +719,27 @@ public class DependencyAwareness {
 
     Matcher fromMatcher = SQL_FROM_JOIN_PATTERN.matcher(sourceCode);
     while (fromMatcher.find()) {
-        String rawTable = fromMatcher.group(2).trim().toUpperCase();
-        rawTable = rawTable.replaceAll("^[\"']|[\"']$", "");  // Strip quotes
-        String tableName = rawTable.replaceAll("^.*[\\/.]", "");  // Strip schema/lib
-        if (!tableName.isEmpty() && tableName.matches("[A-Z0-9$#@_]{1,10}")) {
-            tableNames.add(tableName);
-        }
+      String rawTable = fromMatcher.group(2).trim().toUpperCase();
+      rawTable = rawTable.replaceAll("^[\"']|[\"']$", "");  // Strip quotes
+      String tableName = rawTable.replaceAll("^.*[\\/.]", "");  // Strip schema/lib
+      if (!tableName.isEmpty() && tableName.matches("[A-Z0-9$#@_]{1,10}")) {
+          tableNames.add(tableName);
+      }
 
-        // Chain comma-separated tables from current position
-        int pos = fromMatcher.end();
-        Matcher commaMatcher = SQL_COMMA_TABLE_PATTERN.matcher(sourceCode);
-        commaMatcher.region(pos, sourceCode.length());
-        while (commaMatcher.find()) {
-            String rawCommaTable = commaMatcher.group(1).trim().toUpperCase();
-            rawCommaTable = rawCommaTable.replaceAll("^[\"']|[\"']$", "");
-            String commaTableName = rawCommaTable.replaceAll("^.*[\\/.]", "");
-            if (!commaTableName.isEmpty() && commaTableName.matches("[A-Z0-9$#@_]{1,10}")) {
-                tableNames.add(commaTableName);
-            }
-            pos = commaMatcher.end();
-            commaMatcher.region(pos, sourceCode.length());
+      // Chain comma-separated tables from current position
+      int pos = fromMatcher.end();
+      Matcher commaMatcher = SQL_COMMA_TABLE_PATTERN.matcher(sourceCode);
+      commaMatcher.region(pos, sourceCode.length());
+      while (commaMatcher.find()) {
+        String rawCommaTable = commaMatcher.group(1).trim().toUpperCase();
+        rawCommaTable = rawCommaTable.replaceAll("^[\"']|[\"']$", "");
+        String commaTableName = rawCommaTable.replaceAll("^.*[\\/.]", "");
+        if (!commaTableName.isEmpty() && commaTableName.matches("[A-Z0-9$#@_]{1,10}")) {
+            tableNames.add(commaTableName);
         }
+        pos = commaMatcher.end();
+        commaMatcher.region(pos, sourceCode.length());
+      }
     }
 
     // Add as file deps
