@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /*  
  *  Commmands patterns to be extracted from the build spec (YAML file )
@@ -18,9 +19,22 @@ import java.util.Set;
 public class BuildSpec {
   private String baseDirectory;  // Absolute path to the directory containing the YAML
   private List<TargetKey> targetsList = new ArrayList<>();
+  private ConcurrentHashMap<String, TargetKey> exportedProcToModule = new ConcurrentHashMap<>();
 
   public String getBaseDirectory() { return baseDirectory; }
   public void setBaseDirectory(String baseDirectory) { this.baseDirectory = baseDirectory; }
+
+  public void setExportedProcedures(ConcurrentHashMap<String, TargetKey> exportedProcToModule) { 
+    this.exportedProcToModule = exportedProcToModule; 
+  }
+
+  public boolean containsExport(String procedure, TargetKey target){
+    TargetKey procTarget = this.exportedProcToModule.getOrDefault(procedure, null);
+    if (procTarget == null) return false;
+    /* Validate target */
+    return procTarget.equals(target);
+  }
+
   //TODO: Add getTargetByMap()
   public void setTargetsList(Set<TargetKey> targetsSet) { this.targetsList.addAll(targetsSet);}
   public List<TargetKey> getTargetsList() { return this.targetsList;}

@@ -134,29 +134,6 @@ public class DependencyAwareness {
     String baseDir = globalSpec.getBaseDirectory();
     if (baseDir == null) throw new RuntimeException("Base directory not set in BuildSpec");
 
-    // Phase 1: Process only modules to populate the export map
-    //List<CompletableFuture<Void>> moduleFutures = new ArrayList<>();
-    //for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
-    //  TargetKey target = entry.getKey();
-
-    //  /* If not a module, omit */
-    //  if (!target.isModule()) continue;
-    //  /* If not stream file,  */
-    //  if (!target.containsStreamFile()) continue;
-
-    //  String fullPath = target.getStreamFile();
-
-    //  IFSFile sourceFile = new IFSFile(system, fullPath);
-    //  
-    //  if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
-
-    //  moduleFutures.add(collectExportedProcedures(target, sourceFile));  // will call collectExportedProcedures
-
-    //}
-    //CompletableFuture.allOf(moduleFutures.toArray(new CompletableFuture[0])).join();
-    ///* Show modules logs */
-    //showLogs(globalSpec);
-
     /* Set source stream file for every target */
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
@@ -171,6 +148,32 @@ public class DependencyAwareness {
 
       target.setStreamSourceFile(relPath);
     }
+
+    // Phase 1: Process only modules to populate the export map
+    List<CompletableFuture<Void>> moduleFutures = new ArrayList<>();
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey target = entry.getKey();
+
+      /* If not a module, omit */
+      if (!target.isModule()) continue;
+      /* If not stream file,  */
+      if (!target.containsStreamFile()) continue;
+
+      String fullPath = baseDir + "/" + target.getStreamFile();
+
+      IFSFile sourceFile = new IFSFile(system, fullPath);
+      
+      if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
+
+      moduleFutures.add(collectExportedProceduresAsync(target, sourceFile));  // will call collectExportedProcedures
+
+    }
+    CompletableFuture.allOf(moduleFutures.toArray(new CompletableFuture[0])).join();
+    /* Show modules logs */
+    showLogs(globalSpec);
+
+    /* Set exported procs back to spec */
+    globalSpec.setExportedProcedures(exportedProcToModule);
 
     List<CompletableFuture<Void>> futures = new ArrayList<>();
 
@@ -206,16 +209,10 @@ public class DependencyAwareness {
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
       List<String> logs = targetLogs.getOrDefault(target, List.of());
-      if (logs.size() == 0) {
-        logger.info(target.asString() + ": No dependencies found");
-        continue;
-      }
+      if (logs.size() == 0) continue;
+
       for (String log : logs) {
         logger.info(log);
-      }
-      if (logs.size() == 1) {
-        logger.info("No dependencies found");
-        continue;
       }
     }
 
@@ -223,20 +220,20 @@ public class DependencyAwareness {
     targetLogs.clear();
   }
 
-  //TODO: resolvePath
-  private CompletableFuture<Void> collectExportedProcedures(TargetKey target, IFSFile sourceFile) {
+  private CompletableFuture<Void> collectExportedProceduresAsync(TargetKey target, IFSFile sourceFile) {
   return CompletableFuture.runAsync(() -> {
     List<String> logs = new ArrayList<>();
+    Set<String> exportedProcs = new HashSet<>();
 
     try{ 
-      if (verbose) logs.add("Scannig sources: " + target.asString());
+      if (verbose) logs.add("Scannig sources for exports: " + target.asString());
 
-        String sourceCode;
-        try (InputStream stream = new IFSFileInputStream(sourceFile)) {
-          sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-        }
+      String sourceCode;
+      try (InputStream stream = new IFSFileInputStream(sourceFile)) {
+        sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+      }
 
-        logs.add("Dependencies of " + target.asString());
+      logs.add("Dependencies of " + target.asString());
 
       // Pattern for free-format: dcl-proc ProcName export;  (EXPORT can appear after name or params)
       // We capture the word immediately after dcl-proc as the procedure name
@@ -245,31 +242,41 @@ public class DependencyAwareness {
           Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
       Matcher matcher = exportProcPattern.matcher(sourceCode);
-      Set<String> exportedProcs = new HashSet<>();
 
       while (matcher.find()) {
         String procName = matcher.group(1).toUpperCase();
         if (procName.isEmpty()) continue;
         exportedProcs.add(procName);
-
-        // Store in map (overwrite if conflict – or collect list and warn later)
-        TargetKey previous = exportedProcToModule.put(procName, target);
-        if (previous != null && !previous.equals(target)) {
-          logs.add("WARNING: Procedure " + procName + " exported by multiple modules: " +
-                  previous.asString() + " and " + target.asString() + " – using last one");
-        }
       }
 
-      if (verbose && !exportedProcs.isEmpty()) {
-        logs.add("Exported procedures in " + target.asString() + ": " + exportedProcs);
+      // NEW: fixed-format pattern for P-spec procedures with EXPORT
+      Pattern fixedExportProcPattern = Pattern.compile(
+          "^\\s*P\\s*([A-Z0-9]+)\\s+B\\b.*\\bEXPORT\\b",
+          Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+
+      Matcher fixedMatcher = fixedExportProcPattern.matcher(sourceCode);
+
+      while (fixedMatcher.find()) {
+        String procName = fixedMatcher.group(1).toUpperCase();
+        if (procName.isEmpty()) continue;
+        exportedProcs.add(procName);
       }
+
+      if (exportedProcs.isEmpty()){
+        logs.add("No Exported procedures found in " + target.asString());
+        return;
+      }
+
+      logs.add("Exported procedures found in " + target.asString());
+      for (String export: exportedProcs) {
+        logs.add("EXPORT " + export);
+        exportedProcToModule.put(export, target);
+      } 
+
     } catch (Exception e) {
-      logs.add("ERROR processing " + target.asString() + ": " + e.getMessage());
+      logs.add("ERROR processing exports " + target.asString() + ": " + e.getMessage());
     } finally {
       targetLogs.put(target, logs);  // Store for later ordered printing
-      int count = processed.incrementAndGet();
-      double percent = count * 100.0 / totalTargets;
-      logger.info("Processed {} of {} targets ({}%)", count, totalTargets, String.format("%.1f", percent));
     }
     }
     );
@@ -401,6 +408,7 @@ public class DependencyAwareness {
     } catch (Exception e) {
       logs.add("ERROR processing " + target.asString() + ": " + e.getMessage());
     } finally {
+      if (target.getChildsCount() == 0) logs.add(target.asString() + ": No dependencies found");
       targetLogs.put(target, logs);  // Store for later ordered printing
       int count = processed.incrementAndGet();
       double percent = count * 100.0 / totalTargets;

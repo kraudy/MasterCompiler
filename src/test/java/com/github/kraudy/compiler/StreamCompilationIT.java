@@ -385,6 +385,11 @@ public class StreamCompilationIT {
       assertNotNull(depsORD100C2, "Deps target should not be null");
       assertEquals(1, depsORD100C2.getChildsCount(), "Childs of target " + depsORD100C2.asString() + " should be 1 CALL. ORD100");
 
+      /* Validate exported procs */
+      assertTrue(spec.containsExport("GETVATDESC", depsVAT300), "depsVAT300 Should export proc GETVATDESC");
+      assertTrue(spec.containsExport("GETVATRATE", depsVAT300), "depsVAT300 Should export proc GETVATRATE");
+      assertTrue(spec.containsExport("EXISTVATRATE", depsVAT300), "depsVAT300 Should export proc EXISTVATRATE");
+      assertTrue(spec.containsExport("CLCVAT", depsVAT300), "depsVAT300 Should export proc CLCVAT");
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());
