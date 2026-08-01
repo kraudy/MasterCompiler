@@ -130,6 +130,8 @@ public class ArgParserTest {
     assertFalse(parser.isDebug());
     assertFalse(parser.isVerbose());
     assertFalse(parser.isDiff());
+    assertFalse(parser.isClean());
+    assertFalse(parser.isNoMigrate());
   }
 
   @Test
@@ -140,6 +142,41 @@ public class ArgParserTest {
     ArgParser parser = new ArgParser(args);
 
     assertTrue(parser.isDryRun());  
+  }
+
+  @Test
+  void testNoMigrateFlag() {
+    String filePath = this.tempYaml.toString();
+
+    String[] args = {"-f", filePath, "--no-migrate"};
+    ArgParser parser = new ArgParser(args);
+
+    assertTrue(parser.isNoMigrate());
+  }
+
+  @Test
+  void testCleanShortAndLong() {
+    String filePath = this.tempYaml.toString();
+
+    ArgParser shortForm = new ArgParser(new String[]{"-f", filePath, "-c"});
+    assertTrue(shortForm.isClean());
+
+    ArgParser longForm = new ArgParser(new String[]{"-f", filePath, "--clean"});
+    assertTrue(longForm.isClean());
+  }
+
+  @Test
+  void testMissingValueForFileThrowsException() {
+    assertThrows(IllegalArgumentException.class, () -> new ArgParser(new String[]{"-f"}));
+    assertThrows(IllegalArgumentException.class, () -> new ArgParser(new String[]{"--file"}));
+  }
+
+  @Test
+  void testCombinedShortWithValueOptionThrowsException() {
+    String filePath = this.tempYaml.toString();
+    // -f cannot be part of a combined cluster
+    assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[]{"-fv", filePath}));
   }
 
   @Test
@@ -176,6 +213,27 @@ public class ArgParserTest {
   void testInvalidFilePath() {
     String[] args = {"-f", "/nonexistent.yaml"};
     assertThrows(IllegalArgumentException.class, () -> new ArgParser(args).getYamlFile());
+  }
+
+  @Test
+  void testGetSpecFromYamlFileRejectsInvalidPath() {
+    String[] args = {"-f", "/nonexistent.yaml"};
+    ArgParser parser = new ArgParser(args);
+    assertThrows(IllegalArgumentException.class, parser::getSpecFromYamlFile);
+  }
+
+  @Test
+  void testGetSpecFromYamlFileRejectsMissingFileOption() {
+    ArgParser parser = new ArgParser(new String[]{"-v"});
+    assertThrows(IllegalArgumentException.class, parser::getSpecFromYamlFile);
+  }
+
+  @Test
+  void testUsageMentionsCleanAndNoMigrate() {
+    String usage = ArgParser.getUsage();
+    assertTrue(usage.contains("--clean") || usage.contains("-c"));
+    assertTrue(usage.contains("--no-migrate"));
+    assertTrue(usage.contains("--file") || usage.contains("-f"));
   }
 
 }

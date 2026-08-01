@@ -364,9 +364,9 @@ public class MasterCompiler{
             parser.isDryRun(),
             parser.isDebug(),
             parser.isVerbose(),
-            parser.Clean(),
+            parser.isClean(),
             parser.isDiff(),
-            parser.noMigrate()
+            parser.isNoMigrate()
         );
       compiler.build();
 

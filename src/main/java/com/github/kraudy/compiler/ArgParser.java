@@ -1,40 +1,75 @@
 package com.github.kraudy.compiler;
 
-import java.util.List;
-import java.util.Arrays;
+import java.io.File;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import java.io.File;
-
 /*
  * Simple Unix-style CLI argument parser.
+ *
+ * Options are defined once in the Option catalog. Parse results land in typed
+ * fields. Adding a flag = one enum constant + one field + one getter.
  */
 public class ArgParser {
-  private final Map<String, Object> options = new HashMap<>();
 
-  private static final Map<String, String> validOptions = new HashMap<>();
+  private enum Kind { FLAG, VALUE }
 
-  static {
-    validOptions.put("f", "yamlFile");
-    validOptions.put("file", "yamlFile");
+  /**
+   * Single source of truth for every CLI option.
+   * shortName / longName may be null when only one form exists.
+   */
+  private enum Option {
+    FILE       ("f", "file",       Kind.VALUE, "YAML build file (required)"),
+    DEBUG      ("x", null,         Kind.FLAG,  "Debug mode"),
+    VERBOSE    ("v", null,         Kind.FLAG,  "Verbose output"),
+    CLEAN      ("c", "clean",      Kind.FLAG,  "Delete created objects after build"),
+    DRY_RUN    (null, "dry-run",   Kind.FLAG,  "Show commands without executing"),
+    DIFF       (null, "diff",      Kind.FLAG,  "Only build changed objects"),
+    NO_MIGRATE (null, "no-migrate", Kind.FLAG, "Disable automatic source migration");
 
-    validOptions.put("dry-run", "dryRun");
-    validOptions.put("no-migrate", "noMigrate");
+    final String shortName;
+    final String longName;
+    final Kind kind;
+    final String description;
 
-    validOptions.put("x", "debug");
+    Option(String shortName, String longName, Kind kind, String description) {
+      this.shortName = shortName;
+      this.longName = longName;
+      this.kind = kind;
+      this.description = description;
+    }
 
-    validOptions.put("v", "verbose");
-
-    validOptions.put("c", "clean"); // Delete all created objects
-
-    validOptions.put("diff", "diff");
-
+    boolean isFlag() {
+      return kind == Kind.FLAG;
+    }
   }
 
-  private static final List<String> booleanOptions = Arrays.asList(
-    "dryRun", "debug", "verbose", "clean", "diff", "noMigrate"
-  );
+  private static final Map<String, Option> SHORT_OPTIONS;
+  private static final Map<String, Option> LONG_OPTIONS;
+
+  static {
+    Map<String, Option> shorts = new HashMap<String, Option>();
+    Map<String, Option> longs = new HashMap<String, Option>();
+    for (Option opt : Option.values()) {
+      if (opt.shortName != null) {
+        shorts.put(opt.shortName, opt);
+      }
+      if (opt.longName != null) {
+        longs.put(opt.longName, opt);
+      }
+    }
+    SHORT_OPTIONS = Collections.unmodifiableMap(shorts);
+    LONG_OPTIONS = Collections.unmodifiableMap(longs);
+  }
+
+  private String yamlFile;
+  private boolean dryRun;
+  private boolean debug;
+  private boolean verbose;
+  private boolean clean;
+  private boolean diff;
+  private boolean noMigrate;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -44,59 +79,114 @@ public class ArgParser {
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
 
-      if (!arg.startsWith("-")) throw new IllegalArgumentException("Invalid argument: " + arg + ". Use -short or --long options.");
+      if (!arg.startsWith("-")) {
+        throw new IllegalArgumentException(
+            "Invalid argument: " + arg + ". Use -short or --long options.");
+      }
 
-      /* Extract option name (strip leading - or --) */
-      String optName = arg.startsWith("--") ? arg.substring(2) : arg.substring(1);
-
-      
-      if (optName.isEmpty()) throw new IllegalArgumentException("Empty option: " + arg);
-      
-      // Handle combined short options (e.g., -vx means -v -x)
-      if (!arg.startsWith("--") && optName.length() > 1) {
-        for (char c : optName.toCharArray()) {
-          String shortOpt = String.valueOf(c);
-
-          String fieldName = validOptions.get(shortOpt);
-          if (fieldName == null) throw new IllegalArgumentException("Unknown option: -" + shortOpt);
-
-          if (!booleanOptions.contains(fieldName)) throw new IllegalArgumentException("Combined short options are only supported for boolean flags: -" + shortOpt);
-
-          options.put(fieldName, true);
+      if (arg.startsWith("--")) {
+        String name = arg.substring(2);
+        if (name.isEmpty()) {
+          throw new IllegalArgumentException("Empty option: " + arg);
         }
+        Option opt = LONG_OPTIONS.get(name);
+        if (opt == null) {
+          throw new IllegalArgumentException("Unknown option: " + arg);
+        }
+        i = apply(opt, arg, args, i);
         continue;
       }
 
-      // Map short/long to valid names
-      String fieldName = validOptions.get(optName);
-      if (fieldName == null) throw new IllegalArgumentException("Unknown option: " + arg);
+      // Short form: -x, -v, -f, or combined flags -xv
+      String body = arg.substring(1);
+      if (body.isEmpty()) {
+        throw new IllegalArgumentException("Empty option: " + arg);
+      }
 
-      // Check if it's a flag (no value expected next)
-      if(booleanOptions.contains(fieldName)){
-        options.put(fieldName, true);
+      if (body.length() > 1) {
+        applyCombinedShorts(body, arg);
         continue;
       }
 
-      // Expect value at next index
-      if (i + 1 >= args.length) throw new IllegalArgumentException("Missing value for " + arg);
-
-      /* Extract value from next string in args */
-      String value = args[++i];
-      if (value.startsWith("-")) throw new IllegalArgumentException("Value for " + arg + " cannot start with '-': " + value);
-
-      options.put(fieldName, value);
+      Option opt = SHORT_OPTIONS.get(body);
+      if (opt == null) {
+        throw new IllegalArgumentException("Unknown option: " + arg);
+      }
+      i = apply(opt, arg, args, i);
     }
   }
 
-  // Getters (with defaults and validation)
-  public String getYamlFile() {
-      String file = (String) options.get("yamlFile");
+  /** Combined short flags only (e.g. -xv). Value options cannot be clustered. */
+  private void applyCombinedShorts(String body, String rawArg) {
+    for (int c = 0; c < body.length(); c++) {
+      String shortOpt = String.valueOf(body.charAt(c));
+      Option opt = SHORT_OPTIONS.get(shortOpt);
+      if (opt == null) {
+        throw new IllegalArgumentException("Unknown option: -" + shortOpt);
+      }
+      if (!opt.isFlag()) {
+        throw new IllegalArgumentException(
+            "Combined short options are only supported for boolean flags: -" + shortOpt);
+      }
+      setFlag(opt);
+    }
+  }
 
-      if (file == null) throw new IllegalArgumentException("Required: -f or --file <YAML build file>");
+  /**
+   * Apply a resolved option. For VALUE options, consumes the next argv token.
+   * @return updated index into args
+   */
+  private int apply(Option opt, String rawArg, String[] args, int index) {
+    if (opt.isFlag()) {
+      setFlag(opt);
+      return index;
+    }
 
-      if (!isValidFile(file)) throw new IllegalArgumentException("Invalid YAML file: " + file + " (must exist and be readable)");
+    if (index + 1 >= args.length) {
+      throw new IllegalArgumentException("Missing value for " + rawArg);
+    }
+    String value = args[index + 1];
+    if (value.startsWith("-")) {
+      throw new IllegalArgumentException(
+          "Value for " + rawArg + " cannot start with '-': " + value);
+    }
+    setValue(opt, value);
+    return index + 1;
+  }
 
-      return file;
+  private void setFlag(Option opt) {
+    switch (opt) {
+      case DEBUG:      debug = true; break;
+      case VERBOSE:    verbose = true; break;
+      case CLEAN:      clean = true; break;
+      case DRY_RUN:    dryRun = true; break;
+      case DIFF:       diff = true; break;
+      case NO_MIGRATE: noMigrate = true; break;
+      default:
+        throw new IllegalStateException("Option is not a flag: " + opt);
+    }
+  }
+
+  private void setValue(Option opt, String value) {
+    switch (opt) {
+      case FILE:
+        yamlFile = value;
+        break;
+      default:
+        throw new IllegalStateException("Option does not take a value: " + opt);
+    }
+  }
+
+  /** Required path: non-null, exists, readable, ends with .yaml */
+  private String requireYamlFile() {
+    if (yamlFile == null) {
+      throw new IllegalArgumentException("Required: -f or --file <YAML build file>");
+    }
+    if (!isValidFile(yamlFile)) {
+      throw new IllegalArgumentException(
+          "Invalid YAML file: " + yamlFile + " (must exist and be readable)");
+    }
+    return yamlFile;
   }
 
   private boolean isValidFile(String path) {
@@ -104,54 +194,60 @@ public class ArgParser {
     return f.exists() && f.canRead() && path.endsWith(".yaml");
   }
 
+  public String getYamlFile() {
+    return requireYamlFile();
+  }
 
   public BuildSpec getSpecFromYamlFile() {
-      String file = (String) options.get("yamlFile");
-
-      if (file == null) throw new IllegalArgumentException("Required: -f or --file <YAML build file>");
-
-      return Utilities.deserializeYaml(file);
+    return Utilities.deserializeYaml(requireYamlFile());
   }
 
   public boolean isDryRun() {
-    return (boolean) options.getOrDefault("dryRun", false);
+    return dryRun;
   }
 
   public boolean isDebug() {
-    return (boolean) options.getOrDefault("debug", false);
+    return debug;
   }
 
   public boolean isVerbose() {
-    return (boolean) options.getOrDefault("verbose", false);
+    return verbose;
   }
 
-  public boolean Clean() {
-    return (boolean) options.getOrDefault("clean", false);
+  public boolean isClean() {
+    return clean;
   }
 
   public boolean isDiff() {
-    return (boolean) options.getOrDefault("diff", false);
+    return diff;
   }
 
-  public boolean noMigrate() {
-    return (boolean) options.getOrDefault("noMigrate", false);
-}
+  public boolean isNoMigrate() {
+    return noMigrate;
+  }
 
-  
-
-  // Print usage (call on error)
   public static String getUsage() {
     StringBuilder sb = new StringBuilder();
-
-    sb.append("Usage: compiler [-f|--file <YAML>] [--diff] [--dry-run] [-x] [-v]").append("\n");
-    sb.append("  -f, --file     YAML build file (required)").append("\n");
-    sb.append("  --diff         Only build changed objects").append("\n");
-    sb.append("  --dry-run      Show commands without executing").append("\n");
-    sb.append("  --no-migrate   Disable automatic source migration").append("\n");
-    sb.append("  -x,            Debug mode").append("\n");
-    sb.append("  -v,            Verbose output");
-
+    sb.append("Usage: compiler [-f|--file <YAML>] [--diff] [--dry-run] [--no-migrate] [-c] [-x] [-v]")
+        .append("\n");
+    for (Option opt : Option.values()) {
+      sb.append("  ");
+      if (opt.shortName != null && opt.longName != null) {
+        sb.append("-").append(opt.shortName).append(", --").append(opt.longName);
+      } else if (opt.shortName != null) {
+        sb.append("-").append(opt.shortName);
+      } else {
+        sb.append("--").append(opt.longName);
+      }
+      if (opt.kind == Kind.VALUE) {
+        sb.append(" <value>");
+      }
+      sb.append("\t").append(opt.description).append("\n");
+    }
+    // trim trailing newline for parity with previous single-line last entry style
+    if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') {
+      sb.setLength(sb.length() - 1);
+    }
     return sb.toString();
   }
-
 }

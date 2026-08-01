@@ -12,9 +12,10 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 
 * Spec path. The only required param.  `{-f, --file} `
 * Debug and verbose log output `{-x, -v, -xv}`
-* Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. `*{--dry-run}`
+* Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. `{--dry-run}`
 * No migrate flag ommits souce files migration `{--no-migrate}`
 * Differentiated build based on last source change compared to object creations `{--diff}`
+* Clean deletes created objects after the build `{ -c, --clean }`
 
 ## Params permutation
 
