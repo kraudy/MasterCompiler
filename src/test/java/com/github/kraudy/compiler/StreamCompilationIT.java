@@ -385,6 +385,15 @@ public class StreamCompilationIT {
       assertNotNull(depsORD100C2, "Deps target should not be null");
       assertEquals(1, depsORD100C2.getChildsCount(), "Childs of target " + depsORD100C2.asString() + " should be 1 CALL. ORD100");
 
+      TargetKey depsORD100C = spec.getTargetKey(new TargetKey("curlib.ORD100C.PGM.CLLE"));
+      assertNotNull(depsORD100C, "Deps target should not be null");
+      assertEquals(1, depsORD100C.getChildsCount(), "Childs of target " + depsORD100C.asString() + " should be 1 CMD CRTORD");
+
+      /* User-defined command: ORD500C invokes CVTSPLPDF */
+      TargetKey depsORD500C = spec.getTargetKey(new TargetKey("curlib.ORD500C.PGM.CLLE"));
+      assertNotNull(depsORD500C, "Deps target should not be null");
+      assertEquals(1, depsORD500C.getChildsCount(), "Childs of target " + depsORD500C.asString() + " should be 1 CMD CVTSPLPDF");
+
       /* Validate exported procs */
       assertTrue(spec.containsExport("GETVATDESC", depsVAT300), "depsVAT300 Should export proc GETVATDESC");
       assertTrue(spec.containsExport("GETVATRATE", depsVAT300), "depsVAT300 Should export proc GETVATRATE");

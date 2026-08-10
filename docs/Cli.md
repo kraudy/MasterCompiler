@@ -10,7 +10,12 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 
 ## Parameters
 
-* Spec path. The only required param.  `{-f, --file} `
+* Spec path **or** scan root (one required):
+  * YAML file `{-f, --file}`
+  * Source root to scan `{--scan}` — see [Scan.md](./Scan.md)
+* Output path for generated YAML `{-o, --output}`
+* Default library for scanned targets `{--lib}` (default: `curlib`)
+* Generate YAML only, no compile `{--generate-only}` (requires `--scan` and `-o`)
 * Debug and verbose log output `{-x, -v, -xv}`
 * Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. `{--dry-run}`
 * No migrate flag ommits souce files migration `{--no-migrate}`
@@ -57,3 +62,19 @@ Add no migrate
 ```bash
 java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --no-migrate
 ```
+
+## Scan mode (auto YAML)
+
+Generate a topo-sorted spec from a source tree without writing targets by hand:
+
+```bash
+java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --generate-only -o build.yaml -v
+```
+
+Scan and compile in one step:
+
+```bash
+java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --lib curlib -xv
+```
+
+[Scan doc](./Scan.md)

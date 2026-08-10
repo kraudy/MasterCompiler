@@ -198,6 +198,10 @@ public class TargetKey {
     return this.objectType == ObjectType.SRVPGM;
   }
 
+  public boolean isCmd() {
+    return this.objectType == ObjectType.CMD;
+  }
+
   /* Used for diff build */
   public boolean needsRebuild() {
     /* If no timestamp, rebuild */

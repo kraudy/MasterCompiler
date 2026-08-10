@@ -350,17 +350,51 @@ public class MasterCompiler{
     MasterCompiler compiler = null;
     Connection connection = null;
     try {
-      ArgParser parser = new ArgParser(args);
-      //TODO: This should be able to run locally in debug mode.
       if (args.length == 0) throw new IllegalArgumentException("Params are required");
-        
+
+      ArgParser parser = new ArgParser(args);
+      parser.validate();
+
+      /* Generate-only can run without IBMi when scanning a local tree */
+      if (parser.isGenerateOnly()) {
+        system = null;
+        try {
+          system = IBMiDotEnv.getNewSystemConnection(true);
+        } catch (Exception ignore) {
+          /* local-only generation */
+          if (parser.isVerbose()) {
+            logger.info("No IBMi connection; generating from local filesystem only");
+          }
+        }
+
+        SpecGenerator generator = new SpecGenerator(
+            system, parser.isDebug(), parser.isVerbose());
+        BuildSpec generated = generator.generate(parser.getScanRoot(), parser.getLibrary());
+        SpecWriter.writeToFile(generated, parser.getOutputFile(), parser.getScanRoot());
+        logger.info("Generated YAML: {}", parser.getOutputFile());
+        return;
+      }
+
       system = IBMiDotEnv.getNewSystemConnection(true); // Get system
       connection = new AS400JDBCDataSource(system).getConnection();
+
+      BuildSpec spec;
+      if (parser.hasScan()) {
+        SpecGenerator generator = new SpecGenerator(
+            system, parser.isDebug(), parser.isVerbose());
+        spec = generator.generate(parser.getScanRoot(), parser.getLibrary());
+        if (parser.getOutputFile() != null) {
+          SpecWriter.writeToFile(spec, parser.getOutputFile(), parser.getScanRoot());
+          logger.info("Generated YAML: {}", parser.getOutputFile());
+        }
+      } else {
+        spec = parser.getSpecFromYamlFile();
+      }
 
       compiler = new MasterCompiler(
             system,
             connection,
-            parser.getSpecFromYamlFile(),
+            spec,
             parser.isDryRun(),
             parser.isDebug(),
             parser.isVerbose(),

@@ -1,10 +1,14 @@
 package com.github.kraudy.compiler;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -96,10 +100,20 @@ public class DependencyAwareness {
   private static final Pattern CALL_DIRECT_PGM_PATTERN = Pattern.compile(
       "\\bCALL\\s+(['\"]?)([A-Z0-9$#@_]{1,10})\\1(?:\\s+PARM|\\s|$)",Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
 
+  // Binder language: EXPORT SYMBOL('PROCNAME')
+  private static final Pattern BND_EXPORT_SYMBOL = Pattern.compile(
+      "\\bEXPORT\\s+SYMBOL\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
+
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
   private final Map<String, TargetKey> keyLookup = new HashMap<>();
+
+  /** Project *CMD targets keyed by upper-case object name (command name). */
+  private final Map<String, TargetKey> projectCmds = new HashMap<>();
+
+  /** Statement-leading match for project CMD names; rebuilt each detectDependencies run. */
+  private Pattern projectCmdStmtPattern;
 
   private final ConcurrentHashMap<TargetKey, List<String>> targetLogs = new ConcurrentHashMap<>();
   private final AtomicInteger processed = new AtomicInteger();
@@ -121,32 +135,59 @@ public class DependencyAwareness {
     /* This let us map name string to object name. TODO: There has to be a better way of doing this */
 
     this.totalTargets = globalSpec.targets.size();
+    this.processed.set(0);
+    this.exportedProcToModule.clear();
 
     keyLookup.clear();
+    projectCmds.clear();
+    projectCmdStmtPattern = null;
     for (TargetKey k : globalSpec.targets.keySet()) {
       keyLookup.put(k.asMapKey(), k);
+      if (k.isCmd()) {
+        projectCmds.put(k.getObjectName().toUpperCase(), k);
+      }
+    }
+    if (!projectCmds.isEmpty()) {
+      StringBuilder alt = new StringBuilder();
+      for (String cmdName : projectCmds.keySet()) {
+        if (alt.length() > 0) alt.append('|');
+        alt.append(Pattern.quote(cmdName));
+      }
+      projectCmdStmtPattern = Pattern.compile(
+          "^\\s*(?:[A-Z0-9$#@_]{1,10}:\\s*)?(" + alt + ")\\b",
+          Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
     }
 
     /* Build override map */
     buildFileOverrideMap(globalSpec);
 
-    /* We need the base dir because IFSFile does not seems to work with curdir relative paths */
+    /* We need the base dir because relative SRCSTMF paths resolve against it */
     String baseDir = globalSpec.getBaseDirectory();
     if (baseDir == null) throw new RuntimeException("Base directory not set in BuildSpec");
 
-    /* Set source stream file for every target */
+    /* Set stream file + apply MODULE from spec params onto TargetKey */
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-      if (target.containsStreamFile()) continue;
-      if (!targetSpec.params.containsKey(ParamCmd.SRCSTMF)) continue;
-      
-      String relPath = targetSpec.params.get(ParamCmd.SRCSTMF);
+      if (!target.containsStreamFile() && targetSpec.params.containsKey(ParamCmd.SRCSTMF)) {
+        String relPath = targetSpec.params.get(ParamCmd.SRCSTMF);
+        if (relPath != null && !relPath.isEmpty()) {
+          target.setStreamSourceFile(relPath);
+        }
+      }
 
-      if (relPath.isEmpty()) continue;
-
-      target.setStreamSourceFile(relPath);
+      /* MODULE must be on TargetKey before CRTSRVPGM dep resolution */
+      if (targetSpec.params.containsKey(ParamCmd.MODULE)) {
+        String modules = targetSpec.params.get(ParamCmd.MODULE);
+        if (modules != null && !modules.trim().isEmpty()) {
+          try {
+            target.put(ParamCmd.MODULE, modules.trim());
+          } catch (Exception ignore) {
+            /* invalid for non-srvpgm — ignore */
+          }
+        }
+      }
     }
 
     // Phase 1: Process only modules to populate the export map
@@ -154,54 +195,138 @@ public class DependencyAwareness {
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
 
-      /* If not a module, omit */
       if (!target.isModule()) continue;
-      /* If not stream file,  */
       if (!target.containsStreamFile()) continue;
 
-      String fullPath = baseDir + "/" + target.getStreamFile();
-
-      IFSFile sourceFile = new IFSFile(system, fullPath);
-      
-      if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
-
-      moduleFutures.add(collectExportedProceduresAsync(target, sourceFile));  // will call collectExportedProcedures
-
+      String fullPath = resolveFullPath(baseDir, target.getStreamFile());
+      moduleFutures.add(collectExportedProceduresAsync(target, fullPath));
     }
     CompletableFuture.allOf(moduleFutures.toArray(new CompletableFuture[0])).join();
-    /* Show modules logs */
     showLogs(globalSpec);
 
-    /* Set exported procs back to spec */
     globalSpec.setExportedProcedures(exportedProcToModule);
 
-    List<CompletableFuture<Void>> futures = new ArrayList<>();
+    /* Infer MODULE lists for srvpgms from binder EXPORT symbols + export map */
+    inferSrvpgmModules(globalSpec, baseDir);
 
+    List<CompletableFuture<Void>> futures = new ArrayList<>();
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
 
-      /* If not source file, omit */
       if (!target.containsStreamFile()) {
         if (verbose) logger.info("Target " + target.asString() + " does not contains stream file to scan");
         continue;
       }
 
-      String fullPath =  baseDir + "/" + target.getStreamFile();
-
-      IFSFile sourceFile = new IFSFile(system, fullPath);
-      
-      if (!sourceFile.exists()) throw new RuntimeException("Source file not found: " + fullPath);
-
-      CompletableFuture<Void> future = processTargetAsync(target, sourceFile);
-      futures.add(future);
-
+      String fullPath = resolveFullPath(baseDir, target.getStreamFile());
+      futures.add(processTargetAsync(target, fullPath));
     }
 
-    // Wait for all
     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
     showLogs(globalSpec);
+  }
 
+  /**
+   * For each SRVPGM without an explicit MODULE list, map binder
+   * {@code EXPORT SYMBOL('X')} names to modules via the export map.
+   */
+  private void inferSrvpgmModules(BuildSpec globalSpec, String baseDir) {
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey target = entry.getKey();
+      BuildSpec.TargetSpec targetSpec = entry.getValue();
+
+      if (!target.isServiceProgram()) continue;
+
+      if (targetSpec.params.containsKey(ParamCmd.MODULE)) {
+        String existing = targetSpec.params.get(ParamCmd.MODULE);
+        if (existing != null && !existing.trim().isEmpty()) {
+          try {
+            target.put(ParamCmd.MODULE, existing.trim());
+          } catch (Exception ignore) {}
+          continue;
+        }
+      }
+
+      if (!target.containsStreamFile()) continue;
+
+      try {
+        String fullPath = resolveFullPath(baseDir, target.getStreamFile());
+        String sourceCode = readSource(fullPath);
+
+        Set<String> moduleNames = new LinkedHashSet<>();
+        Matcher m = BND_EXPORT_SYMBOL.matcher(sourceCode);
+        while (m.find()) {
+          String symbol = m.group(1).trim().toUpperCase();
+          if (symbol.isEmpty()) continue;
+          TargetKey mod = exportedProcToModule.get(symbol);
+          if (mod != null && mod.isModule()) {
+            moduleNames.add(mod.getObjectName());
+          }
+        }
+
+        if (moduleNames.isEmpty()) {
+          if (verbose) {
+            logger.info("Could not infer MODULE list for {} (no matching EXPORT symbols)",
+                target.asString());
+          }
+          continue;
+        }
+
+        String joined = String.join(" ", moduleNames);
+        targetSpec.params.put(ParamCmd.MODULE, joined);
+        target.put(ParamCmd.MODULE, joined);
+        if (verbose) {
+          logger.info("Inferred MODULE for {}: {}", target.asString(), joined);
+        }
+      } catch (Exception e) {
+        logger.warn("Failed to infer MODULE for {}: {}", target.asString(), e.getMessage());
+      }
+    }
+  }
+
+  private static String resolveFullPath(String baseDir, String streamFile) {
+    if (streamFile == null) return baseDir;
+    String rel = streamFile.replace("'", "").trim();
+    if (rel.startsWith("/") || (rel.length() > 2 && rel.charAt(1) == ':')) {
+      return rel;
+    }
+    if (baseDir.endsWith("/") || baseDir.endsWith("\\")) {
+      return baseDir + rel;
+    }
+    return baseDir + "/" + rel;
+  }
+
+  /** Read source from local filesystem if present, otherwise from IFS. */
+  private String readSource(String fullPath) throws Exception {
+    File local = new File(fullPath);
+    if (local.isFile()) {
+      try (InputStream stream = new FileInputStream(local)) {
+        return new String(readAllBytes(stream), StandardCharsets.UTF_8);
+      }
+    }
+
+    if (system == null) {
+      throw new RuntimeException(
+          "Source file not found locally and no AS400 connection: " + fullPath);
+    }
+
+    IFSFile sourceFile = new IFSFile(system, fullPath);
+    if (!sourceFile.exists()) {
+      throw new RuntimeException("Source file not found: " + fullPath);
+    }
+    try (InputStream stream = new IFSFileInputStream(sourceFile)) {
+      return new String(readAllBytes(stream), StandardCharsets.UTF_8);
+    }
+  }
+
+  private static byte[] readAllBytes(InputStream stream) throws Exception {
+    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    byte[] chunk = new byte[8192];
+    int n;
+    while ((n = stream.read(chunk)) != -1) {
+      buffer.write(chunk, 0, n);
+    }
+    return buffer.toByteArray();
   }
 
   private void showLogs(BuildSpec globalSpec){
@@ -220,7 +345,7 @@ public class DependencyAwareness {
     targetLogs.clear();
   }
 
-  private CompletableFuture<Void> collectExportedProceduresAsync(TargetKey target, IFSFile sourceFile) {
+  private CompletableFuture<Void> collectExportedProceduresAsync(TargetKey target, String fullPath) {
   return CompletableFuture.runAsync(() -> {
     List<String> logs = new ArrayList<>();
     Set<String> exportedProcs = new HashSet<>();
@@ -228,10 +353,7 @@ public class DependencyAwareness {
     try{ 
       if (verbose) logs.add("Scannig sources for exports: " + target.asString());
 
-      String sourceCode;
-      try (InputStream stream = new IFSFileInputStream(sourceFile)) {
-        sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-      }
+      String sourceCode = readSource(fullPath);
 
       logs.add("Dependencies of " + target.asString());
 
@@ -282,16 +404,13 @@ public class DependencyAwareness {
     );
   }
 
-  private CompletableFuture<Void> processTargetAsync(TargetKey target, IFSFile sourceFile) {
+  private CompletableFuture<Void> processTargetAsync(TargetKey target, String fullPath) {
   return CompletableFuture.runAsync(() -> {
     List<String> logs = new ArrayList<>();
     try {
       if (verbose) logs.add("Scannig sources: " + target.asString());
 
-      String sourceCode;
-      try (InputStream stream = new IFSFileInputStream(sourceFile)) {
-        sourceCode = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-      }
+      String sourceCode = readSource(fullPath);
 
       logs.add("Dependencies of " + target.asString());
 
@@ -387,11 +506,13 @@ public class DependencyAwareness {
           break;
       }
 
-      /* Get CLP, CLLE dependencies */
+      /* Get CLP, CLLE dependencies (CALL + project user-defined commands) */
       switch (target.getCompilationCommand()) {
-        case CRTBNDCL:      
+        case CRTBNDCL:
         case CRTCLPGM:
+        case CRTCLMOD:
           getClCallDependencies(target, sourceCode, logs);
+          getClUserCmdDependencies(target, sourceCode, logs);
           break;
       }
 
@@ -544,6 +665,36 @@ public class DependencyAwareness {
       if (verbose) logs.add("CL CALL dependency: " + target.asString() + " calls program " + pgmKey.asString() + " (CALL " + pgmName + ")");
       target.addChild(pgmKey);
       pgmKey.addFather(target);
+    }
+  }
+
+  /**
+   * Find project *CMD objects used as free-standing commands in CL source
+   * (e.g. {@code CRTORD CUID(&CUID)} when {@code CRTORD} is a build target).
+   * Only statement-leading tokens are matched so system commands and mid-line
+   * mentions are ignored unless they equal a project CMD name.
+   */
+  private void getClUserCmdDependencies(TargetKey target, String sourceCode, List<String> logs) {
+    if (projectCmdStmtPattern == null || projectCmds.isEmpty()) return;
+
+    Set<String> found = new LinkedHashSet<>();
+    Matcher m = projectCmdStmtPattern.matcher(sourceCode);
+    while (m.find()) {
+      String name = m.group(1).trim().toUpperCase();
+      if (!name.isEmpty()) found.add(name);
+    }
+
+    for (String cmdName : found) {
+      TargetKey cmdKey = projectCmds.get(cmdName);
+      if (cmdKey == null || !cmdKey.isCmd()) {
+        if (verbose) logs.add("Referenced CL command not a build target, ignored: " + cmdName
+            + " (in " + target.asString() + ")");
+        continue;
+      }
+      if (verbose) logs.add("CL CMD dependency: " + target.asString() + " uses command "
+          + cmdKey.asString() + " (" + cmdName + ")");
+      target.addChild(cmdKey);
+      cmdKey.addFather(target);
     }
   }
 

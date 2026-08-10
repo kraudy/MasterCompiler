@@ -20,13 +20,17 @@ public class ArgParser {
    * shortName / longName may be null when only one form exists.
    */
   private enum Option {
-    FILE       ("f", "file",       Kind.VALUE, "YAML build file (required)"),
-    DEBUG      ("x", null,         Kind.FLAG,  "Debug mode"),
-    VERBOSE    ("v", null,         Kind.FLAG,  "Verbose output"),
-    CLEAN      ("c", "clean",      Kind.FLAG,  "Delete created objects after build"),
-    DRY_RUN    (null, "dry-run",   Kind.FLAG,  "Show commands without executing"),
-    DIFF       (null, "diff",      Kind.FLAG,  "Only build changed objects"),
-    NO_MIGRATE (null, "no-migrate", Kind.FLAG, "Disable automatic source migration");
+    FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
+    SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
+    OUTPUT        ("o", "output",        Kind.VALUE, "Write generated YAML to this path"),
+    LIB           (null, "lib",          Kind.VALUE, "Default library for scanned targets (default: curlib)"),
+    GENERATE_ONLY (null, "generate-only", Kind.FLAG, "Only generate YAML from --scan (do not compile)"),
+    DEBUG         ("x", null,            Kind.FLAG,  "Debug mode"),
+    VERBOSE       ("v", null,            Kind.FLAG,  "Verbose output"),
+    CLEAN         ("c", "clean",         Kind.FLAG,  "Delete created objects after build"),
+    DRY_RUN       (null, "dry-run",      Kind.FLAG,  "Show commands without executing"),
+    DIFF          (null, "diff",         Kind.FLAG,  "Only build changed objects"),
+    NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration");
 
     final String shortName;
     final String longName;
@@ -64,6 +68,10 @@ public class ArgParser {
   }
 
   private String yamlFile;
+  private String scanRoot;
+  private String outputFile;
+  private String library = SpecGenerator.DEFAULT_LIBRARY;
+  private boolean generateOnly;
   private boolean dryRun;
   private boolean debug;
   private boolean verbose;
@@ -156,12 +164,13 @@ public class ArgParser {
 
   private void setFlag(Option opt) {
     switch (opt) {
-      case DEBUG:      debug = true; break;
-      case VERBOSE:    verbose = true; break;
-      case CLEAN:      clean = true; break;
-      case DRY_RUN:    dryRun = true; break;
-      case DIFF:       diff = true; break;
-      case NO_MIGRATE: noMigrate = true; break;
+      case DEBUG:         debug = true; break;
+      case VERBOSE:       verbose = true; break;
+      case CLEAN:         clean = true; break;
+      case DRY_RUN:       dryRun = true; break;
+      case DIFF:          diff = true; break;
+      case NO_MIGRATE:    noMigrate = true; break;
+      case GENERATE_ONLY: generateOnly = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
     }
@@ -172,8 +181,47 @@ public class ArgParser {
       case FILE:
         yamlFile = value;
         break;
+      case SCAN:
+        scanRoot = value;
+        break;
+      case OUTPUT:
+        outputFile = value;
+        break;
+      case LIB:
+        library = value;
+        break;
       default:
         throw new IllegalStateException("Option does not take a value: " + opt);
+    }
+  }
+
+  /**
+   * Validate mutual exclusion / required inputs after parse.
+   * Call before using getters that require a mode.
+   */
+  public void validate() {
+    boolean hasFile = yamlFile != null;
+    boolean hasScan = scanRoot != null;
+
+    if (!hasFile && !hasScan) {
+      throw new IllegalArgumentException(
+          "Required: -f|--file <YAML> or --scan <source-root>");
+    }
+    if (hasFile && hasScan) {
+      throw new IllegalArgumentException(
+          "Use either -f|--file or --scan, not both");
+    }
+    if (generateOnly && !hasScan) {
+      throw new IllegalArgumentException(
+          "--generate-only requires --scan <source-root>");
+    }
+    if (generateOnly && outputFile == null) {
+      throw new IllegalArgumentException(
+          "--generate-only requires -o|--output <file>");
+    }
+    if (hasFile && !isValidFile(yamlFile)) {
+      throw new IllegalArgumentException(
+          "Invalid YAML file: " + yamlFile + " (must exist and be readable)");
     }
   }
 
@@ -194,8 +242,35 @@ public class ArgParser {
     return f.exists() && f.canRead() && path.endsWith(".yaml");
   }
 
+  public boolean hasScan() {
+    return scanRoot != null;
+  }
+
+  public boolean hasFile() {
+    return yamlFile != null;
+  }
+
   public String getYamlFile() {
     return requireYamlFile();
+  }
+
+  public String getScanRoot() {
+    if (scanRoot == null) {
+      throw new IllegalArgumentException("Required: --scan <source-root>");
+    }
+    return scanRoot;
+  }
+
+  public String getOutputFile() {
+    return outputFile;
+  }
+
+  public String getLibrary() {
+    return library != null ? library : SpecGenerator.DEFAULT_LIBRARY;
+  }
+
+  public boolean isGenerateOnly() {
+    return generateOnly;
   }
 
   public BuildSpec getSpecFromYamlFile() {
@@ -228,7 +303,7 @@ public class ArgParser {
 
   public static String getUsage() {
     StringBuilder sb = new StringBuilder();
-    sb.append("Usage: compiler [-f|--file <YAML>] [--diff] [--dry-run] [--no-migrate] [-c] [-x] [-v]")
+    sb.append("Usage: compiler (-f|--file <YAML> | --scan <root>) [options]")
         .append("\n");
     for (Option opt : Option.values()) {
       sb.append("  ");
@@ -244,7 +319,6 @@ public class ArgParser {
       }
       sb.append("\t").append(opt.description).append("\n");
     }
-    // trim trailing newline for parity with previous single-line last entry style
     if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') {
       sb.setLength(sb.length() - 1);
     }

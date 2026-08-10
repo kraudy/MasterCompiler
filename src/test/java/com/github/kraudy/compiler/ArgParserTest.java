@@ -234,6 +234,51 @@ public class ArgParserTest {
     assertTrue(usage.contains("--clean") || usage.contains("-c"));
     assertTrue(usage.contains("--no-migrate"));
     assertTrue(usage.contains("--file") || usage.contains("-f"));
+    assertTrue(usage.contains("--scan"));
+    assertTrue(usage.contains("--generate-only"));
+  }
+
+  @Test
+  void testScanOption() {
+    ArgParser parser = new ArgParser(new String[]{"--scan", "/tmp/sources", "-v"});
+    parser.validate();
+    assertTrue(parser.hasScan());
+    assertEquals("/tmp/sources", parser.getScanRoot());
+    assertEquals("curlib", parser.getLibrary());
+    assertTrue(parser.isVerbose());
+    assertFalse(parser.isGenerateOnly());
+  }
+
+  @Test
+  void testScanWithLibAndOutput() {
+    ArgParser parser = new ArgParser(new String[]{
+        "--scan", "/tmp/src", "--lib", "mylib", "-o", "/tmp/out.yaml", "--generate-only"});
+    parser.validate();
+    assertEquals("mylib", parser.getLibrary());
+    assertEquals("/tmp/out.yaml", parser.getOutputFile());
+    assertTrue(parser.isGenerateOnly());
+  }
+
+  @Test
+  void testFileAndScanMutuallyExclusive() {
+    String filePath = this.tempYaml.toString();
+    ArgParser parser = new ArgParser(new String[]{"-f", filePath, "--scan", "/tmp/src"});
+    assertThrows(IllegalArgumentException.class, parser::validate);
+  }
+
+  @Test
+  void testGenerateOnlyRequiresScanAndOutput() {
+    ArgParser noScan = new ArgParser(new String[]{"--generate-only", "-o", "/tmp/x.yaml"});
+    assertThrows(IllegalArgumentException.class, noScan::validate);
+
+    ArgParser noOut = new ArgParser(new String[]{"--scan", "/tmp/src", "--generate-only"});
+    assertThrows(IllegalArgumentException.class, noOut::validate);
+  }
+
+  @Test
+  void testValidateRequiresFileOrScan() {
+    ArgParser parser = new ArgParser(new String[]{"-v"});
+    assertThrows(IllegalArgumentException.class, parser::validate);
   }
 
 }

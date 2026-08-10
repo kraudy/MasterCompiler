@@ -142,9 +142,18 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
 
 Unix base style Cli with short and long parameters.
 
-The spec route is always required `{-f, --file | /route/cool_spec.yaml}`
+Provide either a YAML spec `{-f, --file}` **or** a source root to scan `{--scan}`:
 
-[Cli doc](./docs/Cli.md) 
+```bash
+# Classic: hand-written YAML
+java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
+
+# Scan sources → dependency order → generate YAML (and optionally build)
+java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --generate-only -o build.yaml
+java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources -xv
+```
+
+[Cli doc](./docs/Cli.md) · [Scan doc](./docs/Scan.md) 
 
 ## Parameter resolution and validation
 
