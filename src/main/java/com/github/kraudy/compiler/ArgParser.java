@@ -22,6 +22,7 @@ public class ArgParser {
   private enum Option {
     FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
     SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
+    BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
     OUTPUT        ("o", "output",        Kind.VALUE, "Write generated YAML to this path"),
     LIB           (null, "lib",          Kind.VALUE, "Default library for scanned targets (default: curlib)"),
     GENERATE_ONLY (null, "generate-only", Kind.FLAG, "Only generate YAML from --scan (do not compile)"),
@@ -69,6 +70,7 @@ public class ArgParser {
 
   private String yamlFile;
   private String scanRoot;
+  private String baseFile;
   private String outputFile;
   private String library = SpecGenerator.DEFAULT_LIBRARY;
   private boolean generateOnly;
@@ -184,6 +186,9 @@ public class ArgParser {
       case SCAN:
         scanRoot = value;
         break;
+      case BASE:
+        baseFile = value;
+        break;
       case OUTPUT:
         outputFile = value;
         break;
@@ -223,6 +228,15 @@ public class ArgParser {
       throw new IllegalArgumentException(
           "Invalid YAML file: " + yamlFile + " (must exist and be readable)");
     }
+    if (baseFile != null) {
+      if (!hasScan) {
+        throw new IllegalArgumentException("--base requires --scan <source-root>");
+      }
+      if (!isValidFile(baseFile)) {
+        throw new IllegalArgumentException(
+            "Invalid base overlay: " + baseFile + " (must exist and be readable .yaml)");
+      }
+    }
   }
 
   /** Required path: non-null, exists, readable, ends with .yaml */
@@ -259,6 +273,11 @@ public class ArgParser {
       throw new IllegalArgumentException("Required: --scan <source-root>");
     }
     return scanRoot;
+  }
+
+  /** Explicit {@code --base} path, or null to use default {@code mc-base.yaml} under scan root. */
+  public String getBaseFile() {
+    return baseFile;
   }
 
   public String getOutputFile() {

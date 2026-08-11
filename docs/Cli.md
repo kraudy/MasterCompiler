@@ -13,6 +13,7 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 * Spec path **or** scan root (one required):
   * YAML file `{-f, --file}`
   * Source root to scan `{--scan}` — see [Scan.md](./Scan.md)
+* Base overlay for non-inferable scan params `{--base}` (default: `<scan>/mc-base.yaml` if present)
 * Output path for generated YAML `{-o, --output}`
 * Default library for scanned targets `{--lib}` (default: `curlib`)
 * Generate YAML only, no compile `{--generate-only}` (requires `--scan` and `-o`)
@@ -75,6 +76,13 @@ Scan and compile in one step:
 
 ```bash
 java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --lib curlib -xv
+```
+
+Optional explicit base overlay (otherwise uses `<scan>/mc-base.yaml` when present):
+
+```bash
+java -jar MasterCompiler-1.0-SNAPSHOT.jar \
+  --scan /home/user/sources --base /home/user/sources/mc-base.yaml -o build.yaml -xv
 ```
 
 [Scan doc](./Scan.md)

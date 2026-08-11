@@ -12,9 +12,9 @@ import java.util.Map;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 
 /**
- * Writes a minimal, readable YAML build spec from a {@link BuildSpec}.
- * Only emits {@code targets} with {@code params} (SRCSTMF, MODULE, ...).
- * Target map order is preserved (expected to be topo-sorted).
+ * Writes a readable YAML build spec from a {@link BuildSpec}.
+ * Emits global hooks, per-target hooks, and {@code params}
+ * (SRCSTMF, MODULE, PGM, ...). Target map order is preserved (topo-sorted).
  */
 public final class SpecWriter {
 
@@ -34,34 +34,104 @@ public final class SpecWriter {
       sb.append("# Base directory: ").append(spec.getBaseDirectory()).append("\n");
     }
     sb.append("\n");
+
+    writeHookSection(sb, "before", spec.before, "");
+    writeHookSection(sb, "after", spec.after, "");
+    writeHookSection(sb, "success", spec.success, "");
+    writeHookSection(sb, "failure", spec.failure, "");
+
     sb.append("targets:\n");
 
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : spec.targets.entrySet()) {
       TargetKey key = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-      // Always quote target keys for safe YAML
       sb.append("  \"").append(escapeYamlDouble(key.asString())).append("\":\n");
 
-      if (targetSpec.params == null || targetSpec.params.isEmpty()) {
+      boolean hasParams = targetSpec.params != null && !targetSpec.params.isEmpty();
+      boolean hasBefore = targetSpec.before != null && !targetSpec.before.isEmpty();
+      boolean hasAfter = targetSpec.after != null && !targetSpec.after.isEmpty();
+      boolean hasSuccess = targetSpec.success != null && !targetSpec.success.isEmpty();
+      boolean hasFailure = targetSpec.failure != null && !targetSpec.failure.isEmpty();
+
+      if (!hasParams && !hasBefore && !hasAfter && !hasSuccess && !hasFailure) {
         sb.append("    params: {}\n");
         sb.append("\n");
         continue;
       }
 
-      sb.append("    params:\n");
+      writeHookSection(sb, "before", targetSpec.before, "    ");
+      writeHookSection(sb, "after", targetSpec.after, "    ");
+      writeHookSection(sb, "success", targetSpec.success, "    ");
+      writeHookSection(sb, "failure", targetSpec.failure, "    ");
 
-      // Prefer stable param order: SRCSTMF first, then MODULE, then rest
-      List<ParamCmd> ordered = orderedParams(targetSpec.params);
-      for (ParamCmd param : ordered) {
-        String value = targetSpec.params.get(param);
-        if (value == null) continue;
-        writeParam(sb, param, value);
+      if (hasParams) {
+        sb.append("    params:\n");
+        List<ParamCmd> ordered = orderedParams(targetSpec.params);
+        for (ParamCmd param : ordered) {
+          String value = targetSpec.params.get(param);
+          if (value == null) continue;
+          writeParam(sb, param, value);
+        }
+      } else {
+        sb.append("    params: {}\n");
       }
       sb.append("\n");
     }
 
     return sb.toString();
+  }
+
+  /**
+   * Emit hooks as a YAML list (supports repeated commands like multiple ADDMSGD).
+   * Indent is the YAML indent for the section key ("" global, "    " under target).
+   */
+  private static void writeHookSection(
+      StringBuilder sb, String section, List<CommandObject> hooks, String indent) {
+    if (hooks == null || hooks.isEmpty()) return;
+
+    sb.append(indent).append(section).append(":\n");
+    String itemIndent = indent + "  ";
+    String cmdIndent = indent + "    ";
+    String paramIndent = indent + "      ";
+
+    for (CommandObject cmd : hooks) {
+      if (cmd == null) continue;
+      sb.append(itemIndent).append("- ").append(cmd.getSystemCommandName()).append(":\n");
+      List<ParamCmd> pattern = CompilationPattern.getCommandPattern(cmd.getSystemCommand());
+      boolean wroteAny = false;
+      for (ParamCmd param : pattern) {
+        if (!cmd.containsKey(param)) continue;
+        String value = stripIbmQuotes(cmd.get(param));
+        if (value == null || value.isEmpty()) continue;
+
+        if ((param == ParamCmd.OBJ || param == ParamCmd.MODULE) && value.contains(" ")) {
+          sb.append(paramIndent).append(param.name()).append(":\n");
+          for (String part : value.trim().split("\\s+")) {
+            if (part.isEmpty()) continue;
+            String name = part.replaceAll("^.*[\\\\/]", "");
+            sb.append(paramIndent).append("  - ").append(name).append("\n");
+          }
+          wroteAny = true;
+          continue;
+        }
+
+        sb.append(paramIndent).append(param.name()).append(": ");
+        if (needsQuoting(value)) {
+          sb.append("\"").append(escapeYamlDouble(value)).append("\"");
+        } else {
+          sb.append(value);
+        }
+        sb.append("\n");
+        wroteAny = true;
+      }
+      if (!wroteAny) {
+        sb.append(paramIndent).append("{}\n");
+      }
+    }
+    if (indent.isEmpty()) {
+      sb.append("\n");
+    }
   }
 
   public static void writeToFile(BuildSpec spec, String outputPath) throws IOException {
@@ -82,22 +152,22 @@ public final class SpecWriter {
     List<ParamCmd> ordered = new ArrayList<>();
     if (params.containsKey(ParamCmd.SRCSTMF)) ordered.add(ParamCmd.SRCSTMF);
     if (params.containsKey(ParamCmd.MODULE)) ordered.add(ParamCmd.MODULE);
+    if (params.containsKey(ParamCmd.PGM)) ordered.add(ParamCmd.PGM);
     for (ParamCmd p : params.keySet()) {
-      if (p == ParamCmd.SRCSTMF || p == ParamCmd.MODULE) continue;
+      if (p == ParamCmd.SRCSTMF || p == ParamCmd.MODULE || p == ParamCmd.PGM) continue;
       ordered.add(p);
     }
     return ordered;
   }
 
   private static void writeParam(StringBuilder sb, ParamCmd param, String value) {
-    // MODULE may be space-separated list → YAML list
+    value = stripIbmQuotes(value);
     if (param == ParamCmd.MODULE) {
       String[] modules = value.trim().split("\\s+");
       if (modules.length > 1 || (modules.length == 1 && !modules[0].isEmpty())) {
         sb.append("      ").append(param.name()).append(":\n");
         for (String mod : modules) {
           if (mod.isEmpty()) continue;
-          // Strip *LIBL/ qualification for readable YAML
           String name = mod.replaceAll("^.*[\\\\/]", "");
           sb.append("        - ").append(name).append("\n");
         }
@@ -112,6 +182,16 @@ public final class SpecWriter {
       sb.append(value);
     }
     sb.append("\n");
+  }
+
+  /** Peel validateParamValue IBM i quotes so YAML stays logical (re-applied on load). */
+  private static String stripIbmQuotes(String value) {
+    if (value == null) return null;
+    String s = value.trim();
+    while (s.startsWith("''") && s.endsWith("''") && s.length() >= 4) {
+      s = s.substring(2, s.length() - 2).trim();
+    }
+    return s;
   }
 
   private static boolean needsQuoting(String value) {

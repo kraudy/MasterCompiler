@@ -188,6 +188,18 @@ public class DependencyAwareness {
           }
         }
       }
+
+      /* Explicit PGM from YAML for CRTCMD (overrides later source inference) */
+      if (target.isCmd() && targetSpec.params.containsKey(ParamCmd.PGM)) {
+        String pgm = targetSpec.params.get(ParamCmd.PGM);
+        if (pgm != null && !pgm.trim().isEmpty()) {
+          try {
+            target.put(ParamCmd.PGM, pgm.trim());
+          } catch (Exception ignore) {
+            /* invalid — ignore */
+          }
+        }
+      }
     }
 
     // Phase 1: Process only modules to populate the export map
@@ -208,6 +220,13 @@ public class DependencyAwareness {
 
     /* Infer MODULE lists for srvpgms from binder EXPORT symbols + export map */
     inferSrvpgmModules(globalSpec, baseDir);
+
+    /* CMD → processing program when PGM param is set (YAML / scan base overlay) */
+    applyCmdPgmDeps(globalSpec);
+
+    /* Program → SRVPGM edges from ADDBNDDIRE hooks so topo builds service
+     * programs before consumers bind via SAMPLE */
+    applyAddBndDirEDeps(globalSpec);
 
     List<CompletableFuture<Void>> futures = new ArrayList<>();
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
@@ -282,6 +301,120 @@ public class DependencyAwareness {
         logger.warn("Failed to infer MODULE for {}: {}", target.asString(), e.getMessage());
       }
     }
+  }
+
+  /**
+   * For each *CMD target with an explicit {@code PGM} param (from YAML or scan
+   * base overlay), put it on the TargetKey and add CMD → program when that
+   * program is a build target. Does not read CMD definition source — {@code PGM}
+   * is not a valid keyword on the CMD statement.
+   */
+  private void applyCmdPgmDeps(BuildSpec globalSpec) {
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey target = entry.getKey();
+      BuildSpec.TargetSpec targetSpec = entry.getValue();
+
+      if (!target.isCmd()) continue;
+
+      String pgmName = null;
+      if (targetSpec.params.containsKey(ParamCmd.PGM)) {
+        String existing = targetSpec.params.get(ParamCmd.PGM);
+        if (existing != null && !existing.trim().isEmpty()) {
+          pgmName = stripLibQualifier(existing.trim());
+        }
+      }
+      if (pgmName == null && target.containsKey(ParamCmd.PGM)) {
+        String existing = target.get(ParamCmd.PGM);
+        if (existing != null && !existing.trim().isEmpty()) {
+          pgmName = stripLibQualifier(existing.trim());
+        }
+      }
+
+      if (pgmName == null || pgmName.isEmpty()) continue;
+      if (!pgmName.matches("[A-Z0-9$#@_]{1,10}")) continue;
+
+      targetSpec.params.put(ParamCmd.PGM, pgmName);
+      try {
+        target.put(ParamCmd.PGM, pgmName);
+      } catch (Exception ignore) {}
+
+      TargetKey pgmKey = keyLookup.get(pgmName + "." + ObjectType.PGM.name());
+      if (pgmKey == null || !pgmKey.isProgram()) {
+        if (verbose) {
+          logger.info("CRTCMD PGM {} for {} is not a build target (param only)",
+              pgmName, target.asString());
+        }
+        continue;
+      }
+
+      target.addChild(pgmKey);
+      pgmKey.addFather(target);
+      if (verbose) {
+        logger.info("CMD PGM dependency: {} depends on processing program {}",
+            target.asString(), pgmKey.asString());
+      }
+    }
+  }
+
+  /**
+   * For each target with {@code ADDBNDDIRE} in before hooks, treat each {@code OBJ}
+   * name as a dependency when it is a build-target *SRVPGM. Ensures e.g. FARTICLE
+   * is compiled before ART201 runs AddBndDirE + CRTBNDRPG with BNDDIR(SAMPLE).
+   */
+  private void applyAddBndDirEDeps(BuildSpec globalSpec) {
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey target = entry.getKey();
+      BuildSpec.TargetSpec targetSpec = entry.getValue();
+      if (targetSpec == null || targetSpec.before == null || targetSpec.before.isEmpty()) {
+        continue;
+      }
+
+      for (CommandObject cmd : targetSpec.before) {
+        if (cmd == null || cmd.getSystemCommand() != SysCmd.ADDBNDDIRE) continue;
+        if (!cmd.containsKey(ParamCmd.OBJ)) continue;
+
+        String objs = cmd.get(ParamCmd.OBJ);
+        if (objs == null || objs.trim().isEmpty()) continue;
+
+        for (String token : objs.trim().split("\\s+")) {
+          if (token.isEmpty()) continue;
+          String objName = stripLibQualifier(token);
+          if (objName == null || objName.isEmpty()) continue;
+          if (!objName.matches("[A-Z0-9$#@_]{1,10}")) continue;
+
+          TargetKey srvKey = keyLookup.get(objName + "." + ObjectType.SRVPGM.name());
+          if (srvKey == null || !srvKey.isServiceProgram()) {
+            if (verbose) {
+              logger.info(
+                  "ADDBNDDIRE OBJ {} for {} is not a build-target SRVPGM (ignored for topo)",
+                  objName, target.asString());
+            }
+            continue;
+          }
+
+          target.addChild(srvKey);
+          srvKey.addFather(target);
+          if (verbose) {
+            logger.info(
+                "ADDBNDDIRE dependency: {} depends on {} (must exist before BNDDIR bind)",
+                target.asString(), srvKey.asString());
+          }
+        }
+      }
+    }
+  }
+
+  private static String stripLibQualifier(String qualified) {
+    if (qualified == null) return null;
+    String s = qualified.trim().toUpperCase();
+    while (s.startsWith("''") && s.endsWith("''") && s.length() > 4) {
+      s = s.substring(2, s.length() - 2).trim();
+    }
+    s = s.replace("'", "").trim();
+    if (s.contains("/")) {
+      s = s.replaceAll("^.*[\\\\/]", "");
+    }
+    return s;
   }
 
   private static String resolveFullPath(String baseDir, String streamFile) {

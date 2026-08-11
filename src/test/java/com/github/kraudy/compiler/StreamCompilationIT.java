@@ -83,8 +83,8 @@ public class StreamCompilationIT {
   @Tag("heavy")  // Heavyweight test before release 
   void test_Compile_Hevy() throws Exception {    
 
-    //masterCompilerTest("tobi.yaml", "https://github.com/kraudy/McOnTobi.git");
-    masterCompilerTest("sjlennon.yaml", "https://github.com/kraudy/McOnSJLennon");
+    masterCompilerTest("tobi.yaml", "https://github.com/kraudy/McOnTobi.git");
+    //masterCompilerTest("sjlennon.yaml", "https://github.com/kraudy/McOnSJLennon");
     
   }
 
@@ -393,6 +393,23 @@ public class StreamCompilationIT {
       TargetKey depsORD500C = spec.getTargetKey(new TargetKey("curlib.ORD500C.PGM.CLLE"));
       assertNotNull(depsORD500C, "Deps target should not be null");
       assertEquals(1, depsORD500C.getChildsCount(), "Childs of target " + depsORD500C.asString() + " should be 1 CMD CVTSPLPDF");
+
+      /* CMD → processing program: CRTORD PGM(ORD100) when ORD100 is a build target */
+      TargetKey depsCRTORD = spec.getTargetKey(new TargetKey("curlib.CRTORD.CMD.cmd"));
+      assertNotNull(depsCRTORD, "CRTORD CMD target should not be null");
+      assertEquals(1, depsCRTORD.getChildsCount(),
+          "Childs of target " + depsCRTORD.asString() + " should be 1 PGM ORD100");
+      boolean crtordDependsOnOrd100 = depsCRTORD.getChildsList().stream()
+          .anyMatch(c -> "ORD100".equalsIgnoreCase(c.getObjectName()) && c.isProgram());
+      assertTrue(crtordDependsOnOrd100,
+          depsCRTORD.asString() + " should depend on processing program ORD100");
+
+      /* CVTSPLPDF has PGM(CVTSPLPDF) but that program is not a build target — param only, no edge */
+      TargetKey depsCVTSPLPDF = spec.getTargetKey(new TargetKey("curlib.CVTSPLPDF.CMD.cmd"));
+      assertNotNull(depsCVTSPLPDF, "CVTSPLPDF CMD target should not be null");
+      assertEquals(0, depsCVTSPLPDF.getChildsCount(),
+          "Childs of " + depsCVTSPLPDF.asString()
+              + " should be 0 (PGM not in build graph)");
 
       /* Validate exported procs */
       assertTrue(spec.containsExport("GETVATDESC", depsVAT300), "depsVAT300 Should export proc GETVATDESC");

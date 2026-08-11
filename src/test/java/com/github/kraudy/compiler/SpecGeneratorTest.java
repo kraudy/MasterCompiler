@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 
 public class SpecGeneratorTest {
 
@@ -88,6 +89,15 @@ public class SpecGeneratorTest {
     BuildSpec.TargetSpec srvSpec = spec.targets.get(srvKey);
     assertTrue(srvSpec.params.containsKey(ParamCmd.MODULE));
     assertTrue(srvSpec.params.get(ParamCmd.MODULE).toUpperCase().contains("FAM300"));
+
+    // Scan injects CHGCURDIR so relative SRCSTMF resolve on IBM i
+    assertFalse(spec.before.isEmpty(), "Expected global before with CHGCURDIR");
+    assertEquals(SysCmd.CHGCURDIR, spec.before.get(0).getSystemCommand());
+    String dir = spec.before.get(0).get(ParamCmd.DIR);
+    assertNotNull(dir);
+    assertTrue(dir.contains(tempDir.toAbsolutePath().toString())
+            || dir.contains(tempDir.toString()),
+        "CHGCURDIR should point at scan root: " + dir);
   }
 
   @Test
@@ -103,11 +113,18 @@ public class SpecGeneratorTest {
     Path out = tempDir.resolve("generated.yaml");
     SpecWriter.writeToFile(spec, out.toString(), tempDir.toString());
 
+    String yaml = new String(Files.readAllBytes(out), StandardCharsets.UTF_8);
+    assertTrue(yaml.contains("before:"), "Generated YAML should include before hooks");
+    assertTrue(yaml.toUpperCase().contains("CHGCURDIR"), "Generated YAML should include CHGCURDIR");
+
     BuildSpec loaded = Utilities.deserializeYaml(out.toString());
     assertEquals(1, loaded.targets.size());
     TargetKey key = loaded.targets.keySet().iterator().next();
     assertEquals("HELLO", key.getObjectName());
     assertTrue(loaded.targets.get(key).params.containsKey(ParamCmd.SRCSTMF));
+
+    assertFalse(loaded.before.isEmpty(), "Round-tripped YAML should keep CHGCURDIR before hook");
+    assertEquals(SysCmd.CHGCURDIR, loaded.before.get(0).getSystemCommand());
   }
 
   @Test

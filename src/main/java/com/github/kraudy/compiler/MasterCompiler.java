@@ -369,7 +369,8 @@ public class MasterCompiler{
 
         SpecGenerator generator = new SpecGenerator(
             system, parser.isDebug(), parser.isVerbose());
-        BuildSpec generated = generator.generate(parser.getScanRoot(), parser.getLibrary());
+        BuildSpec generated = generator.generate(
+            parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
         SpecWriter.writeToFile(generated, parser.getOutputFile(), parser.getScanRoot());
         logger.info("Generated YAML: {}", parser.getOutputFile());
         return;
@@ -382,7 +383,8 @@ public class MasterCompiler{
       if (parser.hasScan()) {
         SpecGenerator generator = new SpecGenerator(
             system, parser.isDebug(), parser.isVerbose());
-        spec = generator.generate(parser.getScanRoot(), parser.getLibrary());
+        spec = generator.generate(
+            parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
         if (parser.getOutputFile() != null) {
           SpecWriter.writeToFile(spec, parser.getOutputFile(), parser.getScanRoot());
           logger.info("Generated YAML: {}", parser.getOutputFile());
