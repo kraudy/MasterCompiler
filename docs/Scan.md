@@ -110,7 +110,7 @@ Defaults when object type is omitted:
 Object name must be a valid IBM i name (1–10 chars: `A-Z 0-9 $ # @ _`).  
 Descriptive middle tokens (e.g. `hello2.nomain.module.rpgle`) are ignored; the first segment is the object name.
 
-Unrecognized files (`.md`, `.yaml`, …) are skipped with a verbose log.
+Unrecognized files (`.md`, `.yaml`, `.RPGLEINC`, `*.include.RPGLE`, …) are skipped with a verbose log. Copy/include members are not compile targets.
 
 ## Generated YAML shape
 
@@ -162,7 +162,8 @@ Object inspection still fills many params at build time when objects already exi
 Scan reuses the same dependency scanners used by `--diff`:
 
 - DDS `PFILE` / `REF` / `REFFLD`  
-- RPG F-specs, `DCL-F`, `EXTPGM`, `DTAARA`, `EXTNAME`, `BNDDIR`  
+- RPG F-specs, `DCL-F`, `EXTPGM`, `DTAARA`, `EXTNAME`  
+- `BNDDIR('A')` or `BNDDIR('A':'B':…)` on **programs** is a compile-order edge (comments ignored). On a `*MODULE` those names are recorded only and lifted onto the parent `*SRVPGM`. Not lifted when that srvpgm is already a member of the directory (would cycle).  
 - Embedded SQL / `RUNSQLSTM` table refs  
 - CL `CALL`  
 - CL user-defined commands (project `*.cmd.cmd` names found as statement-leading tokens in CLP/CLLE)  

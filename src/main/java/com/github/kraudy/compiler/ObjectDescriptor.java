@@ -241,7 +241,10 @@ public class ObjectDescriptor {
 
         case CRTBNDCL:
           String actgrp = rsObj.getString("ACTGRP").trim();
-          if (!actgrp.isEmpty()) key.put(ParamCmd.ACTGRP, actgrp);
+          /* *DFTACTGRP is PROGRAM_INFO for DFTACTGRP(*YES); not a valid ACTGRP value */
+          if (!actgrp.isEmpty() && !"DFTACTGRP".equalsIgnoreCase(actgrp.replace("*", ""))) {
+            key.put(ParamCmd.ACTGRP, actgrp);
+          }
           if ("QILE".equals(actgrp)) key.put(ParamCmd.DFTACTGRP, ValCmd.NO);
 
           String stgMdl = rsObj.getString("STGMDL").trim();
@@ -541,7 +544,9 @@ public class ObjectDescriptor {
       if (verbose) logger.info("Found srvpgm object compilation info " + key.asString());
 
       String actgrp = rsSrvPgm.getString("ACTGRP").trim();
-      if (!actgrp.isEmpty()) key.put(ParamCmd.ACTGRP, actgrp);
+      if (!actgrp.isEmpty() && !"DFTACTGRP".equalsIgnoreCase(actgrp.replace("*", ""))) {
+        key.put(ParamCmd.ACTGRP, actgrp);
+      }
       if ("QILE".equals(actgrp)) key.put(ParamCmd.DFTACTGRP, ValCmd.NO);
 
       String stgMdl = rsSrvPgm.getString("STGMDL").trim();

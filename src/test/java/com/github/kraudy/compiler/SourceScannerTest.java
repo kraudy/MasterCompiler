@@ -22,6 +22,7 @@ public class SourceScannerTest {
     Path qrpg = tempDir.resolve("QRPGLESRC");
     Files.createDirectories(qrpg);
     Files.write(qrpg.resolve("HELLO.pgm.rpgle"), "x".getBytes(StandardCharsets.UTF_8));
+    Files.write(qrpg.resolve("SRV_MSG_P.include.RPGLE"), "dcl-pr x;".getBytes(StandardCharsets.UTF_8));
     Files.write(qrpg.resolve("notes.md"), "skip".getBytes(StandardCharsets.UTF_8));
     Files.write(tempDir.resolve("build.yaml"), "targets: {}".getBytes(StandardCharsets.UTF_8));
 

@@ -65,6 +65,13 @@ public final class SourceNaming {
       return Optional.empty();
     }
 
+    /* Copy/include members (Copy_Mbrs/FOO.include.RPGLE), not compile targets */
+    for (int i = 1; i < parts.length - 1; i++) {
+      if ("include".equalsIgnoreCase(parts[i])) {
+        return Optional.empty();
+      }
+    }
+
     // Last segment = source type
     SourceType sourceType;
     try {

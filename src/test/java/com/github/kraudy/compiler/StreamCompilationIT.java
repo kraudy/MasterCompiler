@@ -223,21 +223,30 @@ public class StreamCompilationIT {
 
       TargetKey depsSRV_SQL = spec.getTargetKey(new TargetKey("CURLIB.SRV_SQL.MODULE.SQLRPGLE"));
       assertNotNull(depsSRV_SQL, "Deps target should not be null");
-      /* BNDDIR UTIL_BND + /include SRV_MSG_P → SRV_MSG (+ UTIL_BND membership SRV_STR). Not own SRV_SQL. */
-      assertTrue(depsSRV_SQL.getChildsCount() >= 2,
-          "Childs of " + depsSRV_SQL.asString()
-              + " should include UTIL_BND and foreign SRV_MSG (not own SRV_SQL srvpgm)");
+      /* *MODULE does not take BNDDIR compile edges (would cycle with ADDBNDDIRE on UTIL_BND). */
       TargetKey depsSRV_MSG = spec.getTargetKey(new TargetKey("CURLIB.SRV_MSG.SRVPGM.BND"));
       TargetKey depsSRV_SQL_SRV = spec.getTargetKey(new TargetKey("CURLIB.SRV_SQL.SRVPGM.BND"));
-      assertTrue(hasChildNamed(depsSRV_SQL, "UTIL_BND"),
-          "SRV_SQL module should depend on BNDDIR UTIL_BND");
+      assertFalse(hasChildNamed(depsSRV_SQL, "UTIL_BND"),
+          "SRV_SQL module must not depend on BNDDIR UTIL_BND");
       if (depsSRV_MSG != null) {
         assertTrue(hasChild(depsSRV_SQL, depsSRV_MSG),
-            "SRV_SQL module should depend on foreign SRV_MSG via /include proto / UTIL_BND membership");
+            "SRV_SQL module should depend on foreign SRV_MSG via /include proto");
       }
       if (depsSRV_SQL_SRV != null) {
         assertFalse(hasChild(depsSRV_SQL, depsSRV_SQL_SRV),
             "SRV_SQL module must not depend on its own parent SRV_SQL *SRVPGM");
+      }
+
+      TargetKey depsUSADRVAL = spec.getTargetKey(new TargetKey("CURLIB.USADRVAL.MODULE.SQLRPGLE"));
+      TargetKey depsUSADRVAL_SRV = spec.getTargetKey(new TargetKey("CURLIB.USADRVAL.SRVPGM.BND"));
+      TargetKey depsSQL_BND = spec.getTargetKey(new TargetKey("CURLIB.SQL_BND.BNDDIR.BNDDIR"));
+      if (depsUSADRVAL != null && depsSQL_BND != null) {
+        assertFalse(hasChild(depsUSADRVAL, depsSQL_BND),
+            "USADRVAL module must not depend on SQL_BND (module compile edge would cycle)");
+      }
+      if (depsUSADRVAL_SRV != null && depsSQL_BND != null) {
+        assertTrue(hasChild(depsUSADRVAL_SRV, depsSQL_BND),
+            "USADRVAL srvpgm must depend on SQL_BND (module ctl-opt bind-time lift)");
       }
 
 

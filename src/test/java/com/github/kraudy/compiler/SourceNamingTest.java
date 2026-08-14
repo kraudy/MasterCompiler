@@ -82,6 +82,13 @@ public class SourceNamingTest {
   }
 
   @Test
+  void includeMemberNotACompileTarget() {
+    assertFalse(SourceNaming.parseFileName("SRV_MSG_P.include.RPGLE").isPresent());
+    assertFalse(SourceNaming.parseFileName("Copy_Mbrs/BASE36_P.include.RPGLE").isPresent());
+    assertFalse(SourceNaming.parseFileName("FOO.include.module.rpgle").isPresent());
+  }
+
+  @Test
   void invalidObjectNameRejected() {
     assertFalse(SourceNaming.parseFileName("thisnameistoolong.pgm.rpgle").isPresent());
   }

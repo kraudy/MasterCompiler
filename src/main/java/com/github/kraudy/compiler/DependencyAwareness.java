@@ -36,9 +36,13 @@ import com.ibm.as400.access.IFSFileInputStream;
 public class DependencyAwareness {
   private static final Logger logger = LoggerFactory.getLogger(DependencyAwareness.class);
 
-  // Broad regex for BNDDIR('NAME') – works for H-spec and CTL-OPT
-  private static final Pattern BNDDIR_PATTERN = Pattern.compile(
-      "\\bBNDDIR\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
+  /** BNDDIR( … ) body, including colon lists: BndDir('A':'B':'C'). */
+  private static final Pattern BNDDIR_BLOCK = Pattern.compile(
+      "\\bBNDDIR\\s*\\(([^)]*)\\)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+  /** One BNDDIR object name inside the parens (quoted). */
+  private static final Pattern BNDDIR_NAME = Pattern.compile(
+      "'([^']+)'");
 
   private static final Pattern DTAARA_PATTERN = Pattern.compile(
     "\\bDTAARA\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
@@ -145,6 +149,9 @@ public class DependencyAwareness {
   /** BNDDIR object name (upper) → *SRVPGM targets registered via ADDBNDDIRE. */
   private final Map<String, Set<TargetKey>> bnddirMembership = new HashMap<>();
 
+  /** *MODULE → BNDDIR names from ctl-opt / H-spec (not compile edges). */
+  private final ConcurrentHashMap<TargetKey, Set<String>> moduleBndDirs = new ConcurrentHashMap<>();
+
   /** Scan base directory for resolving relative /copy paths. */
   private String includeBaseDir;
 
@@ -164,6 +171,7 @@ public class DependencyAwareness {
     this.exportedProcToModule.clear();
     this.exportToSrvpgm.clear();
     this.bnddirMembership.clear();
+    this.moduleBndDirs.clear();
     this.includeBaseDir = null;
 
     keyLookup.clear();
@@ -279,6 +287,9 @@ public class DependencyAwareness {
 
     /* CRTSRVPGM BNDSRVPGM from member modules' foreign *SRVPGM imports */
     applySrvpgmBndSrvPgmFromModules(globalSpec);
+
+    /* CRTSRVPGM BNDDIR from member modules' ctl-opt (not a module compile edge) */
+    applySrvpgmBndDirFromModules(globalSpec);
 
     showLogs(globalSpec);
   }
@@ -631,6 +642,75 @@ public class DependencyAwareness {
     return !upper.equals("*NONE") && !upper.equals("NONE");
   }
 
+  /**
+   * Bind-time: parent *SRVPGM depends on BNDDIRs named in member modules'
+   * ctl-opt. Skips D when S is already a member of D (S → D → S).
+   */
+  private void applySrvpgmBndDirFromModules(BuildSpec globalSpec) {
+    if (moduleBndDirs.isEmpty()) return;
+
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey srv = entry.getKey();
+      BuildSpec.TargetSpec spec = entry.getValue();
+      if (srv == null || spec == null || !srv.isServiceProgram()) continue;
+
+      Set<TargetKey> dirs = new LinkedHashSet<TargetKey>();
+      for (String modName : srvpgmModuleNames(srv, spec)) {
+        TargetKey mod = keyLookup.get(modName + "." + ObjectType.MODULE.name());
+        if (mod == null) continue;
+        Set<String> names = moduleBndDirs.get(mod);
+        if (names == null) continue;
+        for (String bndName : names) {
+          TargetKey dir = keyLookup.get(bndName + "." + ObjectType.BNDDIR.name());
+          if (dir == null || !dir.isBndDir()) continue;
+          if (srvpgmIsMemberOf(srv, bndName)) {
+            if (verbose) {
+              logger.info(
+                  "SRVPGM BNDDIR lift skipped: {} is a member of {} (would cycle)",
+                  srv.asString(), dir.asString());
+            }
+            continue;
+          }
+          dirs.add(dir);
+        }
+      }
+
+      for (TargetKey dir : dirs) {
+        srv.addChild(dir);
+        dir.addFather(srv);
+        if (verbose) {
+          logger.info(
+              "SRVPGM bind BNDDIR: {} depends on {} (from member module ctl-opt)",
+              srv.asString(), dir.asString());
+        }
+      }
+
+      String existing = spec.params.get(ParamCmd.BNDDIR);
+      boolean explicit = existing != null && !existing.trim().isEmpty();
+      if (explicit || dirs.isEmpty()) continue;
+
+      StringBuilder joined = new StringBuilder();
+      for (TargetKey dir : dirs) {
+        if (joined.length() > 0) joined.append(' ');
+        joined.append(dir.getObjectName());
+      }
+      spec.params.put(ParamCmd.BNDDIR, joined.toString());
+      try {
+        srv.put(ParamCmd.BNDDIR, joined.toString());
+      } catch (Exception ignore) {}
+      if (verbose) {
+        logger.info("Inferred BNDDIR for {}: {}", srv.asString(), joined);
+      }
+    }
+  }
+
+  private boolean srvpgmIsMemberOf(TargetKey srv, String bndName) {
+    if (srv == null || bndName == null) return false;
+    Set<TargetKey> members = bnddirMembership.get(bndName.toUpperCase());
+    if (members == null) return false;
+    return members.contains(srv);
+  }
+
   private List<String> srvpgmModuleNames(TargetKey srv, BuildSpec.TargetSpec spec) {
     Set<String> names = new LinkedHashSet<String>();
     try {
@@ -767,12 +847,7 @@ public class DependencyAwareness {
     try (java.util.Scanner sc = new java.util.Scanner(sourceCode)) {
       while (sc.hasNextLine()) {
         String line = sc.nextLine();
-        String trimmed = line.trim();
-        if (trimmed.startsWith("//")) continue;
-        /* Fixed-form full-line comment: * in column 7 (1-based) */
-        if (line.length() >= 7 && line.charAt(6) == '*' && !line.substring(0, 6).matches(".*\\S.*")) {
-          continue;
-        }
+        if (isRpgCommentLine(line)) continue;
         Matcher m = COPY_INCLUDE_DIR.matcher(line);
         if (!m.find()) continue;
         String path = m.group(2);
@@ -782,6 +857,15 @@ public class DependencyAwareness {
       }
     }
     return paths;
+  }
+
+  /** Free-form {@code //} or fixed-form {@code *} in column 7. */
+  private static boolean isRpgCommentLine(String line) {
+    if (line == null) return false;
+    if (line.trim().startsWith("//")) return true;
+    return line.length() >= 7
+        && line.charAt(6) == '*'
+        && !line.substring(0, 6).matches(".*\\S.*");
   }
 
   private String resolveIncludePath(String rel, String programFullPath) {
@@ -1048,10 +1132,8 @@ public class DependencyAwareness {
         case CRTBNDRPG:
         case CRTSQLRPGI:
         case CRTRPGMOD:
-          /*  Scan source for BndDir */
           getBndDirDependencies(target, sourceCode, logs);
           break;
-          /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
       }
 
       /* PGM → SRVPGM via /copy|/include prototypes ∩ project exports */
@@ -1185,13 +1267,33 @@ public class DependencyAwareness {
 
   private void getBndDirDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> bndDirNames = new HashSet<>();
-    Matcher m = BNDDIR_PATTERN.matcher(sourceCode);
+    StringBuilder live = new StringBuilder();
+    try (java.util.Scanner sc = new java.util.Scanner(sourceCode)) {
+      while (sc.hasNextLine()) {
+        String line = sc.nextLine();
+        if (isRpgCommentLine(line)) continue;
+        live.append(line).append('\n');
+      }
+    }
+    Matcher block = BNDDIR_BLOCK.matcher(live);
+    while (block.find()) {
+      Matcher names = BNDDIR_NAME.matcher(block.group(1));
+      while (names.find()) {
+        String bndDirName = names.group(1).trim().toUpperCase();
+        if (bndDirName.isEmpty()) continue;
+        bndDirNames.add(bndDirName);
+      }
+    }
 
-    /* Get multiple bnddir */
-    while (m.find()) {  // ← changed from if(!find()) to while
-      String bndDirName = m.group(1).toUpperCase();
-      if (bndDirName.isEmpty()) continue;
-      bndDirNames.add(bndDirName);
+    if (target.isModule()) {
+      if (!bndDirNames.isEmpty()) {
+        moduleBndDirs.computeIfAbsent(target, k -> ConcurrentHashMap.newKeySet()).addAll(bndDirNames);
+        if (verbose) {
+          logs.add("Module BNDDIR recorded (bind-time on parent SRVPGM, not a module compile edge): "
+              + target.asString() + " ctl-opt " + bndDirNames);
+        }
+      }
+      return;
     }
 
     for (String bndDirName : bndDirNames) {
