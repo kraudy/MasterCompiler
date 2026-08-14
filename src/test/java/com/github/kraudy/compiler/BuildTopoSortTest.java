@@ -84,8 +84,10 @@ public class BuildTopoSortTest {
     spec.targets.put(a, new BuildSpec.TargetSpec());
     spec.targets.put(b, new BuildSpec.TargetSpec());
 
-    assertThrows(RuntimeException.class,
+    RuntimeException ex = assertThrows(RuntimeException.class,
         () -> new BuildTopoSort(false, false).topologicalSort(spec));
+    assertTrue(ex.getMessage().contains("Sample path:"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("->"), ex.getMessage());
   }
 
   @Test

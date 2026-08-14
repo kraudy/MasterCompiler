@@ -104,6 +104,22 @@ public class DependencyAwareness {
   private static final Pattern BND_EXPORT_SYMBOL = Pattern.compile(
       "\\bEXPORT\\s+SYMBOL\\s*\\(\\s*'([^']+)'\\s*\\)", Pattern.CASE_INSENSITIVE);
 
+  /** RPG /copy or /include path (not //commented). */
+  private static final Pattern COPY_INCLUDE_DIR = Pattern.compile(
+      "^\\s*/\\s*(copy|include)\\s+(\\S+)", Pattern.CASE_INSENSITIVE);
+
+  /** Free-form dcl-pr Name … */
+  private static final Pattern DCL_PR_NAME = Pattern.compile(
+      "\\bdcl-pr\\s+([A-Z0-9$#@_]+)\\b", Pattern.CASE_INSENSITIVE);
+
+  /**
+   * Fixed-format D-spec prototype: col 6 = D, name, then PR or … continuation.
+   * e.g. {@code      DGetArtDesc       PR} or {@code      DGetArtRefSalPrice...}
+   */
+  private static final Pattern FIXED_D_PR = Pattern.compile(
+      "^.{5}[Dd]\\s*([A-Z0-9$#@_]+)(?:\\s*\\.\\.\\.|\\s+PR\\b)",
+      Pattern.CASE_INSENSITIVE);
+
   private final AS400 system;
   private final boolean debug;
   private final boolean verbose;
@@ -123,6 +139,15 @@ public class DependencyAwareness {
 
   private final ConcurrentHashMap<String, TargetKey> exportedProcToModule = new ConcurrentHashMap<>();
 
+  /** Upper-case export symbol → *SRVPGM that provides it. */
+  private final Map<String, TargetKey> exportToSrvpgm = new HashMap<>();
+
+  /** BNDDIR object name (upper) → *SRVPGM targets registered via ADDBNDDIRE. */
+  private final Map<String, Set<TargetKey>> bnddirMembership = new HashMap<>();
+
+  /** Scan base directory for resolving relative /copy paths. */
+  private String includeBaseDir;
+
   public DependencyAwareness(AS400 system, boolean debug, boolean verbose) {
     this.system = system;
     this.debug = debug;
@@ -137,6 +162,9 @@ public class DependencyAwareness {
     this.totalTargets = globalSpec.targets.size();
     this.processed.set(0);
     this.exportedProcToModule.clear();
+    this.exportToSrvpgm.clear();
+    this.bnddirMembership.clear();
+    this.includeBaseDir = null;
 
     keyLookup.clear();
     projectCmds.clear();
@@ -221,11 +249,14 @@ public class DependencyAwareness {
     /* Infer MODULE lists for srvpgms from binder EXPORT symbols + export map */
     inferSrvpgmModules(globalSpec, baseDir);
 
+    this.includeBaseDir = baseDir;
+    buildExportToSrvpgmMap(globalSpec, baseDir);
+    collectBnddirMembership(globalSpec);
+
     /* CMD → processing program when PGM param is set (YAML / scan base overlay) */
     applyCmdPgmDeps(globalSpec);
 
-    /* Program → SRVPGM edges from ADDBNDDIRE hooks so topo builds service
-     * programs before consumers bind via SAMPLE */
+    /* Program → SRVPGM edges from ADDBNDDIRE on consumer targets */
     applyAddBndDirEDeps(globalSpec);
 
     List<CompletableFuture<Void>> futures = new ArrayList<>();
@@ -242,6 +273,13 @@ public class DependencyAwareness {
     }
 
     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+    /* Programs with BNDDIR('X') also depend on srvpgms registered into X via ADDBNDDIRE */
+    applyBndDirMembershipFanout(globalSpec);
+
+    /* CRTSRVPGM BNDSRVPGM from member modules' foreign *SRVPGM imports */
+    applySrvpgmBndSrvPgmFromModules(globalSpec);
+
     showLogs(globalSpec);
   }
 
@@ -357,48 +395,487 @@ public class DependencyAwareness {
   }
 
   /**
-   * For each target with {@code ADDBNDDIRE} in before hooks, treat each {@code OBJ}
-   * name as a dependency when it is a build-target *SRVPGM. Ensures e.g. FARTICLE
-   * is compiled before ART201 runs AddBndDirE + CRTBNDRPG with BNDDIR(SAMPLE).
+   * Map export symbols to the *SRVPGM that provides them (binder EXPORT and/or
+   * module exports for modules listed on the srvpgm).
+   */
+  private void buildExportToSrvpgmMap(BuildSpec globalSpec, String baseDir) {
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey srv = entry.getKey();
+      if (!srv.isServiceProgram()) continue;
+
+      /* Binder EXPORT SYMBOL('X') */
+      if (srv.containsStreamFile()) {
+        try {
+          String code = readSource(resolveFullPath(baseDir, srv.getStreamFile()));
+          Matcher m = BND_EXPORT_SYMBOL.matcher(code);
+          while (m.find()) {
+            String sym = m.group(1).trim().toUpperCase();
+            if (sym.isEmpty()) continue;
+            putExportSrvpgm(sym, srv);
+          }
+        } catch (Exception e) {
+          if (verbose) {
+            logger.warn("Could not read binder source for {}: {}", srv.asString(), e.getMessage());
+          }
+        }
+      }
+
+      /* Module list → exports from those modules */
+      Set<String> modNames = new LinkedHashSet<>();
+      BuildSpec.TargetSpec ts = entry.getValue();
+      if (ts != null && ts.params.containsKey(ParamCmd.MODULE)) {
+        String mods = ts.params.get(ParamCmd.MODULE);
+        if (mods != null) {
+          for (String part : mods.trim().split("\\s+")) {
+            if (!part.isEmpty()) modNames.add(stripLibQualifier(part));
+          }
+        }
+      }
+      try {
+        if (srv.getCompilationCommand() == CompilationPattern.CompCmd.CRTSRVPGM) {
+          for (String mod : srv.getModulesNameList()) {
+            modNames.add(stripLibQualifier(mod));
+          }
+        }
+      } catch (Exception ignore) {}
+
+      for (Map.Entry<String, TargetKey> ex : exportedProcToModule.entrySet()) {
+        TargetKey mod = ex.getValue();
+        if (mod == null || !mod.isModule()) continue;
+        if (!modNames.contains(mod.getObjectName().toUpperCase())) continue;
+        putExportSrvpgm(ex.getKey().toUpperCase(), srv);
+      }
+    }
+    if (verbose) {
+      logger.info("Export→SRVPGM map size: {}", exportToSrvpgm.size());
+    }
+  }
+
+  private void putExportSrvpgm(String symbol, TargetKey srv) {
+    TargetKey prev = exportToSrvpgm.putIfAbsent(symbol, srv);
+    if (prev != null && !prev.equals(srv) && verbose) {
+      logger.info("Export {} claimed by both {} and {} (keeping first)",
+          symbol, prev.asString(), srv.asString());
+    }
+  }
+
+  /** Collect BNDDIR → SRVPGM membership from all ADDBNDDIRE hooks. */
+  private void collectBnddirMembership(BuildSpec globalSpec) {
+    for (BuildSpec.TargetSpec spec : globalSpec.targets.values()) {
+      if (spec == null) continue;
+      collectBnddirMembershipFromHooks(spec.before);
+      collectBnddirMembershipFromHooks(spec.after);
+    }
+    collectBnddirMembershipFromHooks(globalSpec.before);
+    collectBnddirMembershipFromHooks(globalSpec.after);
+  }
+
+  private void collectBnddirMembershipFromHooks(List<CommandObject> hooks) {
+    if (hooks == null) return;
+    for (CommandObject cmd : hooks) {
+      if (cmd == null || cmd.getSystemCommand() != SysCmd.ADDBNDDIRE) continue;
+      if (!cmd.containsKey(ParamCmd.BNDDIR) || !cmd.containsKey(ParamCmd.OBJ)) continue;
+      String bndName = stripLibQualifier(cmd.get(ParamCmd.BNDDIR));
+      if (bndName == null || bndName.isEmpty()) continue;
+
+      for (String token : cmd.get(ParamCmd.OBJ).trim().split("\\s+")) {
+        if (token.isEmpty()) continue;
+        String objName = stripLibQualifier(token);
+        if (objName == null || objName.isEmpty()) continue;
+        TargetKey srv = keyLookup.get(objName + "." + ObjectType.SRVPGM.name());
+        if (srv == null || !srv.isServiceProgram()) continue;
+        bnddirMembership.computeIfAbsent(bndName, k -> new LinkedHashSet<>()).add(srv);
+      }
+    }
+  }
+
+  /**
+   * Consumer ADDBNDDIRE (program before/after): program → each OBJ *SRVPGM.
+   * Srvpgm-side hooks only contribute membership (see {@link #collectBnddirMembership}).
    */
   private void applyAddBndDirEDeps(BuildSpec globalSpec) {
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
-      if (targetSpec == null || targetSpec.before == null || targetSpec.before.isEmpty()) {
+      if (targetSpec == null) continue;
+
+      applyConsumerAddBndDirE(target, targetSpec.before);
+      applyConsumerAddBndDirE(target, targetSpec.after);
+    }
+  }
+
+  private void applyConsumerAddBndDirE(TargetKey target, List<CommandObject> hooks) {
+    if (hooks == null || hooks.isEmpty()) return;
+
+    for (CommandObject cmd : hooks) {
+      if (cmd == null || cmd.getSystemCommand() != SysCmd.ADDBNDDIRE) continue;
+      if (!cmd.containsKey(ParamCmd.OBJ)) continue;
+
+      String objs = cmd.get(ParamCmd.OBJ);
+      if (objs == null || objs.trim().isEmpty()) continue;
+
+      for (String token : objs.trim().split("\\s+")) {
+        if (token.isEmpty()) continue;
+        String objName = stripLibQualifier(token);
+        if (objName == null || objName.isEmpty()) continue;
+        if (!objName.matches("[A-Z0-9$#@_]{1,10}")) continue;
+
+        TargetKey srvKey = keyLookup.get(objName + "." + ObjectType.SRVPGM.name());
+        if (srvKey == null || !srvKey.isServiceProgram()) {
+          if (verbose) {
+            logger.info(
+                "ADDBNDDIRE OBJ {} for {} is not a build-target SRVPGM (ignored for topo)",
+                objName, target.asString());
+          }
+          continue;
+        }
+
+        /* Srvpgm registering itself: membership only (fan-out later) */
+        if (target.isServiceProgram() && target.equals(srvKey)) {
+          continue;
+        }
+        /* Srvpgm registering another srvpgm into a BNDDIR: membership only */
+        if (target.isServiceProgram()) {
+          continue;
+        }
+        /* Module that is compiled into this srvpgm: edge already exists the other way */
+        if (moduleBelongsToSrvpgm(target, srvKey)) {
+          if (verbose) {
+            logger.info(
+                "ADDBNDDIRE dependency skipped: {} is a MODULE of {} (would cycle)",
+                target.asString(), srvKey.asString());
+          }
+          continue;
+        }
+
+        target.addChild(srvKey);
+        srvKey.addFather(target);
+        if (verbose) {
+          logger.info(
+              "ADDBNDDIRE dependency: {} depends on {} (consumer hook)",
+              target.asString(), srvKey.asString());
+        }
+      }
+    }
+  }
+
+  /**
+   * Lift each member module's foreign *SRVPGM children onto the parent *SRVPGM
+   * (bind-time: CRTSRVPGM must resolve those imports). Sets inferred
+   * {@code BNDSRVPGM} when the spec did not already name one.
+   */
+  private void applySrvpgmBndSrvPgmFromModules(BuildSpec globalSpec) {
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
+      TargetKey srv = entry.getKey();
+      BuildSpec.TargetSpec spec = entry.getValue();
+      if (srv == null || spec == null || !srv.isServiceProgram()) continue;
+
+      Set<TargetKey> imported = new LinkedHashSet<TargetKey>();
+
+      for (String modName : srvpgmModuleNames(srv, spec)) {
+        TargetKey mod = keyLookup.get(modName + "." + ObjectType.MODULE.name());
+        if (mod == null || !mod.isModule()) continue;
+        for (TargetKey child : mod.getChildsList()) {
+          if (child == null || !child.isServiceProgram() || child.equals(srv)) continue;
+          imported.add(child);
+        }
+      }
+
+      String existing = spec.params.get(ParamCmd.BNDSRVPGM);
+      boolean explicit = isExplicitBndSrvPgm(existing);
+      if (explicit) {
+        for (String token : existing.trim().split("\\s+")) {
+          if (token.isEmpty()) continue;
+          String name = stripLibQualifier(token);
+          if (name == null || name.isEmpty() || name.equals("*NONE") || name.equals("NONE")) {
+            continue;
+          }
+          TargetKey other = keyLookup.get(name + "." + ObjectType.SRVPGM.name());
+          if (other == null || !other.isServiceProgram() || other.equals(srv)) continue;
+          imported.add(other);
+        }
+      }
+
+      for (TargetKey other : imported) {
+        srv.addChild(other);
+        other.addFather(srv);
+        if (verbose) {
+          logger.info(
+              "SRVPGM bind dependency: {} depends on {} (module import / BNDSRVPGM)",
+              srv.asString(), other.asString());
+        }
+      }
+
+      if (explicit || imported.isEmpty()) continue;
+
+      StringBuilder joined = new StringBuilder();
+      for (TargetKey other : imported) {
+        if (joined.length() > 0) joined.append(' ');
+        joined.append(other.getObjectName());
+      }
+      spec.params.put(ParamCmd.BNDSRVPGM, joined.toString());
+      try {
+        srv.put(ParamCmd.BNDSRVPGM, joined.toString());
+      } catch (Exception ignore) {}
+      if (verbose) {
+        logger.info("Inferred BNDSRVPGM for {}: {}", srv.asString(), joined);
+      }
+    }
+  }
+
+  private static boolean isExplicitBndSrvPgm(String value) {
+    if (value == null) return false;
+    String s = value.trim();
+    if (s.isEmpty()) return false;
+    String upper = s.toUpperCase();
+    return !upper.equals("*NONE") && !upper.equals("NONE");
+  }
+
+  private List<String> srvpgmModuleNames(TargetKey srv, BuildSpec.TargetSpec spec) {
+    Set<String> names = new LinkedHashSet<String>();
+    try {
+      for (String m : srv.getModulesNameList()) {
+        String n = stripLibQualifier(m);
+        if (n != null && !n.isEmpty()) names.add(n);
+      }
+    } catch (Exception ignore) {}
+    String fromSpec = spec.params.get(ParamCmd.MODULE);
+    if (fromSpec != null) {
+      for (String part : fromSpec.trim().split("\\s+")) {
+        if (part.isEmpty()) continue;
+        String n = stripLibQualifier(part);
+        if (n != null && !n.isEmpty()) names.add(n);
+      }
+    }
+    return new ArrayList<String>(names);
+  }
+
+  /**
+   * After source scan, targets that use BNDDIR(D) also depend on every SRVPGM
+   * registered into D via ADDBNDDIRE (srvpgm-side or any membership hooks).
+   * A *MODULE does not depend on the *SRVPGM it is compiled into.
+   */
+  private void applyBndDirMembershipFanout(BuildSpec globalSpec) {
+    if (bnddirMembership.isEmpty()) return;
+
+    for (TargetKey target : globalSpec.targets.keySet()) {
+      for (TargetKey child : new ArrayList<>(target.getChildsList())) {
+        if (child == null || !child.isBndDir()) continue;
+        String bndName = child.getObjectName().toUpperCase();
+        Set<TargetKey> members = bnddirMembership.get(bndName);
+        if (members == null || members.isEmpty()) continue;
+
+        for (TargetKey srv : members) {
+          if (srv == null || srv.equals(target)) continue;
+          if (moduleBelongsToSrvpgm(target, srv)) continue;
+          target.addChild(srv);
+          srv.addFather(target);
+          if (verbose) {
+            logger.info(
+                "BNDDIR membership: {} depends on {} (registered in {})",
+                target.asString(), srv.asString(), bndName);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * For ILE programs and SQL modules: resolve /copy and /include, extract
+   * prototypes (not EXTPGM), match names to project exports → depender depends
+   * on providing *SRVPGM. A *MODULE does not depend on its own parent *SRVPGM.
+   */
+  private void getIncludeProtoSrvpgmDependencies(
+      TargetKey target, String sourceCode, String programFullPath, List<String> logs) {
+    if (exportToSrvpgm.isEmpty() && exportedProcToModule.isEmpty()) return;
+
+    Set<String> includePaths = findCopyIncludePaths(sourceCode);
+    if (includePaths.isEmpty()) return;
+
+    Set<String> protoNames = new LinkedHashSet<>();
+    for (String rel : includePaths) {
+      String resolved = resolveIncludePath(rel, programFullPath);
+      if (resolved == null) {
+        if (verbose) logs.add("Include not found for proto scan: " + rel);
+        continue;
+      }
+      try {
+        String inc = readSource(resolved);
+        extractPrototypeNames(inc, protoNames);
+      } catch (Exception e) {
+        if (verbose) logs.add("Could not read include " + rel + ": " + e.getMessage());
+      }
+    }
+
+    for (String proto : protoNames) {
+      TargetKey srv = exportToSrvpgm.get(proto);
+      if (srv == null) {
+        TargetKey mod = exportedProcToModule.get(proto);
+        if (mod != null && mod.isModule()) {
+          srv = findSrvpgmForModule(mod);
+        }
+      }
+      if (srv == null || !srv.isServiceProgram()) {
+        if (verbose) {
+          logs.add("Include proto " + proto + " not a project SRVPGM export (ignored)");
+        }
+        continue;
+      }
+      if (moduleBelongsToSrvpgm(target, srv)) {
+        if (verbose) {
+          logs.add("Include-proto " + proto + " is export of parent " + srv.asString()
+              + "; skipped to avoid module↔srvpgm cycle");
+        }
+        continue;
+      }
+      target.addChild(srv);
+      srv.addFather(target);
+      if (verbose) {
+        logs.add("Include-proto dependency: " + target.asString()
+            + " uses " + proto + " from " + srv.asString());
+      }
+    }
+  }
+
+  private TargetKey findSrvpgmForModule(TargetKey mod) {
+    if (mod == null || !mod.isModule()) return null;
+    for (TargetKey k : keyLookup.values()) {
+      if (moduleBelongsToSrvpgm(mod, k)) return k;
+    }
+    return null;
+  }
+
+  /**
+   * True when {@code mod} is a *MODULE listed on {@code srv}'s MODULE parameter
+   * (explicit or inferred). Used to avoid module → own-parent *SRVPGM edges.
+   */
+  private boolean moduleBelongsToSrvpgm(TargetKey mod, TargetKey srv) {
+    if (mod == null || srv == null || !mod.isModule() || !srv.isServiceProgram()) {
+      return false;
+    }
+    String modName = mod.getObjectName().toUpperCase();
+    try {
+      for (String m : srv.getModulesNameList()) {
+        if (modName.equals(stripLibQualifier(m))) return true;
+      }
+    } catch (Exception ignore) {}
+    return false;
+  }
+
+  private static Set<String> findCopyIncludePaths(String sourceCode) {
+    Set<String> paths = new LinkedHashSet<>();
+    try (java.util.Scanner sc = new java.util.Scanner(sourceCode)) {
+      while (sc.hasNextLine()) {
+        String line = sc.nextLine();
+        String trimmed = line.trim();
+        if (trimmed.startsWith("//")) continue;
+        /* Fixed-form full-line comment: * in column 7 (1-based) */
+        if (line.length() >= 7 && line.charAt(6) == '*' && !line.substring(0, 6).matches(".*\\S.*")) {
+          continue;
+        }
+        Matcher m = COPY_INCLUDE_DIR.matcher(line);
+        if (!m.find()) continue;
+        String path = m.group(2);
+        /* Strip trailing junk */
+        path = path.replaceAll("[,;]+$", "");
+        if (!path.isEmpty()) paths.add(path);
+      }
+    }
+    return paths;
+  }
+
+  private String resolveIncludePath(String rel, String programFullPath) {
+    if (rel == null) return null;
+    rel = rel.replace("'", "").trim();
+    List<String> candidates = new ArrayList<>();
+    if (rel.startsWith("/") || (rel.length() > 2 && rel.charAt(1) == ':')) {
+      candidates.add(rel);
+    } else {
+      if (includeBaseDir != null) {
+        candidates.add(resolveFullPath(includeBaseDir, rel));
+      }
+      if (programFullPath != null) {
+        File prog = new File(programFullPath);
+        File parent = prog.getParentFile();
+        if (parent != null) {
+          candidates.add(new File(parent, rel).getPath());
+          File grand = parent.getParentFile();
+          if (grand != null) {
+            candidates.add(new File(grand, rel).getPath());
+          }
+        }
+      }
+    }
+    for (String c : candidates) {
+      File f = new File(c);
+      if (f.isFile()) return f.getAbsolutePath();
+    }
+    /* Case-insensitive basename search under base dir (Copy_mbrs vs Copy_Mbrs) */
+    if (includeBaseDir != null && !rel.startsWith("/")) {
+      File found = findFileIgnoreCase(new File(includeBaseDir), rel);
+      if (found != null) return found.getAbsolutePath();
+    }
+    return null;
+  }
+
+  private static File findFileIgnoreCase(File root, String relative) {
+    String[] parts = relative.replace('\\', '/').split("/");
+    File cur = root;
+    for (String part : parts) {
+      if (part.isEmpty() || part.equals(".")) continue;
+      if (part.equals("..")) {
+        cur = cur.getParentFile();
+        if (cur == null) return null;
+        continue;
+      }
+      File[] kids = cur.listFiles();
+      if (kids == null) return null;
+      File next = null;
+      for (File k : kids) {
+        if (k.getName().equalsIgnoreCase(part)) {
+          next = k;
+          break;
+        }
+      }
+      if (next == null) return null;
+      cur = next;
+    }
+    return cur.isFile() ? cur : null;
+  }
+
+  private static void extractPrototypeNames(String includeSource, Set<String> out) {
+    String[] lines = includeSource.split("\\R", -1);
+    for (int i = 0; i < lines.length; i++) {
+      String line = lines[i];
+      String trimmed = line.trim();
+      if (trimmed.startsWith("//")) continue;
+
+      /* Free-form dcl-pr */
+      Matcher dcl = DCL_PR_NAME.matcher(line);
+      if (dcl.find()) {
+        String name = dcl.group(1).toUpperCase();
+        String window = line;
+        for (int j = i; j < Math.min(i + 15, lines.length); j++) {
+          window += " " + lines[j];
+          if (lines[j].toLowerCase().contains("end-pr")) break;
+        }
+        String winLow = window.toLowerCase();
+        if (winLow.contains("extpgm") || winLow.contains("extproc(*system")) {
+          continue; // dynamic call, not bound export
+        }
+        if (name.matches("[A-Z0-9$#@_]{1,128}")) out.add(name);
         continue;
       }
 
-      for (CommandObject cmd : targetSpec.before) {
-        if (cmd == null || cmd.getSystemCommand() != SysCmd.ADDBNDDIRE) continue;
-        if (!cmd.containsKey(ParamCmd.OBJ)) continue;
-
-        String objs = cmd.get(ParamCmd.OBJ);
-        if (objs == null || objs.trim().isEmpty()) continue;
-
-        for (String token : objs.trim().split("\\s+")) {
-          if (token.isEmpty()) continue;
-          String objName = stripLibQualifier(token);
-          if (objName == null || objName.isEmpty()) continue;
-          if (!objName.matches("[A-Z0-9$#@_]{1,10}")) continue;
-
-          TargetKey srvKey = keyLookup.get(objName + "." + ObjectType.SRVPGM.name());
-          if (srvKey == null || !srvKey.isServiceProgram()) {
-            if (verbose) {
-              logger.info(
-                  "ADDBNDDIRE OBJ {} for {} is not a build-target SRVPGM (ignored for topo)",
-                  objName, target.asString());
-            }
-            continue;
-          }
-
-          target.addChild(srvKey);
-          srvKey.addFather(target);
-          if (verbose) {
-            logger.info(
-                "ADDBNDDIRE dependency: {} depends on {} (must exist before BNDDIR bind)",
-                target.asString(), srvKey.asString());
-          }
+      /* Fixed-format D…PR */
+      if (line.length() >= 6) {
+        Matcher fix = FIXED_D_PR.matcher(line);
+        if (fix.find()) {
+          String name = fix.group(1).toUpperCase();
+          String low = line.toLowerCase();
+          if (low.contains("extpgm")) continue;
+          /* continuation name... — still a proto name */
+          if (name.matches("[A-Z0-9$#@_]{1,128}")) out.add(name);
         }
       }
     }
@@ -575,6 +1052,14 @@ public class DependencyAwareness {
           getBndDirDependencies(target, sourceCode, logs);
           break;
           /* At this point, we already have the chain module -> srvpgm -> [bnddir] -> pgm */
+      }
+
+      /* PGM → SRVPGM via /copy|/include prototypes ∩ project exports */
+      switch (target.getCompilationCommand()) {
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+          getIncludeProtoSrvpgmDependencies(target, sourceCode, fullPath, logs);
+          break;
       }
 
       /* Get extpgm */

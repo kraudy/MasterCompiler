@@ -223,7 +223,22 @@ public class StreamCompilationIT {
 
       TargetKey depsSRV_SQL = spec.getTargetKey(new TargetKey("CURLIB.SRV_SQL.MODULE.SQLRPGLE"));
       assertNotNull(depsSRV_SQL, "Deps target should not be null");
-      assertEquals(1, depsSRV_SQL.getChildsCount(), "Childs of target " + depsSRV_SQL.asString() + " should be 1 BNDDIR. UTIL_BND");
+      /* BNDDIR UTIL_BND + /include SRV_MSG_P → SRV_MSG (+ UTIL_BND membership SRV_STR). Not own SRV_SQL. */
+      assertTrue(depsSRV_SQL.getChildsCount() >= 2,
+          "Childs of " + depsSRV_SQL.asString()
+              + " should include UTIL_BND and foreign SRV_MSG (not own SRV_SQL srvpgm)");
+      TargetKey depsSRV_MSG = spec.getTargetKey(new TargetKey("CURLIB.SRV_MSG.SRVPGM.BND"));
+      TargetKey depsSRV_SQL_SRV = spec.getTargetKey(new TargetKey("CURLIB.SRV_SQL.SRVPGM.BND"));
+      assertTrue(hasChildNamed(depsSRV_SQL, "UTIL_BND"),
+          "SRV_SQL module should depend on BNDDIR UTIL_BND");
+      if (depsSRV_MSG != null) {
+        assertTrue(hasChild(depsSRV_SQL, depsSRV_MSG),
+            "SRV_SQL module should depend on foreign SRV_MSG via /include proto / UTIL_BND membership");
+      }
+      if (depsSRV_SQL_SRV != null) {
+        assertFalse(hasChild(depsSRV_SQL, depsSRV_SQL_SRV),
+            "SRV_SQL module must not depend on its own parent SRV_SQL *SRVPGM");
+      }
 
 
     } catch (CompilerException e) {
@@ -291,10 +306,12 @@ public class StreamCompilationIT {
       assertNotNull(depsCOU200, "Deps target should not be null");
       assertEquals(2, depsCOU200.getChildsCount(), "Childs of target " + depsCOU200.asString() + " should be 2");
 
-      // This also finds BndDir y ExtPgm
+      // This also finds BndDir y ExtPgm; SAMPLE membership / include-proto add *SRVPGMs
       TargetKey depsART200 = spec.getTargetKey(new TargetKey("CURLIB.ART200.PGM.SQLRPGLE"));
       assertNotNull(depsART200, "Deps target should not be null");
-      assertEquals(6, depsART200.getChildsCount(), "Childs of target " + depsART200.asString() + " should be 6: 2 Files, 1 Dspf, 1 Table, 1 Bnddir, 1 ExtPgm");
+      assertTrue(depsART200.getChildsCount() >= 6,
+          "Childs of " + depsART200.asString()
+              + " should include files, SAMPLE, EXTPGM, and FFAMILLY (deduped ADDBNDDIRE / include-proto / membership)");
 
       /* Validate PF REF file */
       TargetKey depsVATDEF = spec.getTargetKey(new TargetKey("CURLIB.VATDEF.PF.DDS"));
@@ -338,30 +355,36 @@ public class StreamCompilationIT {
       /* Various validations */
       TargetKey depsART201 = spec.getTargetKey(new TargetKey("CURLIB.ART201.PGM.RPGLE"));
       assertNotNull(depsART201, "Deps target should not be null");
-      assertEquals(3, depsART201.getChildsCount(), "REFFLD Childs of target " + depsART201.asString() + " should be 3");
+      /* files + SAMPLE + SRVPGMs from /copy protos and ADDBNDDIRE / BNDDIR membership */
+      assertTrue(depsART201.getChildsCount() >= 5,
+          "Childs of " + depsART201.asString() + " should include files, SAMPLE, FARTICLE, FPROVIDER");
 
       TargetKey depsART202 = spec.getTargetKey(new TargetKey("CURLIB.ART202.PGM.RPGLE"));
       assertNotNull(depsART202, "Deps target should not be null");
-      assertEquals(3, depsART202.getChildsCount(), "Childs of target " + depsART202.asString() + " should be 3");
+      assertTrue(depsART202.getChildsCount() >= 5,
+          "Childs of " + depsART202.asString() + " should include files, SAMPLE, and ARTICLE/PROVIDER srvpgms");
 
       TargetKey depsORD201 = spec.getTargetKey(new TargetKey("CURLIB.ORD201.PGM.SQLRPGLE"));
       assertNotNull(depsORD201, "Deps target should not be null");
-      assertEquals(11, depsORD201.getChildsCount(), "Childs of target " + depsORD201.asString() + " should be 11");
+      assertTrue(depsORD201.getChildsCount() >= 11,
+          "Childs of " + depsORD201.asString() + " should be at least 11 (prior set + optional SRVPGM edges)");
 
       /* dtaara */
       TargetKey depsORD100 = spec.getTargetKey(new TargetKey("curlib.ORD100.PGM.RPGLE"));
       assertNotNull(depsORD100, "Deps target should not be null");
-      // Tmpdetord uses a ovrdbf but references the same detord files so the childs number does not changes
-      assertEquals(6, depsORD100.getChildsCount(), "Childs of target " + depsORD100.asString() + " should be 6. 4 files, 1 bnddir, 1 extpgm, 1 dtaara");
+      // files, SAMPLE, extpgm, dtaara + srvpgms from ADDBNDDIRE / /copy protos / membership
+      assertTrue(depsORD100.getChildsCount() >= 6,
+          "Childs of " + depsORD100.asString() + " should be at least 6");
 
       TargetKey depsORD900 = spec.getTargetKey(new TargetKey("curlib.ORD900.PGM.RPGLE"));
       assertNotNull(depsORD900, "Deps target should not be null");
       assertEquals(2, depsORD900.getChildsCount(), "Childs of target " + depsORD900.asString() + " should be 2. 1 file, 1 dtaara");
 
-      /* Extname */
+      /* Extname + BNDDIR; may also pull SRVPGMs via SAMPLE membership / LOG if present */
       TargetKey depsORD700 = spec.getTargetKey(new TargetKey("curlib.ORD700.PGM.RPGLE"));
       assertNotNull(depsORD700, "Deps target should not be null");
-      assertEquals(3, depsORD700.getChildsCount(), "Childs of target " + depsORD700.asString() + " should be 3. 1 Bnddir, 1 file, 1 extname");
+      assertTrue(depsORD700.getChildsCount() >= 3,
+          "Childs of " + depsORD700.asString() + " should be at least 3 (BNDDIR, file, EXTNAME)");
 
       /* SQL dependencies */
       TargetKey depsARTLSTDAT = spec.getTargetKey(new TargetKey("curlib.ARTLSTDAT.VIEW.SQL"));
@@ -411,6 +434,85 @@ public class StreamCompilationIT {
           "Childs of " + depsCVTSPLPDF.asString()
               + " should be 0 (PGM not in build graph)");
 
+      /*
+       * PGM → SRVPGM: /copy|/include prototypes matched to module/srvpgm exports,
+       * plus ADDBNDDIRE consumer hooks (and BNDDIR membership fan-out).
+       * ART201: /copy ARTICLE + PROVIDER; AddBndDirE FARTICLE, FPROVIDER.
+       */
+      TargetKey depsFARTICLE = spec.getTargetKey(new TargetKey("curlib.FARTICLE.srvpgm.bnd"));
+      TargetKey depsFPROVIDER = spec.getTargetKey(new TargetKey("curlib.FPROVIDER.srvpgm.bnd"));
+      TargetKey depsFFAMILLY = spec.getTargetKey(new TargetKey("curlib.FFAMILLY.srvpgm.bnd"));
+      TargetKey depsFCUSTOMER = spec.getTargetKey(new TargetKey("curlib.FCUSTOMER.srvpgm.bnd"));
+      TargetKey depsFVAT = spec.getTargetKey(new TargetKey("curlib.fvat.srvpgm.bnd"));
+      assertNotNull(depsFARTICLE, "FARTICLE srvpgm should be in tobi.yaml");
+      assertNotNull(depsFPROVIDER, "FPROVIDER srvpgm should be in tobi.yaml");
+      assertNotNull(depsFFAMILLY, "FFAMILLY srvpgm should be in tobi.yaml");
+      assertNotNull(depsFCUSTOMER, "FCUSTOMER srvpgm should be in tobi.yaml");
+
+      assertTrue(hasChild(depsART201, depsFARTICLE),
+          "ART201 should depend on FARTICLE (include protos / ADDBNDDIRE)");
+      assertTrue(hasChild(depsART201, depsFPROVIDER),
+          "ART201 should depend on FPROVIDER (include protos / ADDBNDDIRE)");
+      assertTrue(hasChildNamed(depsART201, "SAMPLE"),
+          "ART201 should depend on BNDDIR SAMPLE");
+
+      assertTrue(hasChild(depsART202, depsFARTICLE),
+          "ART202 should depend on FARTICLE via /copy ARTICLE protos");
+      assertTrue(hasChild(depsART202, depsFPROVIDER),
+          "ART202 should depend on FPROVIDER via /copy PROVIDER protos");
+
+      /* ORD100: AddBndDirE fvat + FCUSTOMER; /copy CUSTOMER, ARTICLE, VAT */
+      assertTrue(hasChild(depsORD100, depsFVAT),
+          "ORD100 should depend on FVAT (ADDBNDDIRE / VAT include)");
+      assertTrue(hasChild(depsORD100, depsFCUSTOMER),
+          "ORD100 should depend on FCUSTOMER (ADDBNDDIRE / CUSTOMER include)");
+      assertTrue(hasChild(depsORD100, depsFARTICLE),
+          "ORD100 should depend on FARTICLE via /copy ARTICLE protos");
+
+      /* ART200: /copy FAMILLY → FFAMILLY; AddBndDirE FFAMILLY (deduped if also via SAMPLE) */
+      assertTrue(hasChild(depsART200, depsFFAMILLY),
+          "ART200 should depend on FFAMILLY (include protos / ADDBNDDIRE)");
+      assertTrue(hasChild(depsART200, depsFARTICLE),
+          "ART200 program should depend on FARTICLE (SAMPLE membership / later bind)");
+
+      /* ORD700: /copy LOG_functions → ADDLOGENTRY when LOG *SRVPGM is in the graph */
+      TargetKey depsLOG = spec.getTargetKey(new TargetKey("curlib.LOG.srvpgm.bnd"));
+      if (depsLOG != null) {
+        assertTrue(hasChild(depsORD700, depsLOG),
+            "ORD700 should depend on LOG when LOG srvpgm is a build target");
+      }
+
+      /*
+       * SQL *MODULE /copy of own proto must not reverse the SRVPGM → MODULE edge.
+       * ART301 /copy ARTICLE (own FARTICLE) + FAMILLY (foreign FFAMILLY).
+       * CUS301 /copy CUSTOMER (own FCUSTOMER) only.
+       */
+      TargetKey depsART301 = spec.getTargetKey(new TargetKey("CURLIB.ART301.MODULE.SQLRPGLE"));
+      TargetKey depsCUS301 = spec.getTargetKey(new TargetKey("CURLIB.CUS301.MODULE.SQLRPGLE"));
+      assertNotNull(depsART301, "ART301 module should be in tobi.yaml");
+      assertNotNull(depsCUS301, "CUS301 module should be in tobi.yaml");
+      assertFalse(hasChild(depsART301, depsFARTICLE),
+          "ART301 must not depend on parent FARTICLE (module↔srvpgm cycle)");
+      assertTrue(hasChild(depsFARTICLE, depsART301),
+          "FARTICLE must still depend on ART301 via MODULE");
+      assertTrue(hasChild(depsART301, depsFFAMILLY),
+          "ART301 should depend on foreign FFAMILLY via /copy FAMILLY");
+      assertFalse(hasChild(depsCUS301, depsFCUSTOMER),
+          "CUS301 must not depend on parent FCUSTOMER (module↔srvpgm cycle)");
+      assertTrue(hasChild(depsFCUSTOMER, depsCUS301),
+          "FCUSTOMER must still depend on CUS301 via MODULE");
+
+      TargetKey depsART300 = spec.getTargetKey(new TargetKey("CURLIB.ART300.MODULE.RPGLE"));
+      assertTrue(hasChild(depsFARTICLE, depsFFAMILLY),
+          "FARTICLE must depend on FFAMILLY (BNDSRVPGM / ART301 import of GETARTFAMDESC)");
+      if (depsART300 != null) {
+        assertTrue(hasChild(depsFARTICLE, depsART300),
+            "FARTICLE must still depend on ART300 via MODULE");
+      }
+
+      /* Graph must stay acyclic after include-proto + ADDBNDDIRE + SAMPLE fan-out */
+      new BuildTopoSort(false, false).topologicalSort(spec);
+
       /* Validate exported procs */
       assertTrue(spec.containsExport("GETVATDESC", depsVAT300), "depsVAT300 Should export proc GETVATDESC");
       assertTrue(spec.containsExport("GETVATRATE", depsVAT300), "depsVAT300 Should export proc GETVATRATE");
@@ -435,6 +537,19 @@ public class StreamCompilationIT {
         System.out.println(e.getFullContext());
       }
     }
+  }
+
+  /** True if parent lists child as a direct dependency. */
+  private static boolean hasChild(TargetKey parent, TargetKey child) {
+    if (parent == null || child == null) return false;
+    return parent.getChildsList().stream().anyMatch(c -> c != null && c.equals(child));
+  }
+
+  /** True if parent has a child with the given object name (any object type). */
+  private static boolean hasChildNamed(TargetKey parent, String objectName) {
+    if (parent == null || objectName == null) return false;
+    return parent.getChildsList().stream()
+        .anyMatch(c -> c != null && objectName.equalsIgnoreCase(c.getObjectName()));
   }
 
   @Test

@@ -167,8 +167,12 @@ Scan reuses the same dependency scanners used by `--diff`:
 - CL `CALL`  
 - CL user-defined commands (project `*.cmd.cmd` names found as statement-leading tokens in CLP/CLLE)  
 - CMD → processing program when `PGM` is set (base overlay / YAML) and that program is a build target  
-- Program → service programs listed on `ADDBNDDIRE` hooks (so BNDDIR consumers bind after those \*SRVPGMs exist)  
-- SRVPGM → modules via `MODULE` (explicit or inferred)
+- Program (and module) → service programs listed on `ADDBNDDIRE` hooks (consumer `before`/`after`)  
+- BNDDIR consumers → srvpgms registered into that BNDDIR via any `ADDBNDDIRE` (including hooks on the \*SRVPGM itself)  
+- Program or module → service programs whose **exports** match prototypes in `/copy` or `/include` (not whole-source scan; skips `extpgm` protos)  
+- A \*MODULE never depends on a \*SRVPGM that lists it on `MODULE` (that edge already exists the other way and would cycle). Duplicate child/father links are ignored by `TargetKey`.  
+- SRVPGM → modules via `MODULE` (explicit or inferred)  
+- SRVPGM → other \*SRVPGMs its modules import via `/copy` `/include` prototypes. Written as inferred `BNDSRVPGM` when the overlay did not set one (so `CRTSRVPGM` can resolve those symbols). Explicit `BNDSRVPGM` in YAML / base is kept.
 
 References to objects **outside** the scanned tree are ignored (same rule as deps outside a hand-written spec).
 
