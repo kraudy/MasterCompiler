@@ -159,6 +159,8 @@ Object inspection still fills many params at build time when objects already exi
 
 ## How it fits with dependency awareness
 
+`--diff` uses this graph: stale or missing objects are seeds; every father (dependent) is compiled too. Source last-edit is the stream file’s `File` / `IFSFile` mtime, not `IFS_OBJECT_STATISTICS`.
+
 Scan reuses the same dependency scanners used by `--diff`:
 
 - DDS `PFILE` / `REF` / `REFFLD`  

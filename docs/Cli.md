@@ -20,7 +20,7 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 * Debug and verbose log output `{-x, -v, -xv}`
 * Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. `{--dry-run}`
 * No migrate flag ommits souce files migration `{--no-migrate}`
-* Differentiated build based on last source change compared to object creations `{--diff}`
+* Incremental build `{--diff}`: compile targets whose source is newer than the object (or whose object is missing), plus every dependent. Source time comes from the stream file (`File` / `IFSFile`), not DB2. Does not `touch` sources.
 * Clean deletes created objects after the build `{ -c, --clean }`
 
 ## Params permutation

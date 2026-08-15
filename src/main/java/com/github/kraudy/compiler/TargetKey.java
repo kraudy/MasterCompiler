@@ -202,11 +202,13 @@ public class TargetKey {
     return this.objectType == ObjectType.CMD;
   }
 
-  /* Used for diff build */
+  /* Used for diff build: missing object, or source newer than object. */
   public boolean needsRebuild() {
-    /* If no timestamp, rebuild */
-    if (this.lastSourceEdit == null || this.lastBuild == null) {
-        return true;
+    if (this.lastBuild == null) {
+      return true;
+    }
+    if (this.lastSourceEdit == null) {
+      return false;
     }
     return this.lastSourceEdit.after(this.lastBuild);
   }

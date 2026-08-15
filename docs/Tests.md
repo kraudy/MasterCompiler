@@ -30,6 +30,19 @@ mvn test -Dtest=ScanDepsTest
 
 Needs `git` on PATH and network. Tagged `@Tag("deps")`; Surefire runs it with the other local tests (`mvn test` / `mvn clean package`). IBM i is not used here.
 
+## Incremental (`--diff`) tests
+
+Rebuild **logic** is local. IBM i only proves that a real compile skips the rest.
+
+* [DiffPlannerTest](../src/test/java/com/github/kraudy/compiler/DiffPlannerTest.java) — hand-built PF→LF→PGM and MODULE→SRVPGM→PGM. No clone.
+* [ScanDiffTest](../src/test/java/com/github/kraudy/compiler/ScanDiffTest.java) — clone McOnTobi, `--scan`, bump one local file mtime, assert fan-out (`ARTICLE.PF`, `ART301`, `ART200`).
+
+```bash
+mvn test -Dtest=DiffPlannerTest,ScanDiffTest
+```
+
+`StreamCompilationIT.test_Diff_Build` (`-Pintegration-diff`) remains the on-box check: full compile, touch `ARTICLE.PF`, `--diff`, dependents rebuilt, existing BNDDIR skipped.
+
 ## Integration tests
 
 Integration tests are a different beast, especially on IBM i-related projects. 

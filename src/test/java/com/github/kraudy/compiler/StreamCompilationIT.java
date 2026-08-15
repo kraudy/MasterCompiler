@@ -218,34 +218,27 @@ public class StreamCompilationIT {
       int totalTargets = spec.targets.size();
       assertEquals(totalTargets, fullCompiler.getBuiltCount(), "Full build should build all targets");
 
-      // Simulate changes: Touch a few sources (updates IFS DATA_CHANGE_TIMESTAMP)
-      List<String> changedRelativePaths = List.of(
-        "QRPGLESRC/ADDNUM.RPGLE",           // Independent program
-        "QDDSSRC/ART200D.dspf.dds",         // DSPF
-        "QRPGLESRC/ART200.pgm.sqlrpgle"     // SQLRPGI program source
-      );
+      // One source with dependents (PF → LF / DSPF / PGM). No BNDDIR fudge.
+      String changedRel = "QDDSSRC/ARTICLE.PF.dds";
+      CommandObject touch = new CommandObject(SysCmd.QSH)
+          .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/touch " + testFolder + "/" + changedRel);
+      commandExecutor.executeCommand(touch);
 
-      for (String relPath : changedRelativePaths) {
-        String fullPath = testFolder + "/" + relPath;
-        CommandObject touch = new CommandObject(SysCmd.QSH)
-            .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/touch " + fullPath);
-        commandExecutor.executeCommand(touch);
-      }
-
-      // SECOND BUILD: Diff mode
       MasterCompiler diffCompiler = new MasterCompiler(
         system, connection, spec,
         // dryRun, debug, verbose, clean, diff, noMigrate
-        false, true, true, true, true, false  // clean=true, diff=true
+        false, true, true, true, true, false
       );
       diffCompiler.build();
       errorFound = diffCompiler.foundCompilationError();
       assertFalse(errorFound, "Diff build failed");
 
-      // ASSERTIONS: Only changed targets rebuilt, others skipped
-      int expectedRebuilt = changedRelativePaths.size() + 1;  // Add one for bnddir build
-      assertEquals(expectedRebuilt, diffCompiler.getBuiltCount(), "Diff build should rebuild only changed sources");
-      assertEquals(totalTargets - expectedRebuilt, diffCompiler.getSkippedCount(), "Diff build should skip unchanged");
+      int built = diffCompiler.getBuiltCount();
+      int skipped = diffCompiler.getSkippedCount();
+      assertEquals(totalTargets, built + skipped, "built + skipped should cover the spec");
+      assertTrue(built > 1, "ARTICLE.PF should fan out to dependents, built=" + built);
+      assertTrue(skipped > 0, "unrelated targets (including existing BNDDIR) should be skipped");
+      assertTrue(built < totalTargets, "must not rebuild the whole spec");
 
     } catch (CompilerException e) {
       System.out.println(e.getFullContext());

@@ -281,15 +281,18 @@ public class TargetKeyTest {
   void testNeedsRebuildLogic() {
     TargetKey key = new TargetKey("MYLIB.HELLO.PGM.RPGLE");
 
-    // No timestamps: rebuild
+    // No timestamps: object missing → rebuild
     assertTrue(key.needsRebuild());
 
-    // Set timestamps: source newer -> rebuild
     Timestamp oldBuild = Timestamp.valueOf("2023-01-01 00:00:00");
     Timestamp newEdit = Timestamp.valueOf("2023-01-02 00:00:00");
-    
-    key.setLastBuild(oldBuild).setLastEdit(newEdit);
 
+    // Object exists, no source signal (sourceless / unread) → skip
+    key.setLastBuild(oldBuild);
+    assertFalse(key.needsRebuild());
+
+    // Source newer → rebuild
+    key.setLastEdit(newEdit);
     assertTrue(key.needsRebuild());
 
     // Build newer: no rebuild

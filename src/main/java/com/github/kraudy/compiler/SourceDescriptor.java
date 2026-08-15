@@ -1,41 +1,50 @@
 package com.github.kraudy.compiler;
 
+import java.io.File;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
+import com.ibm.as400.access.AS400;
+import com.ibm.as400.access.IFSFile;
 
 public class SourceDescriptor {
   private static final Logger logger = LoggerFactory.getLogger(SourceDescriptor.class);
 
+  private final AS400 system;
   private final Connection connection;
+  private final String baseDirectory;
   private final boolean debug;
   private final boolean verbose;
 
-  public SourceDescriptor(Connection connection, boolean debug, boolean verbose) {
+  public SourceDescriptor(AS400 system, Connection connection, String baseDirectory,
+      boolean debug, boolean verbose) {
+    this.system = system;
     this.connection = connection;
+    this.baseDirectory = baseDirectory;
     this.debug = debug;
     this.verbose = verbose;
   }
 
   /* Get Pgm and SrvPgm objects creation timestamp */
   public void getPgmSrvPgmCreation (TargetKey key) throws SQLException {
+    if (connection == null) return;
     try (Statement stmt = connection.createStatement();
         ResultSet rsObjCreationInfo = stmt.executeQuery(
           "With " +
           Utilities.CteLibraryList +
           "SELECT " +
-              "CREATE_TIMESTAMP, " + // creationDateTime
-              "SOURCE_FILE_CHANGE_TIMESTAMP " + // sourceUpdatedDateTime
+              "CREATE_TIMESTAMP " +
             "FROM QSYS2.PROGRAM_INFO " +
             "INNER JOIN Libs " +
             "ON (PROGRAM_LIBRARY = Libs.Libraries) " +
-            "WHERE " + 
+            "WHERE " +
                 "PROGRAM_NAME = '" + key.getObjectName() + "' " +
                 "AND OBJECT_TYPE = '" + key.getObjectType() + "' "
           )) {
@@ -47,26 +56,21 @@ public class SourceDescriptor {
       if (verbose) logger.info("Found object creation data '" + key.asString());
 
       key.setLastBuild(rsObjCreationInfo.getTimestamp("CREATE_TIMESTAMP"));
-      key.setLastEdit(rsObjCreationInfo.getTimestamp("SOURCE_FILE_CHANGE_TIMESTAMP"));
-
     }
   }
 
-  public void getModCreation (TargetKey key) throws SQLException {
-
-  }
-
   public void getSqlCreation (TargetKey key) throws SQLException {
+    if (connection == null) return;
     try (Statement stmt = connection.createStatement();
         ResultSet rsSql = stmt.executeQuery(
           "With " +
           Utilities.CteLibraryList +
           "SELECT " +
               "LAST_ALTERED_TIMESTAMP " +
-            "FROM QSYS2.SYSFILES " + 
+            "FROM QSYS2.SYSFILES " +
             "INNER JOIN Libs " +
             "ON (TABLE_SCHEMA = Libs.Libraries) " +
-            "WHERE " + 
+            "WHERE " +
                 "TABLE_NAME = '" + key.getObjectName() + "' " +
                 "AND SQL_OBJECT_TYPE = '" + key.getObjectTypeName() + "' "
           )) {
@@ -78,41 +82,54 @@ public class SourceDescriptor {
       if (verbose) logger.info("Found sql object creation data '" + key.asString());
 
       key.setLastBuild(rsSql.getTimestamp("LAST_ALTERED_TIMESTAMP"));
-      
     }
   }
 
-  public void getDdsCreation (TargetKey key) throws SQLException {
-
+  /** *MODULE, *FILE, *BNDDIR, *CMD, … via OBJECT_STATISTICS. */
+  public void getObjectCreation(TargetKey key) throws SQLException {
+    if (connection == null) return;
+    try (Statement stmt = connection.createStatement();
+        ResultSet rs = stmt.executeQuery(
+          "Select OBJCREATED " +
+          "From TABLE( " +
+            "QSYS2.OBJECT_STATISTICS( " +
+              "OBJECT_SCHEMA => '" + ValCmd.LIBL.toString() + "', " +
+              "OBJTYPELIST => '" + key.getObjectType() + "', " +
+              "OBJECT_NAME => '" + key.getObjectName() + "' " +
+            ") " +
+          ") " +
+          "LIMIT 1")) {
+      if (!rs.next()) {
+        if (verbose) logger.info("Could not extract object creation time '" + key.asString());
+        return;
+      }
+      if (verbose) logger.info("Found object creation data '" + key.asString());
+      key.setLastBuild(rs.getTimestamp("OBJCREATED"));
+    }
   }
 
-  //TODO: Check if the object exists using SYSPARTITIONSTAT
-
   public void getObjectTimestamps(TargetKey key) throws SQLException {
-    /* Get object creation timestamp */
-    if (key.isProgram() || key.isServiceProgram()) {
-      getPgmSrvPgmCreation(key);
-    } else if (key.isModule()) {
-      getModCreation(key);
-    } else if (key.isSql()) {
-      getSqlCreation(key);
-    } else if (key.isDds()) {
-      getDdsCreation(key);
-    } 
-    
+    if (connection != null) {
+      if (key.isProgram() || key.isServiceProgram()) {
+        getPgmSrvPgmCreation(key);
+      } else if (key.isSql()) {
+        getSqlCreation(key);
+      } else {
+        getObjectCreation(key);
+      }
+    }
 
-    /* Get source stream file last change */
-    if (key.containsStreamFile()){
-      //TODO: Add git diff
+    if (key.containsStreamFile()) {
       getSourceStreamFileLastChange(key);
       return;
     }
-    /* Get source member last change */
-    getSourceMemberLastChange(key);
-    return;
+    if (connection != null) {
+      getSourceMemberLastChange(key);
+    }
   }
 
   public void getSourceMemberLastChange(TargetKey key) throws SQLException {
+    if (connection == null) return;
     try (Statement stmt = connection.createStatement();
           ResultSet rs = stmt.executeQuery(
             "With " +
@@ -125,34 +142,61 @@ public class SourceDescriptor {
               "AND SOURCE_TYPE = '" + key.getSourceType() + "'")) {
         if (!rs.next()) {
           if (verbose) logger.info("Could not get source member last change: " + key.getSourceName());
-          key.setLastEdit(null);  // File not found
-          return;  
+          return;
         }
 
         if (verbose) logger.info("Found source member last change: " + key.getSourceName());
         key.setLastEdit(rs.getTimestamp("LAST_SOURCE_UPDATE_TIMESTAMP"));
-        return;
     }
   }
 
-  public void getSourceStreamFileLastChange(TargetKey key) throws SQLException {
-    try (Statement stmt = connection.createStatement();
-          ResultSet rs = stmt.executeQuery(
-            "SELECT DATA_CHANGE_TIMESTAMP " + 
-            "FROM TABLE (QSYS2.IFS_OBJECT_STATISTICS( " +
-                    "START_PATH_NAME => '" + key.getStreamFile() +  "', " +
-                    "SUBTREE_DIRECTORIES => 'NO' " +
-                ") " +
-            ")")) {
-        if (!rs.next()) {
-            if (verbose) logger.info("Could not get source stream file last change: " + key.getStreamFile());
-          key.setLastEdit(null);  // File not found
-          return;
-        }
-        
-        if (verbose) logger.info("Found source stream file last change: " + key.getStreamFile());
-        key.setLastEdit(rs.getTimestamp("DATA_CHANGE_TIMESTAMP"));
-        return;
+  /**
+   * Stream-file mtime: local {@link File} if present, otherwise {@link IFSFile}.
+   * Same split as {@link DependencyAwareness} source reads. No DB2.
+   */
+  public void getSourceStreamFileLastChange(TargetKey key) {
+    Timestamp edit = streamFileLastEdit(key);
+    if (edit == null) {
+      if (verbose) logger.info("Could not get source stream file last change: " + key.getStreamFile());
+      return;
     }
+    if (verbose) logger.info("Found source stream file last change: " + key.getStreamFile());
+    key.setLastEdit(edit);
+  }
+
+  public Timestamp streamFileLastEdit(TargetKey key) {
+    if (key == null || !key.containsStreamFile()) return null;
+    String fullPath = resolveFullPath(baseDirectory, key.getStreamFile());
+    if (fullPath == null || fullPath.isEmpty()) return null;
+
+    File local = new File(fullPath);
+    if (local.isFile()) {
+      long ms = local.lastModified();
+      return ms > 0 ? new Timestamp(ms) : null;
+    }
+
+    if (system == null) return null;
+    try {
+      IFSFile remote = new IFSFile(system, fullPath);
+      if (!remote.exists()) return null;
+      long ms = remote.lastModified();
+      return ms > 0 ? new Timestamp(ms) : null;
+    } catch (Exception e) {
+      if (debug) logger.info("IFS lastModified failed for {}: {}", fullPath, e.toString());
+      return null;
+    }
+  }
+
+  static String resolveFullPath(String baseDir, String streamFile) {
+    if (streamFile == null) return baseDir;
+    String rel = streamFile.replace("'", "").trim();
+    if (rel.startsWith("/") || (rel.length() > 2 && rel.charAt(1) == ':')) {
+      return rel;
+    }
+    if (baseDir == null || baseDir.isEmpty()) return rel;
+    if (baseDir.endsWith("/") || baseDir.endsWith("\\")) {
+      return baseDir + rel;
+    }
+    return baseDir + "/" + rel;
   }
 }

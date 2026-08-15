@@ -6,13 +6,12 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import com.github.kraudy.compiler.CompilationPattern.ObjectType;
-import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
-import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400JDBCDataSource;
@@ -51,6 +50,7 @@ public class MasterCompiler{
   private boolean compilationError = false;
   private int builtCount = 0;
   private int skippedCount = 0;
+  private Set<TargetKey> rebuildSet = new HashSet<TargetKey>();
 
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
@@ -96,7 +96,8 @@ public class MasterCompiler{
 
 
     /* Init source descriptor */
-    sourceDes = new SourceDescriptor(connection, debug, verbose);
+    String baseDir = globalSpec != null ? globalSpec.getBaseDirectory() : null;
+    sourceDes = new SourceDescriptor(system, connection, baseDir, debug, verbose);
 
     /* Init object descriptor */
     odes = new ObjectDescriptor(connection, debug, verbose);
@@ -110,7 +111,10 @@ public class MasterCompiler{
 
       if(verbose) logger.info(showLibraryList());
 
-      if (diff) depAwareness.detectDependencies(globalSpec);
+      if (diff) {
+        depAwareness.detectDependencies(globalSpec);
+        collectDiffRebuildSet();
+      }
 
       /* Build each target */
       buildTargets(globalSpec.targets);
@@ -166,19 +170,13 @@ public class MasterCompiler{
       TargetKey key = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-      /* Skip target if diff and no build required */
+      /* Skip target if diff and not in the rebuild set (seed + fathers) */
       if (diff) {
-        sourceDes.getObjectTimestamps(key);
-        if (!key.needsRebuild()) {
+        if (!rebuildSet.contains(key)) {
           this.skippedCount++;
           if (verbose) logger.info("Skipping unchanged target: " + key.asString() + key.getTimestmaps());
-          continue; 
+          continue;
         }
-        if (key.isChild()) {
-          /* Since child changed, fathers must be recompiled */
-          updateFathersSourceTimeStamps(key);
-        }
-        
       }
 
       this.builtCount++;
@@ -281,28 +279,18 @@ public class MasterCompiler{
     }
   }
 
-  /* Update target's fathers source edit timestamp so they can be recompiled */
-  private void updateFathersSourceTimeStamps(TargetKey childKey){
-
-    logger.info("Updating fathers source timestamp of child object (" + childKey.asString() + ")");
-
-    for(TargetKey fatherKey: childKey.getFathersList()){
-      /* if already updated, omit */
-      if (fatherKey.needsRebuild()) continue;
-      //TODO: Check lastSourceEdit and lastBuild
-      String relativePath = fatherKey.getStreamFile();
-      if (relativePath == null) {
-        //TODO: If needed, the update effect could be simultated of forced chaning las edit variable
-        logger.info("Father object (" + fatherKey.asString() + ") has not streamfile path for update");
-        continue;
+  private void collectDiffRebuildSet() throws SQLException {
+    Set<TargetKey> seeds = new HashSet<TargetKey>();
+    for (TargetKey key : globalSpec.targets.keySet()) {
+      sourceDes.getObjectTimestamps(key);
+      if (key.needsRebuild()) {
+        seeds.add(key);
+        if (verbose) logger.info("Diff seed: " + key.asString() + key.getTimestmaps());
       }
-      /* use touch to update source stream file. bnddir, dtaara and dtaq have no source file*/
-      CommandObject touch = new CommandObject(SysCmd.QSH)
-            .put(ParamCmd.CMD, "/QOpenSys/pkgs/bin/touch " + globalSpec.getBaseDirectory() + relativePath);
-      
-      try {
-        commandExec.executeCommand(touch);
-      } catch (Exception ignore) {} // Omit exeption to not break for.
+    }
+    rebuildSet = DiffPlanner.expand(globalSpec, seeds);
+    if (verbose) {
+      logger.info("Diff rebuild set: " + rebuildSet.size() + " of " + globalSpec.targets.size());
     }
   }
 
