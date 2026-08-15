@@ -20,6 +20,16 @@ These classes are very important because they contain core logic functionality.
 
 These test are executed automatically with every `mvn clean package`. 
 
+## Dependency scan tests
+
+Deps live locally. [ScanDepsTest](../src/test/java/com/github/kraudy/compiler/ScanDepsTest.java) clones [McOnTobi](https://github.com/kraudy/McOnTobi) and [McOnSJLennon](https://github.com/kraudy/McOnSJLennon) to a temp dir, runs `--scan` (`SpecGenerator.generate` with no IBM i), asserts the graph (files, include-proto, BNDDIR lift, no module↔own-srvpgm cycle), then deletes the clone.
+
+```bash
+mvn test -Dtest=ScanDepsTest
+```
+
+Needs `git` on PATH and network. Tagged `@Tag("deps")`; Surefire runs it with the other local tests (`mvn test` / `mvn clean package`). IBM i is not used here.
+
 ## Integration tests
 
 Integration tests are a different beast, especially on IBM i-related projects. 
@@ -48,11 +58,13 @@ That's it.
 
 [StreamCompilation Integration Test](../src/test/java/com/github/kraudy/compiler/StreamCompilationIT.java)
 
-* Connects to a real IBM I
-* Upload source files from repo [McOnTobi](../src/test/resources/tobiRecursive)
-* Execute compilation flow remotely
+* Connects to a real IBM i
+* Clone [McOnTobi](https://github.com/kraudy/McOnTobi) or [McOnSJLennon](https://github.com/kraudy/McOnSJLennon) on the box
+* Execute compilation (or diff) flow remotely
 * Generate log
 * Remove created objects
+
+Dependency graph checks are **not** here — they live in local `ScanDepsTest`.
 
 Here is the [tobi-example yaml spec](https://github.com/kraudy/McOnTobi/blob/master/tobi.yaml)
 
