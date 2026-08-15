@@ -110,7 +110,7 @@ Defaults when object type is omitted:
 Object name must be a valid IBM i name (1–10 chars: `A-Z 0-9 $ # @ _`).  
 Descriptive middle tokens (e.g. `hello2.nomain.module.rpgle`) are ignored; the first segment is the object name.
 
-Unrecognized files (`.md`, `.yaml`, `.RPGLEINC`, `*.include.RPGLE`, …) are skipped with a verbose log. Copy/include members are not compile targets.
+Unrecognized files (`.md`, `.yaml`, `.RPGLEINC`, `*.include.RPGLE`, …) are skipped with a verbose log. Copy/include members are not compile targets. A consumer that `/copy`s or `/include`s them records the resolved path; `--diff` treats that file's mtime as part of the consumer (edit `ARTICLE.RPGLEINC` rebuilds ART201).
 
 ## Generated YAML shape
 

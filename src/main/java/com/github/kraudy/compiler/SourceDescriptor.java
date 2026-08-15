@@ -155,18 +155,36 @@ public class SourceDescriptor {
    * Same split as {@link DependencyAwareness} source reads. No DB2.
    */
   public void getSourceStreamFileLastChange(TargetKey key) {
-    Timestamp edit = streamFileLastEdit(key);
+    Timestamp edit = latestSourceEdit(key);
     if (edit == null) {
       if (verbose) logger.info("Could not get source stream file last change: " + key.getStreamFile());
       return;
     }
-    if (verbose) logger.info("Found source stream file last change: " + key.getStreamFile());
+    if (verbose) logger.info("Found source last change: " + key.getStreamFile());
     key.setLastEdit(edit);
+  }
+
+  /**
+   * Newest mtime of the target's own SRCSTMF and any attached /copy|/include files.
+   */
+  public Timestamp latestSourceEdit(TargetKey key) {
+    if (key == null) return null;
+    Timestamp best = streamFileLastEdit(key);
+    for (String inc : key.getIncludeFiles()) {
+      Timestamp t = pathLastEdit(inc);
+      if (t != null && (best == null || t.after(best))) {
+        best = t;
+      }
+    }
+    return best;
   }
 
   public Timestamp streamFileLastEdit(TargetKey key) {
     if (key == null || !key.containsStreamFile()) return null;
-    String fullPath = resolveFullPath(baseDirectory, key.getStreamFile());
+    return pathLastEdit(resolveFullPath(baseDirectory, key.getStreamFile()));
+  }
+
+  public Timestamp pathLastEdit(String fullPath) {
     if (fullPath == null || fullPath.isEmpty()) return null;
 
     File local = new File(fullPath);

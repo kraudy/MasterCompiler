@@ -35,7 +35,7 @@ Needs `git` on PATH and network. Tagged `@Tag("deps")`; Surefire runs it with th
 Rebuild **logic** is local. IBM i only proves that a real compile skips the rest.
 
 * [DiffPlannerTest](../src/test/java/com/github/kraudy/compiler/DiffPlannerTest.java) — hand-built PF→LF→PGM and MODULE→SRVPGM→PGM. No clone.
-* [ScanDiffTest](../src/test/java/com/github/kraudy/compiler/ScanDiffTest.java) — clone McOnTobi, `--scan`, bump one local file mtime, assert fan-out (`ARTICLE.PF`, `ART301`, `ART200`).
+* [ScanDiffTest](../src/test/java/com/github/kraudy/compiler/ScanDiffTest.java) — clone McOnTobi, `--scan`, bump one local file mtime, assert fan-out (`ARTICLE.PF`, `ART301`, `ART200`, `ARTICLE.RPGLEINC` → ART201).
 
 ```bash
 mvn test -Dtest=DiffPlannerTest,ScanDiffTest

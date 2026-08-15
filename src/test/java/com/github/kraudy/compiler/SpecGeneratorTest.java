@@ -128,6 +128,45 @@ public class SpecGeneratorTest {
   }
 
   @Test
+  void copyIncludeAttachesToConsumerAndSeedsDiff() throws Exception {
+    Path proto = tempDir.resolve("QPROTOSRC");
+    Path qrpg = tempDir.resolve("QRPGLESRC");
+    Files.createDirectories(proto);
+    Files.createDirectories(qrpg);
+    Files.write(proto.resolve("ARTICLE.RPGLEINC"),
+        ("**free\n"
+            + "dcl-pr GetArtDesc varchar(50);\n"
+            + "end-pr;\n").getBytes(StandardCharsets.UTF_8));
+    Files.write(qrpg.resolve("ART201.pgm.rpgle"),
+        ("**free\n"
+            + "/copy QPROTOSRC/ARTICLE.RPGLEINC\n"
+            + "dsply 'x';\n").getBytes(StandardCharsets.UTF_8));
+
+    BuildSpec spec = new SpecGenerator(null, false, true).generate(tempDir.toString(), "curlib");
+    TargetKey art201 = null;
+    for (TargetKey k : spec.targets.keySet()) {
+      if ("ART201".equals(k.getObjectName())) art201 = k;
+    }
+    assertNotNull(art201);
+    assertEquals(1, spec.targets.size(), "RPGLEINC must not become a target");
+    assertFalse(art201.getIncludeFiles().isEmpty(), art201.getIncludeFiles().toString());
+    assertTrue(art201.getIncludeFiles().stream()
+        .anyMatch(p -> p.toUpperCase().replace('\\', '/').endsWith("/ARTICLE.RPGLEINC")));
+
+    SourceDescriptor des = new SourceDescriptor(null, null, spec.getBaseDirectory(), false, false);
+    java.sql.Timestamp baseline = java.sql.Timestamp.valueOf("2099-01-01 00:00:00");
+    art201.setLastBuild(baseline);
+    art201.setLastEdit(des.latestSourceEdit(art201));
+    assertFalse(art201.needsRebuild(), "include older than baseline");
+
+    Path inc = proto.resolve("ARTICLE.RPGLEINC");
+    Files.setLastModifiedTime(inc,
+        java.nio.file.attribute.FileTime.fromMillis(baseline.getTime() + 5_000L));
+    art201.setLastEdit(des.latestSourceEdit(art201));
+    assertTrue(art201.needsRebuild(), "newer include must seed ART201");
+  }
+
+  @Test
   void emptyTreeThrows() throws Exception {
     SpecGenerator gen = new SpecGenerator(null, false, false);
     assertThrows(IllegalArgumentException.class,

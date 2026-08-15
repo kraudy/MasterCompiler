@@ -44,6 +44,8 @@ public class TargetKey {
 
   private final List<TargetKey> childs = new ArrayList<>(); // List of child targets
   private final List<TargetKey> fathers = new ArrayList<>(); // List of fathers targets
+  /** Resolved /copy|/include files that are not compile targets. */
+  private final List<String> includeFiles = new ArrayList<>();
 
   public TargetKey(String key) {
     String[] parts = key.split("\\.");
@@ -433,6 +435,16 @@ public class TargetKey {
     if (child.equals(this)) return; /* Prevents cycles */
     if (childs.contains(child)) return; /* Prevents cylces */
     childs.add(child);
+  }
+
+  public void addIncludeFile(String path) {
+    if (path == null || path.isEmpty()) return;
+    if (includeFiles.contains(path)) return;
+    includeFiles.add(path);
+  }
+
+  public List<String> getIncludeFiles() {
+    return Collections.unmodifiableList(includeFiles);
   }
 
   public void addFather(TargetKey father) {

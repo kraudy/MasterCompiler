@@ -761,29 +761,47 @@ public class DependencyAwareness {
   }
 
   /**
-   * For ILE programs and SQL modules: resolve /copy and /include, extract
-   * prototypes (not EXTPGM), match names to project exports → depender depends
+   * Resolve /copy|/include (including nested) onto the consumer. The include
+   * is not a compile target; its mtime participates in --diff for this target.
+   */
+  private void attachCopyIncludes(
+      TargetKey target, String sourceCode, String programFullPath, List<String> logs) {
+    Set<String> resolved = new LinkedHashSet<>();
+    collectIncludes(sourceCode, programFullPath, resolved);
+    for (String path : resolved) {
+      target.addIncludeFile(path);
+      if (verbose) logs.add("Include attachment: " + target.asString() + " <- " + path);
+    }
+  }
+
+  private void collectIncludes(String sourceCode, String fromPath, Set<String> resolved) {
+    for (String rel : findCopyIncludePaths(sourceCode)) {
+      String path = resolveIncludePath(rel, fromPath);
+      if (path == null || !resolved.add(path)) continue;
+      try {
+        collectIncludes(readSource(path), path, resolved);
+      } catch (Exception ignore) {
+        /* attachment already recorded */
+      }
+    }
+  }
+
+  /**
+   * For ILE programs and SQL modules: extract prototypes from attached includes
+   * (not EXTPGM), match names to project exports → depender depends
    * on providing *SRVPGM. A *MODULE does not depend on its own parent *SRVPGM.
    */
-  private void getIncludeProtoSrvpgmDependencies(
-      TargetKey target, String sourceCode, String programFullPath, List<String> logs) {
+  private void getIncludeProtoSrvpgmDependencies(TargetKey target, List<String> logs) {
     if (exportToSrvpgm.isEmpty() && exportedProcToModule.isEmpty()) return;
-
-    Set<String> includePaths = findCopyIncludePaths(sourceCode);
-    if (includePaths.isEmpty()) return;
+    if (target.getIncludeFiles().isEmpty()) return;
 
     Set<String> protoNames = new LinkedHashSet<>();
-    for (String rel : includePaths) {
-      String resolved = resolveIncludePath(rel, programFullPath);
-      if (resolved == null) {
-        if (verbose) logs.add("Include not found for proto scan: " + rel);
-        continue;
-      }
+    for (String resolved : target.getIncludeFiles()) {
       try {
         String inc = readSource(resolved);
         extractPrototypeNames(inc, protoNames);
       } catch (Exception e) {
-        if (verbose) logs.add("Could not read include " + rel + ": " + e.getMessage());
+        if (verbose) logs.add("Could not read include " + resolved + ": " + e.getMessage());
       }
     }
 
@@ -1136,11 +1154,20 @@ public class DependencyAwareness {
           break;
       }
 
+      /* Non-target /copy|/include files attach to the consumer for --diff */
+      switch (target.getCompilationCommand()) {
+        case CRTBNDRPG:
+        case CRTSQLRPGI:
+        case CRTRPGMOD:
+          attachCopyIncludes(target, sourceCode, fullPath, logs);
+          break;
+      }
+
       /* PGM → SRVPGM via /copy|/include prototypes ∩ project exports */
       switch (target.getCompilationCommand()) {
         case CRTBNDRPG:
         case CRTSQLRPGI:
-          getIncludeProtoSrvpgmDependencies(target, sourceCode, fullPath, logs);
+          getIncludeProtoSrvpgmDependencies(target, logs);
           break;
       }
 
