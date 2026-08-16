@@ -14,7 +14,7 @@ Master compiler follows unix philosophi in various parts of its design. One of t
   * YAML file `{-f, --file}`
   * Source root to scan `{--scan}` — see [Scan.md](./Scan.md)
 * Base overlay for non-inferable scan params `{--base}` (default: `<scan>/mc-base.yaml` if present)
-* Output path for generated YAML `{-o, --output}`
+* Output path for generated YAML `{-o, --output}` (also writes `<stem>.cl`)
 * Default library for scanned targets `{--lib}` (default: `curlib`)
 * Generate or rewrite YAML only, no compile `{--generate-only}` (requires `-o`, and either `--scan` or `-f`)
 * Debug and verbose log output `{-x, -v, -xv}`

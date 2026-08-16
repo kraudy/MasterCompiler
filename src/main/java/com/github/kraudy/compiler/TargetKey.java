@@ -260,6 +260,7 @@ public class TargetKey {
   }
 
   public String getCommandStringWithoutSummary(){
+    ResolveConflicts();
     return this.ParamCmdSequence.getCommandStringWithoutSummary(this.compilationCommand);
   }
 

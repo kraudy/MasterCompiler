@@ -213,9 +213,10 @@ public final class CommandStringParser {
     return qcmdexc.replace("''", "'");
   }
 
-  /** Paste-ready CRT* from an already-resolved {@link TargetKey}. */
+  /** Paste-ready CRT* from a {@link TargetKey}. Resolves conflicts first. */
   public static String toPasteableCommand(TargetKey key) {
     if (key == null) return null;
+    key.ResolveConflicts();
     StringBuilder sb = new StringBuilder(key.getCompilationCommandName());
     boolean any = false;
     for (ParamCmd param : CompilationPattern.getCommandPattern(key.getCompilationCommand())) {

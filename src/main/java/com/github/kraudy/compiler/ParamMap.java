@@ -117,8 +117,7 @@ public class ParamMap {
       ParamValue pv = this.paramMap.get(param);
       if (pv == null) continue;
       String value = pv.get();
-      if (value == null) continue;
-      if (value.isEmpty()) continue;
+      if (value == null) continue; /* removed; empty is valid (CHGLIBL LIBL()) */
       sb.append(param.paramString(value));
     }
 
@@ -137,7 +136,9 @@ public class ParamMap {
     for (ParamCmd param : compilationPattern) {
       ParamValue pv = this.paramMap.get(param);
       if (pv == null) continue;
-      sb.append(param.paramString(pv.get()));
+      String value = pv.get();
+      if (value == null) continue; /* removed; empty is valid (CHGLIBL LIBL()) */
+      sb.append(param.paramString(value));
     }
 
     return sb.toString();

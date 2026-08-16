@@ -2,12 +2,16 @@ package com.github.kraudy.compiler;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 
 public class SpecResolverTest {
 
@@ -96,6 +100,54 @@ public class SpecResolverTest {
 
     assertEquals("QDDSSRC/ARTICLE.pf.dds", resolved.get(ParamCmd.SRCSTMF));
     assertFalse(resolved.containsKey(ParamCmd.FILE), "identity FILE omitted");
+  }
+
+  @Test
+  void compileScriptIncludesHooksMigrateAndCrt() {
+    BuildSpec spec = new BuildSpec();
+    spec.before.add(new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, "/home/src"));
+
+    TargetKey rpg = new TargetKey("curlib.hello.pgm.rpgle");
+    BuildSpec.TargetSpec rpgSpec = new BuildSpec.TargetSpec();
+    rpgSpec.params.put(ParamCmd.SRCSTMF, "QRPGLESRC/HELLO.pgm.rpgle");
+    spec.targets.put(rpg, rpgSpec);
+
+    TargetKey pf = new TargetKey("curlib.article.pf.dds");
+    BuildSpec.TargetSpec pfSpec = new BuildSpec.TargetSpec();
+    pfSpec.params.put(ParamCmd.SRCSTMF, "QDDSSRC/ARTICLE.pf.dds");
+    spec.targets.put(pf, pfSpec);
+
+    String cl = CompileScriptWriter.toCl(spec);
+    assertTrue(cl.contains("CHGCURDIR DIR('/home/src')"));
+    assertTrue(cl.contains("CRTBNDRPG PGM(*CURLIB/HELLO)"));
+    assertTrue(cl.contains("SRCSTMF('QRPGLESRC/HELLO.pgm.rpgle')"));
+    assertTrue(cl.contains("CPYFRMSTMF"));
+    assertTrue(cl.contains("QDDSSRC/ARTICLE.pf.dds"));
+    assertTrue(cl.contains("CRTPF FILE(*CURLIB/ARTICLE)"));
+    assertTrue(cl.indexOf("CPYFRMSTMF") < cl.indexOf("CRTPF"));
+    assertFalse(cl.contains("CPYFRMSTMF FROMSTMF('QRPGLESRC/HELLO.pgm.rpgle')"),
+        "IFS CRT* must not CPYFRMSTMF");
+  }
+
+  @Test
+  void specWriterWritesSiblingCl() throws Exception {
+    BuildSpec spec = new BuildSpec();
+    TargetKey key = new TargetKey("curlib.hello.pgm.rpgle");
+    BuildSpec.TargetSpec ts = new BuildSpec.TargetSpec();
+    ts.params.put(ParamCmd.SRCSTMF, "hello.rpgle");
+    spec.targets.put(key, ts);
+
+    Path yaml = Files.createTempFile("build", ".yaml");
+    try {
+      SpecWriter.writeToFile(spec, yaml.toString());
+      Path cl = SpecWriter.clPathFor(yaml);
+      assertTrue(Files.isRegularFile(cl), "expected " + cl);
+      String body = new String(Files.readAllBytes(cl), StandardCharsets.UTF_8);
+      assertTrue(body.contains("CRTBNDRPG"));
+    } finally {
+      Files.deleteIfExists(yaml);
+      Files.deleteIfExists(SpecWriter.clPathFor(yaml));
+    }
   }
 
   @Test

@@ -152,6 +152,16 @@ public final class SpecWriter {
       Files.createDirectories(parent);
     }
     Files.write(path, toYaml(spec, scanRootComment).getBytes(StandardCharsets.UTF_8));
+    Path clPath = clPathFor(path);
+    Files.write(clPath, CompileScriptWriter.toCl(spec).getBytes(StandardCharsets.UTF_8));
+  }
+
+  static Path clPathFor(Path yamlPath) {
+    String name = yamlPath.getFileName().toString();
+    int dot = name.lastIndexOf('.');
+    String stem = dot > 0 ? name.substring(0, dot) : name;
+    Path parent = yamlPath.getParent();
+    return parent == null ? Paths.get(stem + ".cl") : parent.resolve(stem + ".cl");
   }
 
   private static List<ParamCmd> orderedParams(TargetKey key, Map<ParamCmd, String> params) {

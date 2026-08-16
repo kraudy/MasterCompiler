@@ -22,7 +22,16 @@ These test are executed automatically with every `mvn clean package`.
 
 ## Dependency scan tests
 
-Deps live locally. [ScanDepsTest](../src/test/java/com/github/kraudy/compiler/ScanDepsTest.java) clones [McOnTobi](https://github.com/kraudy/McOnTobi) and [McOnSJLennon](https://github.com/kraudy/McOnSJLennon) to a temp dir, runs `--scan` (`SpecGenerator.generate` with no IBM i), asserts the graph (files, include-proto, BNDDIR lift, no module↔own-srvpgm cycle), then deletes the clone.
+Deps live locally. [ScanDepsTest](../src/test/java/com/github/kraudy/compiler/ScanDepsTest.java) clones [McOnTobi](https://github.com/kraudy/McOnTobi) and [McOnSJLennon](https://github.com/kraudy/McOnSJLennon) to a temp dir, runs `--scan` (`SpecGenerator.generate` with no IBM i), asserts the graph (files, include-proto, BNDDIR lift, no module↔own-srvpgm cycle), then asserts the **full compile plan**: every scanned source is a target, every edge is ordered (child before parent), every target has a paste-ready CRT* in the YAML comment and in `build.cl`. Then it deletes the clone.
+
+That local plan is not a substitute for a real compile. [StreamCompilationIT](../src/test/java/com/github/kraudy/compiler/StreamCompilationIT.java) remains the hard truth: if local order/script checks and IT disagree, fix the generator — do not weaken the IT.
+
+Every CRT* / RUNSQLSTM line from a real `--scan -o` of McOnTobi and McOnSJLennon is locked in:
+
+* [`golden/mcontobi-commands.txt`](../src/test/resources/golden/mcontobi-commands.txt) (78 commands)
+* [`golden/mconsjlennon-commands.txt`](../src/test/resources/golden/mconsjlennon-commands.txt) (CRT*, `CPYFRMSTMF`, hooks; not `-c` deletes)
+
+`CompilePlanAssert.assertGoldenCommands` matches **all** of them (verb, object, SRCSTMF / MODULE / PGM / …). A miss or extra is reported as a full list. `TGTRLS` from live object inspection is not required on a local scan.
 
 ```bash
 mvn test -Dtest=ScanDepsTest

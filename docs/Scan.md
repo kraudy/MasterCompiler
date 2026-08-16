@@ -30,7 +30,7 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar -f existing.yaml -xv
 |--------|---------|
 | `--scan <dir>` | Source root (local path or IFS). Mutually exclusive with `-f`. |
 | `--base <file>` | Overlay YAML for non-inferable params (default: `<scan>/mc-base.yaml` if present). |
-| `-o` / `--output <file>` | Write generated YAML here. |
+| `-o` / `--output <file>` | Write generated YAML here (also writes `<stem>.cl`, the local compile command list). |
 | `--lib <name>` | Library segment for target keys (default: `curlib`). |
 | `--generate-only` | Scan + write YAML + exit (requires `--scan` and `-o`). |
 
@@ -157,6 +157,7 @@ targets:
 - Targets appear in **compile-safe order** (dependencies first).  
 - Each target gets relative `SRCSTMF` from the scan root plus the resolved non-identity compile params.  
 - A `#` comment above the target is the **paste-ready CRT*** (IBM i command-line quotes, identity included). It is rebuilt from current `params:` every time the YAML is written. Edit params, then `-o` (or `--generate-only -o`) to refresh. Do not edit the comment by hand. DDS/OPM comments use `SRCFILE`/`SRCMBR`; the IFS path stays in `params`.  
+- The same write emits **`build.cl`** next to `build.yaml`: global/target hooks, `CPYFRMSTMF` when the CRT* is member-based, then the CRT* line, in compile order. Not a `PGM`/`ENDPGM` member — a stream-file command list.  
 - A global **`CHGCURDIR`** sets the IBM i job directory to the scan root so those relative `SRCSTMF` values resolve at compile time (same job as `QCMDEXC`).  
 - Service programs get an inferred `MODULE` list when binder `EXPORT SYMBOL('…')` names match procedures exported from modules in the tree.  
 - Commands get **`PGM`** from the base overlay (or hand YAML), never from the CMD definition member (`PGM` is not a valid keyword on the CMD statement). If that program is also a build target, the command depends on it so the program compiles first.

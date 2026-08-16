@@ -249,6 +249,8 @@ public class ScanDepsTest {
       assertTrue(spec.containsExport("EXISTVATRATE", depsVAT300));
       assertTrue(spec.containsExport("CLCVAT", depsVAT300));
 
+      CompilePlanAssert.assertFullCompilePlan(spec, root.toString());
+      CompilePlanAssert.assertGoldenCommands(spec, "golden/mcontobi-commands.txt");
       new BuildTopoSort(false, false).topologicalSort(spec);
     } finally {
       deleteRecursively(root);
@@ -313,6 +315,8 @@ public class ScanDepsTest {
       assertNull(spec.getTargetKey(new TargetKey("CURLIB.SRV_MSG_P.PGM.RPGLE")),
           "*.include.RPGLE must not become a *PGM target");
 
+      CompilePlanAssert.assertFullCompilePlan(spec, root.toString());
+      CompilePlanAssert.assertGoldenCommands(spec, "golden/mconsjlennon-commands.txt");
       new BuildTopoSort(false, false).topologicalSort(spec);
     } finally {
       deleteRecursively(root);

@@ -288,7 +288,7 @@ Rules:
 * Unknown params or params not valid for that command fail at deserialize.
 * If both `command:` and `params:` are present, **`params:` wins** for the same key.
 
-Scan / `--generate-only` still writes enriched `params:`, not a `command:` array. Above each target it writes a **paste-ready CRT* comment** (single quotes, includes `PGM(...)`). Copy the comment line (without `# `) into QCMD / ACS. The comment is derived from current params on every write — change a param and run `-o` to refresh it.
+Scan / `--generate-only` still writes enriched `params:`, not a `command:` array. Above each target it writes a **paste-ready CRT* comment** (single quotes, includes `PGM(...)`). Copy the comment line (without `# `) into QCMD / ACS. The comment is derived from current params on every write — change a param and run `-o` to refresh it. The same write produces `<stem>.cl` with hooks, member copies, and those CRT* lines in compile order.
 
 ```yaml
   # CRTBNDRPG PGM(*CURLIB/HELLO) SRCSTMF('/home/USER/HELLO.pgm.rpgle') DBGVIEW(*ALL) REPLACE(*YES)

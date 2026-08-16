@@ -6,6 +6,8 @@ This enum based approach allows **MC** to validate every command's param along w
 
 ## Conflict resolution
 
+Resolution runs on every compile command string (not only under `-x`).
+
 * If `SRCSTMF` and `SRCFILE` are present, `SRCFILE` is removed to give priority to stream files.
 * If `SRCSTMF` is present and `TGTCCSID` is missing, then **MC** adds it.
 * If `SRCSTMF` and `EXPORT` are present, `EXPORT` is removed.

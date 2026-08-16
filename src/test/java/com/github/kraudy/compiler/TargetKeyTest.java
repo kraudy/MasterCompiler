@@ -137,6 +137,44 @@ public class TargetKeyTest {
   }
 
   @Test
+  void withoutSummaryDropsSrcfileWhenSrcstmfPresent_crtclmod() {
+    String cmd = new TargetKey("curlib.PAR201.MODULE.CLLE")
+      .put(ParamCmd.SRCSTMF, "QCLSRC/PAR201.module.CLLE")
+      .getCommandStringWithoutSummary();
+
+    assertEquals(
+      "CRTCLMOD MODULE(*CURLIB/PAR201) SRCSTMF(''QCLSRC/PAR201.module.CLLE'') " +
+      "OPTION(*EVENTF) REPLACE(*YES) DBGVIEW(*ALL) TGTCCSID(*JOB)", cmd);
+    assertFalse(cmd.contains("SRCFILE"), cmd);
+    assertFalse(cmd.contains("SRCMBR"), cmd);
+  }
+
+  @Test
+  void withoutSummaryDropsSrcfileWhenSrcstmfPresent_crtbndcl() {
+    String cmd = new TargetKey("curlib.INCLUDED.PGM.CLLE")
+      .put(ParamCmd.SRCSTMF, "QCLSRC/included.clle")
+      .getCommandStringWithoutSummary();
+
+    assertEquals(
+      "CRTBNDCL PGM(*CURLIB/INCLUDED) SRCSTMF(''QCLSRC/included.clle'') " +
+      "OPTION(*EVENTF) REPLACE(*YES) DBGVIEW(*ALL) TGTCCSID(*JOB)", cmd);
+    assertFalse(cmd.contains("SRCFILE"), cmd);
+    assertFalse(cmd.contains("SRCMBR"), cmd);
+  }
+
+  @Test
+  void withoutSummaryDropsSrcfileWhenSrcstmfPresent_crtbndrpg() {
+    String cmd = new TargetKey("curlib.ORD900.PGM.RPGLE")
+      .put(ParamCmd.SRCSTMF, "QRPGLESRC/ORD900.PGM.RPGLE")
+      .getCommandStringWithoutSummary();
+
+    assertTrue(cmd.startsWith("CRTBNDRPG "), cmd);
+    assertTrue(cmd.contains("SRCSTMF(''QRPGLESRC/ORD900.PGM.RPGLE'')"), cmd);
+    assertFalse(cmd.contains("SRCFILE"), cmd);
+    assertFalse(cmd.contains("SRCMBR"), cmd);
+  }
+
+  @Test
   void test_Dspf_Dds_Command() {
     String cmd = new TargetKey("MYLIB.DSPHELLO.DSPF.DDS")
       .put(ParamCmd.SRCFILE, "MYLIB/QDSPFSRC")
