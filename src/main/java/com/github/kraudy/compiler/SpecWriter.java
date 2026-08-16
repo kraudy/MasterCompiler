@@ -13,8 +13,8 @@ import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 
 /**
  * Writes a readable YAML build spec from a {@link BuildSpec}.
- * Emits global hooks, per-target hooks, and {@code params}
- * (SRCSTMF, MODULE, PGM, ...). Target map order is preserved (topo-sorted).
+ * Emits global hooks, per-target hooks, and resolved {@code params}
+ * (SRCSTMF, MODULE, PGM, defaults, inspection, ...). Target map order is preserved (topo-sorted).
  */
 public final class SpecWriter {
 
@@ -46,6 +46,12 @@ public final class SpecWriter {
       TargetKey key = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
+      String paste = CommandStringParser.toPasteableCommand(
+          key, spec.defaults, targetSpec.params);
+      if (paste != null && !paste.isEmpty()) {
+        sb.append("  # ").append(paste).append("\n");
+      }
+
       sb.append("  \"").append(escapeYamlDouble(key.asString())).append("\":\n");
 
       boolean hasParams = targetSpec.params != null && !targetSpec.params.isEmpty();
@@ -67,7 +73,7 @@ public final class SpecWriter {
 
       if (hasParams) {
         sb.append("    params:\n");
-        List<ParamCmd> ordered = orderedParams(targetSpec.params);
+        List<ParamCmd> ordered = orderedParams(key, targetSpec.params);
         for (ParamCmd param : ordered) {
           String value = targetSpec.params.get(param);
           if (value == null) continue;
@@ -148,14 +154,14 @@ public final class SpecWriter {
     Files.write(path, toYaml(spec, scanRootComment).getBytes(StandardCharsets.UTF_8));
   }
 
-  private static List<ParamCmd> orderedParams(Map<ParamCmd, String> params) {
+  private static List<ParamCmd> orderedParams(TargetKey key, Map<ParamCmd, String> params) {
     List<ParamCmd> ordered = new ArrayList<>();
-    if (params.containsKey(ParamCmd.SRCSTMF)) ordered.add(ParamCmd.SRCSTMF);
-    if (params.containsKey(ParamCmd.MODULE)) ordered.add(ParamCmd.MODULE);
-    if (params.containsKey(ParamCmd.PGM)) ordered.add(ParamCmd.PGM);
+    List<ParamCmd> pattern = CompilationPattern.getCommandPattern(key.getCompilationCommand());
+    for (ParamCmd p : pattern) {
+      if (params.containsKey(p)) ordered.add(p);
+    }
     for (ParamCmd p : params.keySet()) {
-      if (p == ParamCmd.SRCSTMF || p == ParamCmd.MODULE || p == ParamCmd.PGM) continue;
-      ordered.add(p);
+      if (!ordered.contains(p)) ordered.add(p);
     }
     return ordered;
   }

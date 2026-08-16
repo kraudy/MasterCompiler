@@ -1,0 +1,3 @@
+targets:
+  "mylib.hello.pgm.rpgle":
+    command: CRTBNDRPG PGM(*CURLIB/HELLO) SRCSTMF('/home/sources/HELLO.RPGLE') TEXT('Hello World') DBGVIEW(*SOURCE)

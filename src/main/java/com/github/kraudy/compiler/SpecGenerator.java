@@ -1,6 +1,7 @@
 package com.github.kraudy.compiler;
 
 import java.io.File;
+import java.sql.Connection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,11 +27,17 @@ public class SpecGenerator {
   public static final String DEFAULT_BASE_NAME = "mc-base.yaml";
 
   private final AS400 system; // may be null for local-only generation without dep scan on IFS
+  private final Connection connection; // may be null; used to inspect existing objects
   private final boolean debug;
   private final boolean verbose;
 
   public SpecGenerator(AS400 system, boolean debug, boolean verbose) {
+    this(system, null, debug, verbose);
+  }
+
+  public SpecGenerator(AS400 system, Connection connection, boolean debug, boolean verbose) {
     this.system = system;
+    this.connection = connection;
     this.debug = debug;
     this.verbose = verbose;
   }
@@ -140,6 +147,15 @@ public class SpecGenerator {
     // Topo sort into compile-safe order
     BuildTopoSort topo = new BuildTopoSort(debug, verbose);
     topo.reorderSpec(spec);
+
+    ObjectDescriptor descriptor = null;
+    if (connection != null) {
+      descriptor = new ObjectDescriptor(connection, debug, verbose);
+      if (verbose) logger.info("Resolving generated params with object inspection");
+    } else if (verbose) {
+      logger.info("Resolving generated params without object inspection");
+    }
+    SpecResolver.resolveAll(spec, descriptor);
 
     return spec;
   }

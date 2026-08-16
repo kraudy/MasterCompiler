@@ -1,0 +1,9 @@
+targets:
+  "mylib.hello.pgm.rpgle":
+    command:
+      - CRTBNDRPG
+      - SRCSTMF('/home/sources/HELLO.RPGLE')
+      - DBGVIEW(*SOURCE)
+    params:
+      DBGVIEW: "*ALL"
+      TEXT: From params

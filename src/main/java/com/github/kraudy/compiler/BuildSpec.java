@@ -88,8 +88,13 @@ public class BuildSpec {
   }
 
   public static class TargetSpec {
+    /* Optional full compile command (array or CL string); folded into params on load */
+    @JsonProperty(value = "command", required = false)
+    @JsonDeserialize(using = CommandStringParser.CommandFormDeserializer.class)
+    public CommandStringParser.CommandForm command;
+
     /* Per-target compilation command params */
-    @JsonProperty(value = "params", required = true)  // Required
+    @JsonProperty(value = "params", required = false)
     @JsonDeserialize(using = ParamMapDeserializer.class)
     public final Map<ParamCmd, String> params = new HashMap<>();
 
@@ -116,7 +121,7 @@ public class BuildSpec {
     @JsonAnySetter
     public void unknown(String name, Object value) {
       throw new IllegalArgumentException(
-          "Unknown parameter in target '" + name + "'. Valid parameters are the ones from ParamCmd enum.");
+          "Unknown field in target '" + name + "'. Valid fields: params, command, before, after, success, failure.");
     }
   }
 }

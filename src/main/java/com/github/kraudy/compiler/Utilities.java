@@ -273,6 +273,8 @@ public class Utilities {
         throw new IllegalArgumentException("YAML must define at least one target in 'targets' section.");
       }
 
+      CommandStringParser.applyCommandForms(spec);
+
       /* Set Targets list */
       spec.setTargetsList(spec.targets.keySet());
 

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -121,7 +122,17 @@ public class SpecGeneratorTest {
     assertEquals(1, loaded.targets.size());
     TargetKey key = loaded.targets.keySet().iterator().next();
     assertEquals("HELLO", key.getObjectName());
-    assertTrue(loaded.targets.get(key).params.containsKey(ParamCmd.SRCSTMF));
+    Map<ParamCmd, String> params = loaded.targets.get(key).params;
+    assertTrue(params.containsKey(ParamCmd.SRCSTMF));
+    assertEquals("*ALL", params.get(ParamCmd.DBGVIEW));
+    assertEquals("*EVENTF", params.get(ParamCmd.OPTION));
+    assertEquals("*YES", params.get(ParamCmd.REPLACE));
+    assertFalse(params.containsKey(ParamCmd.PGM), "identity PGM stays implicit in the target key");
+    assertFalse(yaml.contains("\n    command:"), "generated YAML emits params, not command:");
+    assertTrue(yaml.contains("# CRTBNDRPG "), "paste-ready command comment");
+    assertTrue(yaml.contains("PGM(*CURLIB/HELLO)"));
+    assertTrue(yaml.contains("SRCSTMF('") && yaml.contains("HELLO.pgm.rpgle')"));
+    assertFalse(yaml.contains("SRCSTMF(''"), "comment uses command-line quotes, not QCMDEXC");
 
     assertFalse(loaded.before.isEmpty(), "Round-tripped YAML should keep CHGCURDIR before hook");
     assertEquals(SysCmd.CHGCURDIR, loaded.before.get(0).getSystemCommand());

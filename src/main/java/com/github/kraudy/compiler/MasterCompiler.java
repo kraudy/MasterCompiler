@@ -343,7 +343,7 @@ public class MasterCompiler{
       ArgParser parser = new ArgParser(args);
       parser.validate();
 
-      /* Generate-only can run without IBMi when scanning a local tree */
+      /* Generate-only can run without IBMi when scanning a local tree or rewriting a spec */
       if (parser.isGenerateOnly()) {
         system = null;
         try {
@@ -354,12 +354,32 @@ public class MasterCompiler{
             logger.info("No IBMi connection; generating from local filesystem only");
           }
         }
+        if (system != null) {
+          try {
+            connection = new AS400JDBCDataSource(system).getConnection();
+          } catch (Exception ignore) {
+            if (parser.isVerbose()) {
+              logger.info("No JDBC connection; generating without object inspection");
+            }
+          }
+        }
 
-        SpecGenerator generator = new SpecGenerator(
-            system, parser.isDebug(), parser.isVerbose());
-        BuildSpec generated = generator.generate(
-            parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
-        SpecWriter.writeToFile(generated, parser.getOutputFile(), parser.getScanRoot());
+        BuildSpec generated;
+        String scanRootComment = null;
+        if (parser.hasScan()) {
+          SpecGenerator generator = new SpecGenerator(
+              system, connection, parser.isDebug(), parser.isVerbose());
+          generated = generator.generate(
+              parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
+          scanRootComment = parser.getScanRoot();
+        } else {
+          generated = parser.getSpecFromYamlFile();
+          ObjectDescriptor descriptor = connection == null
+              ? null
+              : new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose());
+          SpecResolver.resolveAll(generated, descriptor);
+        }
+        SpecWriter.writeToFile(generated, parser.getOutputFile(), scanRootComment);
         logger.info("Generated YAML: {}", parser.getOutputFile());
         return;
       }
@@ -370,7 +390,7 @@ public class MasterCompiler{
       BuildSpec spec;
       if (parser.hasScan()) {
         SpecGenerator generator = new SpecGenerator(
-            system, parser.isDebug(), parser.isVerbose());
+            system, connection, parser.isDebug(), parser.isVerbose());
         spec = generator.generate(
             parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
         if (parser.getOutputFile() != null) {
@@ -379,6 +399,12 @@ public class MasterCompiler{
         }
       } else {
         spec = parser.getSpecFromYamlFile();
+        if (parser.getOutputFile() != null) {
+          SpecResolver.resolveAll(
+              spec, new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose()));
+          SpecWriter.writeToFile(spec, parser.getOutputFile(), null);
+          logger.info("Generated YAML: {}", parser.getOutputFile());
+        }
       }
 
       compiler = new MasterCompiler(

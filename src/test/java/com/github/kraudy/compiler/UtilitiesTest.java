@@ -251,6 +251,57 @@ public class UtilitiesTest {
     }
   }
 
+  @Test
+  void testDeserializeYaml_CommandArray() throws IOException {
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/command_array.yaml");
+    Path tempYaml = Files.createTempFile("test", ".yaml");
+    Files.write(tempYaml, yamlContent.getBytes());
+    try {
+      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
+      TargetKey key = new TargetKey("mylib.hello.pgm.rpgle");
+      Map<ParamCmd, String> params = spec.targets.get(key).params;
+      assertEquals("/home/sources/HELLO.RPGLE", params.get(ParamCmd.SRCSTMF));
+      assertEquals("QILE", params.get(ParamCmd.ACTGRP));
+      assertEquals("*SOURCE", params.get(ParamCmd.DBGVIEW));
+      assertFalse(params.containsKey(ParamCmd.PGM), "matching identity PGM is dropped");
+      assertNull(spec.targets.get(key).command);
+    } finally {
+      Files.deleteIfExists(tempYaml);
+    }
+  }
+
+  @Test
+  void testDeserializeYaml_CommandString() throws IOException {
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/command_string.yaml");
+    Path tempYaml = Files.createTempFile("test", ".yaml");
+    Files.write(tempYaml, yamlContent.getBytes());
+    try {
+      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
+      Map<ParamCmd, String> params = spec.targets.get(new TargetKey("mylib.hello.pgm.rpgle")).params;
+      assertEquals("/home/sources/HELLO.RPGLE", params.get(ParamCmd.SRCSTMF));
+      assertEquals("Hello World", params.get(ParamCmd.TEXT));
+      assertEquals("*SOURCE", params.get(ParamCmd.DBGVIEW));
+    } finally {
+      Files.deleteIfExists(tempYaml);
+    }
+  }
+
+  @Test
+  void testDeserializeYaml_CommandAndParams_ParamsWin() throws IOException {
+    String yamlContent = TestHelpers.loadResourceAsString("yaml/deserialize/command_and_params.yaml");
+    Path tempYaml = Files.createTempFile("test", ".yaml");
+    Files.write(tempYaml, yamlContent.getBytes());
+    try {
+      BuildSpec spec = Utilities.deserializeYaml(tempYaml.toString());
+      Map<ParamCmd, String> params = spec.targets.get(new TargetKey("mylib.hello.pgm.rpgle")).params;
+      assertEquals("*ALL", params.get(ParamCmd.DBGVIEW));
+      assertEquals("From params", params.get(ParamCmd.TEXT));
+      assertEquals("/home/sources/HELLO.RPGLE", params.get(ParamCmd.SRCSTMF));
+    } finally {
+      Files.deleteIfExists(tempYaml);
+    }
+  }
+
   /*
    * Negative validations
    */

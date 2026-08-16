@@ -34,7 +34,9 @@ targets:      # Required | Ordered sequence of compilation targets. At leas one 
 
     before: {}            # optional | Per-target pre-compilation system commands
 
-    params: {}            # optional | Target's compilation params
+    params: {}            # optional | Target's compilation params (canonical)
+
+    command: []           # optional | Full CRT* command as a Docker-style array or CL string; parsed into params
 
     after: {}             # optional | Per-target post-compilation system commands
 
@@ -252,3 +254,48 @@ With this change, you will get all the commands executed:
 ```
 
 I'm sure this can be improved.
+
+## Full compile command (`command:`)
+
+The canonical form is still `params:`. If you already have the CRT* command (joblog, copy/paste), you can write it directly and **MC** parses it back into the param map. It is never executed as a raw string.
+
+Docker-style array (one `PARAM(value)` token per element):
+
+```yaml
+targets:
+  curlib.hello.pgm.rpgle:
+    command:
+      - CRTBNDRPG
+      - PGM(*CURLIB/HELLO)
+      - SRCSTMF('/home/ROBKRAUDY/sources/HELLO.pgm.rpgle')
+      - DFTACTGRP(*NO)
+      - ACTGRP(QILE)
+      - DBGVIEW(*SOURCE)
+```
+
+Or a single CL string:
+
+```yaml
+targets:
+  curlib.hello.pgm.rpgle:
+    command: CRTBNDRPG PGM(*CURLIB/HELLO) SRCSTMF('/home/x.rpgle') TEXT('Hello World')
+```
+
+Rules:
+
+* The first token must be the compilation command inferred from the target key (`pgm.rpgle` → `CRTBNDRPG`). A mismatch is an error.
+* Identity tokens that restate the target (`PGM(*CURLIB/HELLO)`) are accepted and dropped. A different object name is an error. `CRTCMD` `PGM` is the processing program, not identity.
+* Unknown params or params not valid for that command fail at deserialize.
+* If both `command:` and `params:` are present, **`params:` wins** for the same key.
+
+Scan / `--generate-only` still writes enriched `params:`, not a `command:` array. Above each target it writes a **paste-ready CRT* comment** (single quotes, includes `PGM(...)`). Copy the comment line (without `# `) into QCMD / ACS. The comment is derived from current params on every write — change a param and run `-o` to refresh it.
+
+```yaml
+  # CRTBNDRPG PGM(*CURLIB/HELLO) SRCSTMF('/home/USER/HELLO.pgm.rpgle') DBGVIEW(*ALL) REPLACE(*YES)
+  "CURLIB.HELLO.PGM.RPGLE":
+    params:
+      SRCSTMF: "/home/USER/HELLO.pgm.rpgle"
+      DBGVIEW: "*ALL"
+```
+
+See [Scan.md](./Scan.md).

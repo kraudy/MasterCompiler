@@ -86,6 +86,11 @@ public class CommandExecutor {
       commandString = key.getCommandStringWithoutSummary();
     }
 
+    String paste = CommandStringParser.toPasteableCommand(key);
+    if (paste != null) {
+      logger.info("Paste: {}", paste);
+    }
+
     try {
       executeCommand(commandString, commandTime);
     } catch (CompilerException e) {

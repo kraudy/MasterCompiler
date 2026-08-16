@@ -25,7 +25,7 @@ public class ArgParser {
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
     OUTPUT        ("o", "output",        Kind.VALUE, "Write generated YAML to this path"),
     LIB           (null, "lib",          Kind.VALUE, "Default library for scanned targets (default: curlib)"),
-    GENERATE_ONLY (null, "generate-only", Kind.FLAG, "Only generate YAML from --scan (do not compile)"),
+    GENERATE_ONLY (null, "generate-only", Kind.FLAG, "Write YAML only, do not compile (--scan or -f, requires -o)"),
     DEBUG         ("x", null,            Kind.FLAG,  "Debug mode"),
     VERBOSE       ("v", null,            Kind.FLAG,  "Verbose output"),
     CLEAN         ("c", "clean",         Kind.FLAG,  "Delete created objects after build"),
@@ -215,10 +215,6 @@ public class ArgParser {
     if (hasFile && hasScan) {
       throw new IllegalArgumentException(
           "Use either -f|--file or --scan, not both");
-    }
-    if (generateOnly && !hasScan) {
-      throw new IllegalArgumentException(
-          "--generate-only requires --scan <source-root>");
     }
     if (generateOnly && outputFile == null) {
       throw new IllegalArgumentException(

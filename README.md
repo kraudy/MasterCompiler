@@ -159,7 +159,9 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources -xv
 
 Params are enum based, this allows for automatic param conflic resolution and validation in O(1) time along with instant validation at deserialization.
 
-[Params doc](./docs/Params.md)
+Scan writes the **resolved** `params:` map (defaults + inspection + overlay), not just `SRCSTMF`, plus a paste-ready CRT* comment above each target. You can also paste a full CRT* command as `command:` (Docker-style array or CL string); MC parses it back into params. `params:` still wins.
+
+[Params doc](./docs/Params.md) · [Spec doc](./docs/Spec.md)
 
 ## Source migration
 
@@ -171,7 +173,7 @@ Can be disabled with flag `--no-migrate`
 
 ## Object inspection
 
-If available, metadata is extracted from compiled objects to infer compilation params.
+If available, metadata is extracted from compiled objects to infer compilation params. The same inspection is applied when generating YAML if IBM i is connected.
 
 [Object Descriptor doc](./docs/Inspection.md) 
 

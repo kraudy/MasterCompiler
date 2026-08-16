@@ -80,6 +80,14 @@ public class CompilationPattern {
     CRTSRVPGM, CRTDSPF, CRTLF, CRTPRTF, CRTMNU, CRTQMQRY, CRTPF, CRTCMD,
     CRTBNDDIR, CRTDTAARA, CRTDTAQ, CRTMSGF
     ;
+
+    public static CompCmd fromString(String value) {
+      try {
+        return CompCmd.valueOf(value.toUpperCase().trim());
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Could not get compilation command from string: '" + value + "'");
+      }
+    }
   }
 
   public static final  List<SourceType> IleSources = Arrays.asList(

@@ -19,3 +19,15 @@ This enum based approach allows **MC** to validate every command's param along w
 ## History 
 
 Every change is tracked individually in the history of each param. This gives you full context of what **MC** does.
+
+## Precedence
+
+At compile time and when generating a spec:
+
+1. **MC defaults** (`Utilities.SetDefaultParams`)
+2. **Object inspection** (existing object metadata, if any)
+3. Spec **`defaults:`**
+4. Target **`command:`** tokens (if present; parsed into params)
+5. Target **`params:`** — **wins**
+
+A raw command string is never executed. See [Spec.md](./Spec.md#full-compile-command-command).

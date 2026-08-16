@@ -267,12 +267,19 @@ public class ArgParserTest {
   }
 
   @Test
-  void testGenerateOnlyRequiresScanAndOutput() {
-    ArgParser noScan = new ArgParser(new String[]{"--generate-only", "-o", "/tmp/x.yaml"});
-    assertThrows(IllegalArgumentException.class, noScan::validate);
+  void testGenerateOnlyRequiresFileOrScanAndOutput() {
+    ArgParser noSource = new ArgParser(new String[]{"--generate-only", "-o", "/tmp/x.yaml"});
+    assertThrows(IllegalArgumentException.class, noSource::validate);
 
     ArgParser noOut = new ArgParser(new String[]{"--scan", "/tmp/src", "--generate-only"});
     assertThrows(IllegalArgumentException.class, noOut::validate);
+
+    String filePath = this.tempYaml.toString();
+    ArgParser fromFile = new ArgParser(new String[]{
+        "-f", filePath, "--generate-only", "-o", "/tmp/out.yaml"});
+    fromFile.validate();
+    assertTrue(fromFile.isGenerateOnly());
+    assertEquals("/tmp/out.yaml", fromFile.getOutputFile());
   }
 
   @Test

@@ -6,6 +6,8 @@ Another way of doing that is using the new DB2-provided services, and this is wh
 
 It searches for the compilation target's object to extract its metadata and add the params to the compilation command. These extracted params are a suggestion; they are overridden by the Spec params if provided.
 
+The same inspection runs when **generating** a YAML spec (`--scan` / `--generate-only`) if a JDBC connection is available. Inspectable attributes are merged into the written `params:` map (below YAML / base overlay). Inspection reconstructs object attributes (`ACTGRP`, `STGMDL`, `TGTRLS`, `USRPRF`, …), not the original CRT* command — `OPTION`, `REPLACE`, and `TGTCCSID` come from MC defaults and conflict resolution.
+
 [Object Descriptor class](../src/main/java/com/github/kraudy/compiler/ObjectDescriptor.java) is the one that does the inspection. It works well for pgm, srvpgm and modules. It still needs some love for sql and dds objects.
 
 Services used
