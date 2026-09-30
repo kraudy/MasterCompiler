@@ -44,11 +44,21 @@ final class PinnedRepo {
     return dir;
   }
 
-  static void delete(Path root) throws IOException {
+  /* Best effort: git makes its object files read-only, which Windows refuses to delete as they are */
+  static void delete(Path root) {
     if (root == null || !Files.exists(root)) return;
+    try {
+      walkDelete(root);
+    } catch (IOException ignored) {
+      /* a leftover temp directory must not fail the test */
+    }
+  }
+
+  private static void walkDelete(Path root) throws IOException {
     Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
       @Override
       public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+        file.toFile().setWritable(true);
         Files.delete(file);
         return FileVisitResult.CONTINUE;
       }

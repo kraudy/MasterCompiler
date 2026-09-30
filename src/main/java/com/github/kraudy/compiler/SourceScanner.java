@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
@@ -87,7 +88,9 @@ public class SourceScanner {
       List<Path> files = walk
           .filter(Files::isRegularFile)
           .filter(p -> !shouldSkipPath(p.toString()))
-          .sorted()
+          /* Same order on every OS (Path order is case-insensitive on Windows): it decides which of two
+             same-named sources is kept and the order of independent targets */
+          .sorted(Comparator.comparing((Path p) -> root.relativize(p).toString().replace('\\', '/')))
           .collect(Collectors.toList());
 
       for (Path file : files) {
@@ -108,7 +111,7 @@ public class SourceScanner {
   private List<CandidateSource> scanIfs(IFSFile dir, String rootPath) throws Exception {
     List<CandidateSource> result = new ArrayList<>();
     scanIfsRecursive(dir, rootPath, result);
-    Collections.sort(result, (a, b) -> a.relativePath.compareToIgnoreCase(b.relativePath));
+    Collections.sort(result, (a, b) -> a.relativePath.compareTo(b.relativePath));  // same order as a local scan
     if (verbose) logger.info("Found {} source candidates under {}", result.size(), rootPath);
     return result;
   }

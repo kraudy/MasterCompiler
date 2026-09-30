@@ -358,6 +358,7 @@ public class ScanDepsTest {
       Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
         @Override
         public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+          file.toFile().setWritable(true);  // git objects are read-only (Windows)
           Files.deleteIfExists(file);
           return FileVisitResult.CONTINUE;
         }
