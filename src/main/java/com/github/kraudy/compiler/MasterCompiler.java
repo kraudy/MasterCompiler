@@ -239,7 +239,10 @@ public class MasterCompiler{
       if (isIncremental()) {
         if (!rebuildSet.contains(key)) {
           this.skippedCount++;
-          report.add(key.asString(), BuildReport.SKIPPED);
+          if (reporting()) {
+            resolveLibrary(key);
+            report.add(key.asString(), BuildReport.SKIPPED);
+          }
           if (verbose) logger.info("Skipping unchanged target: " + key.asString() + (diff ? key.getTimestmaps() : ""));
           continue;
         }
@@ -247,7 +250,10 @@ public class MasterCompiler{
 
       if (blocked.contains(key)) {
         if (verbose) logger.info("Blocked by a failed dependency: " + key.asString());
-        if (reporting()) report.add(key.asString(), BuildReport.BLOCKED).error = "Depends on a failed target";
+        if (reporting()) {
+          resolveLibrary(key);
+          report.add(key.asString(), BuildReport.BLOCKED).error = "Depends on a failed target";
+        }
         continue;
       }
 
@@ -355,6 +361,13 @@ public class MasterCompiler{
     }
   }
 
+  /* Report entries of targets that were not built use the same library naming as the built ones */
+  private void resolveLibrary(TargetKey key) {
+    try {
+      if (key.isCurLib()) key.setLibrary(getCurLIb());
+    } catch (Exception ignored) {}
+  }
+
   /* Targets never reached are listed as not built, then the report is written (--json) */
   private void finishReport() {
     if (compilationError) report.success = false;
@@ -364,9 +377,7 @@ public class MasterCompiler{
     for (BuildReport.TargetResult result : report.targets) reported.add(result.target);
     for (TargetKey key : globalSpec.targets.keySet()) {
       if (reported.contains(key.asString())) continue;
-      try {
-        if (key.isCurLib()) key.setLibrary(getCurLIb());  // same library naming as the built targets
-      } catch (Exception ignored) {}
+      resolveLibrary(key);
       report.add(key.asString(), BuildReport.NOT_BUILT);
     }
 

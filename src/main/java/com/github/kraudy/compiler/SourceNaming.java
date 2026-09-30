@@ -14,7 +14,8 @@ import com.github.kraudy.compiler.CompilationPattern.SourceType;
  *   {objectName}.{sourceType}                objectType defaulted
  * </pre>
  * Extra descriptive middle tokens (e.g. {@code hello2.nomain.module.rpgle})
- * are ignored; the object name is the first segment.
+ * are ignored; the object name is the first segment. A TOBi-style description after a
+ * dash is ignored too ({@code ART200-Work_with_article.pgm.sqlrpgle} is ART200).
  */
 public final class SourceNaming {
 
@@ -106,8 +107,10 @@ public final class SourceNaming {
       }
     }
 
-    // Object name = first segment (IBM i 10-char limit)
+    // Object name = first segment (IBM i 10-char limit), without a "-description" suffix
     String objectName = parts[0].toUpperCase(Locale.ROOT);
+    int dash = objectName.indexOf('-');
+    if (dash > 0) objectName = objectName.substring(0, dash);
     if (!OBJECT_NAME.matcher(objectName).matches()) {
       return Optional.empty();
     }

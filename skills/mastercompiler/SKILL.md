@@ -83,6 +83,20 @@ writes `build.cl`, the same plan as a CL command list. Values scan cannot infer
 (binding directories, data areas, CMD `PGM`, hooks) go in `mc-base.yaml` at the scan
 root. Copy members (`*.RPGLEINC`, `*.include.RPGLE`) are not targets.
 
+## TOBi / Bob projects
+
+```bash
+java -jar MC.jar --from-tobi /home/USER/project -k --json report.json      # build it as it is
+java -jar MC.jar --from-tobi project --generate-only -o build.yaml         # or convert once
+```
+
+MC reads the project's `Rules.mk` files and `iproj.json` (include path → `INCDIR`) and
+builds the same objects TOBi would: object types come from the rules, rule dependencies
+are added to MC's own. Targets MC cannot build (C, C++, COBOL, `CRTPGM` from modules,
+panel groups, menus, system triggers, make recipes) are logged as `Skipped ...`; check
+that list before relying on the build. Scanned file names may carry a TOBi description
+after a dash (`ART200-Work_with_article.pgm.sqlrpgle` is `ART200`).
+
 ## Import an existing library
 
 ```bash
