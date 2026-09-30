@@ -70,7 +70,11 @@ public class Utilities {
           .put(ParamCmd.OBJ, targetKey.getQualifiedObject(ValCmd.CURLIB))
           .put(ParamCmd.OBJTYPE, targetKey.getObjectType())
           .put(ParamCmd.COMMIT, ValCmd.NONE)
-          .put(ParamCmd.DBGVIEW, ValCmd.SOURCE);
+          .put(ParamCmd.DBGVIEW, ValCmd.SOURCE)
+          /* Run the RPG preprocessor first so host variables in /COPY members are visible to SQL;
+             it needs TGTCCSID(*JOB) to read UTF-8 stream files (RNS9380 otherwise) */
+          .put(ParamCmd.RPGPPOPT, "*LVL2")
+          .put(ParamCmd.COMPILEOPT, "TGTCCSID(*JOB)");
         break;
     
       case CRTBNDRPG:
@@ -109,7 +113,9 @@ public class Utilities {
       case RUNSQLSTM:
         targetKey.put(ParamCmd.COMMIT, ValCmd.NONE)
           .put(ParamCmd.DBGVIEW, ValCmd.SOURCE)
-          .put(ParamCmd.OPTION, ValCmd.LIST);
+          .put(ParamCmd.OPTION, ValCmd.LIST)
+          /* DECIMAL(9,2) must not depend on the job's decimal point (a comma in many locales) */
+          .put(ParamCmd.DECMPT, ValCmd.PERIOD);
         break;
 
       default:
@@ -343,6 +349,7 @@ public class Utilities {
       case TOSTMF:
       case DIR:
       case MSG:
+      case COMPILEOPT:
         return "''" + value + "''";
 
       /* List of IFS directories: quote each one (special values such as *NONE stay as they are) */

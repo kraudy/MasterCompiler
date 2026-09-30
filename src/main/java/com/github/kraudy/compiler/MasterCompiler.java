@@ -354,7 +354,15 @@ public class MasterCompiler{
     try {
       result.joblog = commandExec.getJoblogMessages(since);
       if (command != null) {
-        result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, compileBaseDir);
+        if (key.getCompilationCommand() == CompilationPattern.CompCmd.RUNSQLSTM) {
+          /* The listing also carries warnings (e.g. SQL7905 not journaled): read it only on failure */
+          if (!BuildReport.FAILED.equals(status)) return;
+          String stmf = key.containsStreamFile() ? key.getStreamFile() : null;
+          String spool = stmf != null ? new java.io.File(stmf).getName().split("\\.")[0] : key.getObjectName();
+          result.errors = EventFile.readSqlListing(connection, spool, since, stmf);
+        } else {
+          result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, compileBaseDir);
+        }
       }
     } catch (Exception e) {
       logger.info("Could not collect report details for {}: {}", key.asString(), e.getMessage());

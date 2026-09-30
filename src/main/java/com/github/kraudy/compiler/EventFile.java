@@ -174,6 +174,49 @@ public final class EventFile {
   private static final Pattern QSYS_MEMBER = Pattern.compile(
       "(?i)/QSYS\\.LIB/([^/]+)\\.LIB/([^/]+)\\.FILE/([^/]+)\\.MBR");
 
+  /*
+   * RUNSQLSTM has no event file: its errors are in the listing it spools (OPTION(*LIST)), named
+   * after the source, e.g. EMPLOYEE for employee.table. Message lines look like
+   *   SQL0104  30      15  Position 27 Token ( was not valid. Valid tokens: ) ,.
+   *   msg id, severity, record (= line of the stream file), text
+   */
+  public static List<BuildReport.CompileError> readSqlListing(Connection connection, String spoolName,
+      Timestamp since, String sourceFile) {
+    List<BuildReport.CompileError> errors = new ArrayList<BuildReport.CompileError>();
+    if (connection == null || spoolName == null || spoolName.isEmpty()) return errors;
+    String name = spoolName.toUpperCase();
+    if (name.length() > 10) name = name.substring(0, 10);
+
+    try (Statement stmt = connection.createStatement();
+         ResultSet rs = stmt.executeQuery(
+           "SELECT D.SPOOLED_DATA " +
+           "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER, STARTING_TIMESTAMP => '" + since + "')) S " +
+           "INNER JOIN TABLE(SYSTOOLS.SPOOLED_FILE_DATA(JOB_NAME => S.QUALIFIED_JOB_NAME, " +
+             "SPOOLED_FILE_NAME => S.SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER => S.SPOOLED_FILE_NUMBER)) D ON 1 = 1 " +
+           "WHERE S.SPOOLED_FILE_NAME = '" + name + "' AND S.USER_DATA = 'SQL'")) {
+      while (rs.next()) {
+        Matcher m = SQL_LISTING_MESSAGE.matcher(rs.getString(1) == null ? "" : rs.getString(1).trim());
+        if (!m.matches()) continue;
+        BuildReport.CompileError error = new BuildReport.CompileError();
+        error.file = sourceFile;
+        error.id = m.group(1);
+        error.severity = toInt(m.group(2));
+        error.line = toInt(m.group(3));
+        error.endLine = error.line;
+        error.message = m.group(4).trim();
+        Matcher position = SQL_POSITION.matcher(error.message);
+        if (position.find()) error.column = toInt(position.group(1));
+        errors.add(error);
+      }
+    } catch (SQLException e) {
+      logger.info("Could not read SQL listing {}: {}", name, e.getMessage());
+    }
+    return errors;
+  }
+
+  private static final Pattern SQL_LISTING_MESSAGE = Pattern.compile("^(SQ[A-Z0-9]{5})\\s+(\\d{1,2})\\s+(\\d+)\\s+(.*)$");
+  private static final Pattern SQL_POSITION = Pattern.compile("Position (\\d+)");
+
   /* First record is "TIMESTAMP 0 yyyyMMddHHmmss"; the member must not predate the target build */
   private static boolean isFresh(List<String> records, Timestamp since) {
     if (since == null) return true;

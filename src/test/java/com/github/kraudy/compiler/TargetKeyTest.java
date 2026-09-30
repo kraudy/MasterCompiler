@@ -104,8 +104,8 @@ public class TargetKeyTest {
 
     assertEquals(
       "CRTSQLRPGI OBJ(*CURLIB/SQLHELLO) SRCSTMF(''/home/sources/SQLHELLO.SQLRPGLE'') " +
-      "COMMIT(*NONE) OBJTYPE(*PGM) TEXT(''Sqlrpgle compilation test'') OPTION(*EVENTF) TGTRLS(V7R5M0) REPLACE(*YES) " +
-      "DBGVIEW(*SOURCE) USRPRF(*USER) CVTCCSID(*JOB)", cmd);
+      "COMMIT(*NONE) OBJTYPE(*PGM) TEXT(''Sqlrpgle compilation test'') OPTION(*EVENTF) RPGPPOPT(*LVL2) TGTRLS(V7R5M0) REPLACE(*YES) " +
+      "DBGVIEW(*SOURCE) USRPRF(*USER) CVTCCSID(*JOB) COMPILEOPT(''TGTCCSID(*JOB)'')", cmd);
   }
 
   @Test
@@ -205,7 +205,7 @@ public class TargetKeyTest {
       .getCommandString();
     
     assertEquals(
-      "RUNSQLSTM SRCSTMF(''/home/sources/SQLHELLO.SQL'') COMMIT(*NONE) OPTION(*LIST) TGTRLS(V7R5M0) DBGVIEW(*SOURCE)", cmd);
+      "RUNSQLSTM SRCSTMF(''/home/sources/SQLHELLO.SQL'') COMMIT(*NONE) DECMPT(*PERIOD) OPTION(*LIST) TGTRLS(V7R5M0) DBGVIEW(*SOURCE)", cmd);
   }
 
   @Test
