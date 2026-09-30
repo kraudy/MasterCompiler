@@ -265,6 +265,9 @@ public class McpServer {
   }
 
   private BuildSpec loadSpec() throws Exception {
+    if (parser.hasTobi()) {
+      return new TobiConverter(parser.isVerbose()).convert(parser.getTobiRoot(), parser.getLibrary());
+    }
     if (parser.hasScan()) {
       return new SpecGenerator(system, connection, parser.isDebug(), parser.isVerbose())
           .generate(parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
@@ -273,6 +276,7 @@ public class McpServer {
   }
 
   private String specName() {
+    if (parser.hasTobi()) return parser.getTobiRoot();
     return parser.hasScan() ? parser.getScanRoot() : parser.getYamlFile();
   }
 

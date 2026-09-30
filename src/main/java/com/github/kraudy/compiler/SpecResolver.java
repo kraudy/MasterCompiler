@@ -74,6 +74,10 @@ public final class SpecResolver {
         continue;
       }
       if (isIdentity(key, param, value)) continue;
+      if (param == ParamCmd.INCDIR) {  // list of quoted directories -> plain list, quoted again on load
+        out.put(param, value.replace("'", "").trim());
+        continue;
+      }
       out.put(param, CommandStringParser.stripClQuotes(value));
     }
     if (hasSrcstmf && !out.containsKey(ParamCmd.SRCSTMF)) {

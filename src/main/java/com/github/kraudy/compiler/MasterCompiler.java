@@ -551,7 +551,10 @@ public class MasterCompiler{
 
         BuildSpec generated;
         String scanRootComment = null;
-        if (parser.hasScan()) {
+        if (parser.hasTobi()) {
+          generated = new TobiConverter(parser.isVerbose()).convert(parser.getTobiRoot(), parser.getLibrary());
+          scanRootComment = parser.getTobiRoot();
+        } else if (parser.hasScan()) {
           SpecGenerator generator = new SpecGenerator(
               system, connection, parser.isDebug(), parser.isVerbose());
           generated = generator.generate(
@@ -573,7 +576,13 @@ public class MasterCompiler{
       connection = new AS400JDBCDataSource(system).getConnection();
 
       BuildSpec spec;
-      if (parser.hasScan()) {
+      if (parser.hasTobi()) {
+        spec = new TobiConverter(parser.isVerbose()).convert(parser.getTobiRoot(), parser.getLibrary());
+        if (parser.getOutputFile() != null) {
+          SpecWriter.writeToFile(spec, parser.getOutputFile(), parser.getTobiRoot());
+          logger.info("Generated YAML: {}", parser.getOutputFile());
+        }
+      } else if (parser.hasScan()) {
         SpecGenerator generator = new SpecGenerator(
             system, connection, parser.isDebug(), parser.isVerbose());
         spec = generator.generate(

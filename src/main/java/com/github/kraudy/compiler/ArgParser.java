@@ -22,6 +22,7 @@ public class ArgParser {
   private enum Option {
     FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
     SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
+    FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
     OUTPUT        ("o", "output",        Kind.VALUE, "Write generated YAML to this path"),
@@ -92,6 +93,7 @@ public class ArgParser {
   private boolean mcp;
   private boolean keepGoing;
   private String importSelection;
+  private String tobiRoot;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -221,6 +223,9 @@ public class ArgParser {
       case IMPORT:
         importSelection = value;
         break;
+      case FROM_TOBI:
+        tobiRoot = value;
+        break;
       default:
         throw new IllegalStateException("Option does not take a value: " + opt);
     }
@@ -234,8 +239,10 @@ public class ArgParser {
     boolean hasFile = yamlFile != null;
     boolean hasScan = scanRoot != null;
 
+    boolean hasTobi = tobiRoot != null;
+
     if (importSelection != null) {
-      if (hasFile || hasScan || mcp || generateOnly) {
+      if (hasFile || hasScan || hasTobi || mcp || generateOnly) {
         throw new IllegalArgumentException("--import takes only -o <dir>, --lib, -x, -v");
       }
       if (outputFile == null) {
@@ -244,13 +251,14 @@ public class ArgParser {
       return;
     }
 
-    if (!hasFile && !hasScan) {
+    int sources = (hasFile ? 1 : 0) + (hasScan ? 1 : 0) + (hasTobi ? 1 : 0);
+    if (sources == 0) {
       throw new IllegalArgumentException(
-          "Required: -f|--file <YAML> or --scan <source-root>");
+          "Required: -f|--file <YAML>, --scan <source-root> or --from-tobi <project-root>");
     }
-    if (hasFile && hasScan) {
+    if (sources > 1) {
       throw new IllegalArgumentException(
-          "Use either -f|--file or --scan, not both");
+          "Use only one of -f|--file, --scan or --from-tobi");
     }
     if (generateOnly && outputFile == null) {
       throw new IllegalArgumentException(
@@ -310,6 +318,14 @@ public class ArgParser {
 
   public boolean hasScan() {
     return scanRoot != null;
+  }
+
+  public boolean hasTobi() {
+    return tobiRoot != null;
+  }
+
+  public String getTobiRoot() {
+    return tobiRoot;
   }
 
   public boolean hasFile() {

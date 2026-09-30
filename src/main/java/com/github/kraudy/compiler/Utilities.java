@@ -344,6 +344,15 @@ public class Utilities {
       case DIR:
       case MSG:
         return "''" + value + "''";
+
+      /* List of IFS directories: quote each one (special values such as *NONE stay as they are) */
+      case INCDIR:
+        if (value.contains("'")) return value;
+        List<String> dirs = new ArrayList<>();
+        for (String dir : value.trim().split("\\s+")) {
+          dirs.add(dir.startsWith("*") ? dir : "''" + dir + "''");
+        }
+        return String.join(" ", dirs);
     
       case MODULE:
       case OBJ:
