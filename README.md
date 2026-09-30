@@ -20,6 +20,14 @@ Java 8.
 
 ---
 
+### Download
+
+```bash
+curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar
+```
+
+Runs anywhere Java 8+ is installed, including PASE on the IBM i. Every release is on the [releases page](https://github.com/kraudy/MasterCompiler/releases).
+
 ### Build 
 
 * `git clone git@github.com:kraudy/MasterCompiler.git`

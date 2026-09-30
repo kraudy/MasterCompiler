@@ -1,0 +1,43 @@
+name: Release
+
+# Push a tag like v1.2.0 to publish the jar as a GitHub release:
+#   git tag v1.2.0 && git push origin v1.2.0
+# Latest jar: https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'   # builds Java 8 bytecode (maven.compiler.target 1.8)
+          cache: maven
+
+      - name: Build and run unit tests
+        run: ./mvnw -B clean package
+
+      - name: Name the jar
+        run: |
+          cp target/MasterCompiler-1.0-SNAPSHOT.jar MasterCompiler.jar   # stable name for releases/latest/download
+          cp target/MasterCompiler-1.0-SNAPSHOT.jar .                    # name earlier releases used
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            MasterCompiler.jar MasterCompiler-1.0-SNAPSHOT.jar \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
