@@ -118,6 +118,19 @@ public class SpecGenerator {
       if (verbose) {
         logger.info("Target: {} ← {}", key.asString(), candidate.relativePath);
       }
+
+      /* NAME.srvpgm.rpgle: the module plus a service program made of it (unless binder source exists) */
+      if (name.ownServiceProgram) {
+        TargetKey srvKey = new TargetKey(library + "." + name.objectName + ".SRVPGM.BND");
+        if (!spec.targets.containsKey(srvKey)) {
+          BuildSpec.TargetSpec srvSpec = new BuildSpec.TargetSpec();
+          srvSpec.params.put(ParamCmd.MODULE, name.objectName);
+          srvSpec.params.put(ParamCmd.EXPORT, "*ALL");
+          spec.targets.put(srvKey, srvSpec);
+          added++;
+          if (verbose) logger.info("Target: {} ← module {} (EXPORT(*ALL))", srvKey.asString(), name.objectName);
+        }
+      }
     }
 
     if (added == 0) {

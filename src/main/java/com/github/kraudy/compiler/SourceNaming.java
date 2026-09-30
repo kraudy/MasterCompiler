@@ -1,6 +1,8 @@
 package com.github.kraudy.compiler;
 
 import java.util.Locale;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -30,11 +32,18 @@ public final class SourceNaming {
     public final String objectName;
     public final ObjectType objectType;
     public final SourceType sourceType;
+    /* NAME.srvpgm.rpgle: a NOMAIN module that is also its own service program (EXPORT(*ALL)) */
+    public final boolean ownServiceProgram;
 
     public ParsedName(String objectName, ObjectType objectType, SourceType sourceType) {
+      this(objectName, objectType, sourceType, false);
+    }
+
+    public ParsedName(String objectName, ObjectType objectType, SourceType sourceType, boolean ownServiceProgram) {
       this.objectName = objectName;
       this.objectType = objectType;
       this.sourceType = sourceType;
+      this.ownServiceProgram = ownServiceProgram;
     }
 
     public String toTargetKey(String library) {
@@ -73,19 +82,34 @@ public final class SourceNaming {
       }
     }
 
-    // Last segment = source type
+    // Last segment = source type, or a TOBi extension that names the object type too (ARTICLE.pf)
     SourceType sourceType;
-    try {
-      sourceType = SourceType.fromString(parts[parts.length - 1]);
-    } catch (IllegalArgumentException e) {
-      return Optional.empty();
+    ObjectType objectType = null;
+    String last = parts[parts.length - 1].toUpperCase(Locale.ROOT);
+    if (TOBI_EXTENSIONS.containsKey(last)) {
+      sourceType = TOBI_EXTENSIONS.get(last).sourceType;
+      objectType = TOBI_EXTENSIONS.get(last).objectType;
+    } else {
+      try {
+        sourceType = SourceType.fromString(parts[parts.length - 1]);
+      } catch (IllegalArgumentException e) {
+        return Optional.empty();
+      }
     }
 
-    ObjectType objectType = null;
     int objectNameEnd = parts.length - 1; // exclusive end index for name parts
 
+    /* NAME.srvpgm.rpgle: build it as a module, the scan adds the service program */
+    boolean ownServiceProgram = false;
+    if (objectType == null && parts.length >= 3 && "srvpgm".equalsIgnoreCase(parts[parts.length - 2])
+        && isValidCombination(sourceType, ObjectType.MODULE)) {
+      objectType = ObjectType.MODULE;
+      objectNameEnd = parts.length - 2;
+      ownServiceProgram = true;
+    }
+
     // Second-to-last may be object type
-    if (parts.length >= 3) {
+    if (objectType == null && parts.length >= 3) {
       try {
         ObjectType candidate = ObjectType.valueOf(parts[parts.length - 2].toUpperCase(Locale.ROOT));
         if (isValidCombination(sourceType, candidate)) {
@@ -116,7 +140,27 @@ public final class SourceNaming {
     }
 
     // Descriptive middles (parts[1 .. objectNameEnd)) are intentionally ignored
-    return Optional.of(new ParsedName(objectName, objectType, sourceType));
+    return Optional.of(new ParsedName(objectName, objectType, sourceType, ownServiceProgram));
+  }
+
+  /* Extensions TOBi / Code for IBM i use that imply the object type */
+  private static final Map<String, ParsedName> TOBI_EXTENSIONS = new HashMap<String, ParsedName>();
+  static {
+    tobi("PF", ObjectType.PF, SourceType.DDS);
+    tobi("LF", ObjectType.LF, SourceType.DDS);
+    tobi("DSPF", ObjectType.DSPF, SourceType.DDS);
+    tobi("PRTF", ObjectType.PRTF, SourceType.DDS);
+    tobi("TABLE", ObjectType.TABLE, SourceType.SQL);
+    tobi("VIEW", ObjectType.VIEW, SourceType.SQL);
+    tobi("INDEX", ObjectType.INDEX, SourceType.SQL);
+    tobi("SQLPRC", ObjectType.PROCEDURE, SourceType.SQL);
+    tobi("SQLUDF", ObjectType.FUNCTION, SourceType.SQL);
+    tobi("SQLTRG", ObjectType.TRIGGER, SourceType.SQL);
+    tobi("SQLSEQ", ObjectType.SEQUENCE, SourceType.SQL);
+  }
+
+  private static void tobi(String extension, ObjectType objectType, SourceType sourceType) {
+    TOBI_EXTENSIONS.put(extension, new ParsedName(extension, objectType, sourceType));
   }
 
   /**

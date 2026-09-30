@@ -1152,6 +1152,11 @@ public class DependencyAwareness {
         case CRTRPGMOD:
           getBndDirDependencies(target, sourceCode, logs);
           break;
+
+        case CRTBNDCL:
+        case CRTCLMOD:
+          getBndSrvPgmDependencies(target, sourceCode, logs);
+          break;
       }
 
       /* Non-target /copy|/include files attach to the consumer for --diff */
@@ -1291,6 +1296,37 @@ public class DependencyAwareness {
       if (verbose) logger.info("Detected OVRDBF: {} -> {}", overridden, actual);
   }
   }
+
+  /* CL DCLPRCOPT BNDSRVPGM((CALLSTACK) (LIB/OTHER *IMMED)): bind-time service programs, built first */
+  private void getBndSrvPgmDependencies(TargetKey target, String sourceCode, List<String> logs) {
+    Matcher start = BNDSRVPGM_START.matcher(sourceCode);
+    while (start.find()) {
+      int depth = 1;
+      int i = start.end();
+      for (; i < sourceCode.length() && depth > 0; i++) {
+        char c = sourceCode.charAt(i);
+        if (c == '(') depth++;
+        if (c == ')') depth--;
+      }
+      Matcher names = BNDSRVPGM_NAME.matcher(sourceCode.substring(start.end(), Math.max(start.end(), i - 1)));
+      while (names.find()) {
+        String name = names.group(1).toUpperCase();
+        TargetKey srv = keyLookup.get(name + "." + ObjectType.SRVPGM.name());
+        if (srv == null || !srv.isServiceProgram()) {
+          if (verbose) logs.add("Referenced BNDSRVPGM not a build target, ignored: " + name + " (in " + target.asString() + ")");
+          continue;
+        }
+        target.addChild(srv);
+        srv.addFather(target);
+        if (verbose) logs.add("BNDSRVPGM dependency: " + target.asString() + " binds " + srv.asString());
+      }
+    }
+  }
+
+  private static final Pattern BNDSRVPGM_START = Pattern.compile("\\bBNDSRVPGM\\s*\\(", Pattern.CASE_INSENSITIVE);
+  /* Object names inside the list; special values (*NONE, *IMMED, *DEFER) are skipped */
+  private static final Pattern BNDSRVPGM_NAME = Pattern.compile(
+      "(?:^|[\\s(])(?:[A-Z0-9$#@_]+/)?([A-Z$#@][A-Z0-9$#@_]{0,9})(?=[\\s)]|$)", Pattern.CASE_INSENSITIVE);
 
   private void getBndDirDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> bndDirNames = new HashSet<>();

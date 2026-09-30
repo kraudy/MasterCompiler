@@ -126,7 +126,9 @@ public class Utilities {
     switch (targetKey.getCompilationCommand()) {
       case CRTCMD:
         targetKey.put(ParamCmd.CMD, targetKey.getQualifiedObject())
-          .put(ParamCmd.CMD, targetKey.getQualifiedObject(ValCmd.CURLIB));
+          .put(ParamCmd.CMD, targetKey.getQualifiedObject(ValCmd.CURLIB))
+          /* Processing program defaults to the command's name, as in TOBi; PGM in the spec wins */
+          .put(ParamCmd.PGM, targetKey.getObjectName());
         break;
     
       case CRTBNDDIR:
