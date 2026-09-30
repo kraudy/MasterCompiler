@@ -31,6 +31,9 @@ public class ArgParser {
     CLEAN         ("c", "clean",         Kind.FLAG,  "Delete created objects after build"),
     DRY_RUN       (null, "dry-run",      Kind.FLAG,  "Show commands without executing"),
     DIFF          (null, "diff",         Kind.FLAG,  "Only build changed objects"),
+    SINCE         (null, "since",        Kind.VALUE, "Only build targets whose sources changed since this git ref, plus dependents"),
+    PUSH          (null, "push",         Kind.VALUE, "Upload the local git repo's sources to this IFS directory and build from there"),
+    MCP           (null, "mcp",          Kind.FLAG,  "Run as an MCP server on stdio (tools: build, plan, impact, joblog)"),
     NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration"),
     JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 
@@ -82,6 +85,9 @@ public class ArgParser {
   private boolean diff;
   private boolean noMigrate;
   private String jsonReport;
+  private String since;
+  private String push;
+  private boolean mcp;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -175,6 +181,7 @@ public class ArgParser {
       case DIFF:          diff = true; break;
       case NO_MIGRATE:    noMigrate = true; break;
       case GENERATE_ONLY: generateOnly = true; break;
+      case MCP:           mcp = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
     }
@@ -199,6 +206,12 @@ public class ArgParser {
         break;
       case JSON:
         jsonReport = value;
+        break;
+      case SINCE:
+        since = value;
+        break;
+      case PUSH:
+        push = value;
         break;
       default:
         throw new IllegalStateException("Option does not take a value: " + opt);
@@ -228,6 +241,22 @@ public class ArgParser {
     if (generateOnly && jsonReport != null) {
       throw new IllegalArgumentException(
           "--json reports a build; it cannot be used with --generate-only");
+    }
+    if (since != null && diff) {
+      throw new IllegalArgumentException("Use either --diff or --since, not both");
+    }
+    if (since != null && generateOnly) {
+      throw new IllegalArgumentException("--since selects targets to build; it cannot be used with --generate-only");
+    }
+    if (mcp && (generateOnly || jsonReport != null || since != null || diff || dryRun || clean)) {
+      throw new IllegalArgumentException(
+          "--mcp takes -f|--scan, --push, --lib, --base, --no-migrate, -x, -v; builds are chosen per tool call");
+    }
+    if (push != null && !push.startsWith("/")) {
+      throw new IllegalArgumentException("--push needs an absolute IFS directory: " + push);
+    }
+    if (push != null && generateOnly) {
+      throw new IllegalArgumentException("--push uploads sources for a build; it cannot be used with --generate-only");
     }
     if (hasFile && !isValidFile(yamlFile)) {
       throw new IllegalArgumentException(
@@ -323,6 +352,20 @@ public class ArgParser {
 
   public boolean isNoMigrate() {
     return noMigrate;
+  }
+
+  /** {@code --since} git ref, or null for a full (or --diff) build. */
+  public String getSince() {
+    return since;
+  }
+
+  public boolean isMcp() {
+    return mcp;
+  }
+
+  /** {@code --push} IFS directory, or null when sources are already on the IBM i. */
+  public String getPush() {
+    return push;
   }
 
   /** {@code --json} report path, or null when no report is requested. */

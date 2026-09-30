@@ -86,7 +86,9 @@ root. Copy members (`*.RPGLEINC`, `*.include.RPGLE`) are not targets.
 java -jar MC.jar -f build.yaml                       # build every target
 java -jar MC.jar -f build.yaml --dry-run --json plan.json   # plan only: connects, compiles nothing
 java -jar MC.jar -f build.yaml --json report.json    # build + machine-readable report
-java -jar MC.jar -f build.yaml --diff                # changed sources + dependents only
+java -jar MC.jar -f build.yaml --since origin/master # what git says changed + dependents
+java -jar MC.jar -f build.yaml --push /home/USER/build --json report.json   # upload, then build
+java -jar MC.jar -f build.yaml --diff                # sources newer than their objects + dependents
 java -jar MC.jar -f build.yaml -c                    # delete built objects at the end
 ```
 
@@ -94,6 +96,25 @@ Flags: `-x` debug, `-v` verbose (combine as `-xv`), `--no-migrate` (skip
 member ↔ stream file migration), `--lib <name>` (library for scanned targets).
 
 **Exit codes:** `0` success, `1` a target or command failed, `2` invalid arguments.
+
+### Incremental builds
+
+- `--since <git-ref>`: seeds are targets whose source file or any `/COPY`/`/INCLUDE`d
+  file changed since the ref (committed, uncommitted and untracked files); every
+  dependent is added. Use it in CI and agent loops. It assumes the objects from the
+  ref's build already exist.
+- `--diff`: compares source modification times with object creation times. A fresh
+  clone makes every file look new, so prefer `--since` in CI.
+
+### Building from a laptop or CI (`--push <ifs-dir>`)
+
+Relative `SRCSTMF` paths are resolved on the IBM i, so the sources must be in the IFS.
+`--push` uploads the local git repository (every tracked and non-ignored file, or only
+the changed ones with `--since`) to `<ifs-dir>` over MC's own connection, keeping the
+repository layout, as UTF-8 stream files. It then runs `CHGCURDIR` to the pushed copy
+of the spec's directory before the spec's own `before:` hooks. Remote mode needs `.env`
+(`IBMI_HOSTNAME`, `IBMI_USERNAME`, `IBMI_PASSWORD`). Do not also put a `ChgCurDir` in
+the spec: it would run after MC's and point the job back at the old directory.
 
 ## The build report (`--json <file>`)
 
@@ -110,25 +131,56 @@ member ↔ stream file migration), `--lib <name>` (library for scanned targets).
     { "target": "MYLIB.ART202.PGM.RPGLE", "status": "not_built" } ] }
 ```
 
-- `status`: `built`, `failed`, `skipped` (`--diff`, unchanged), `planned` (`--dry-run`),
+- `status`: `built`, `failed`, `skipped` (`--since`/`--diff`, unchanged), `planned` (`--dry-run`),
   `not_built` (never reached: MC stops at the first failed target).
 - `errors` come from the compiler's EVFEVENT member (needs `OPTION(*EVENTF)`, the
-  default). `file` is relative to the spec's directory; errors inside copy members
-  point at the copy member's own file and line.
+  default). `file` is relative to the spec's directory (or the pushed copy of it);
+  errors inside copy members point at the copy member's own file and line.
 - **Severity:** `00` informational (e.g. RNF7031 "not referenced"; many per
-  compile, safe to ignore), `10` warning, `20` error that may still create the object,
-  `30`+ errors that stop the compile. Fix `>= 30` first.
+  compile, safe to ignore), `10` warning. Anything above the compile's `GENLVL`
+  (default 10) stops the compile, so **severity `20` and up are the errors to fix**.
+  The compiler's final `RNS9308` summary record has line 0; skip it.
 - A top-level `error` means a failure outside any target (global hook, connection).
+
+## MCP server
+
+`java -jar MC.jar --mcp -f build.yaml` serves the spec over stdio (Model Context
+Protocol). One IBM i job stays open across calls, and the spec is re-read on each call.
+
+| Tool | Arguments | Returns |
+|------|-----------|---------|
+| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything | The build report above; `isError` when the build failed |
+| `plan` | same as `build` | The report with `planned` targets; compiles nothing |
+| `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
+| `joblog` | none | The job's messages since the previous `joblog` call |
+
+Run it **on the IBM i over SSH**, so it uses the SSH user's own job and no credentials
+file (the login banner goes to stderr, so stdio stays clean):
+
+```json
+{ "mcpServers": { "mastercompiler": {
+    "command": "ssh",
+    "args": ["-S", "/tmp/ibmi.sock", "USER@HOST",
+             "cd /home/USER/repo && java -jar MC.jar --mcp -f build.yaml 2>/dev/null"] } } }
+```
+
+Or **remotely** from the machine with the checkout, with `.env` in the working directory,
+pushing sources before each build:
+
+```json
+{ "mcpServers": { "mastercompiler": {
+    "command": "java",
+    "args": ["-jar", "MC.jar", "--mcp", "-f", "build.yaml", "--push", "/home/USER/build"] } } }
+```
 
 ## Edit–compile–fix loop
 
 1. Edit sources in a local checkout.
-2. Put them where the IBM i compiles from (`scp`/`rsync` over SSH, or `git pull` on
-   the IBM i).
-3. Run `java -jar MC.jar -f build.yaml --json report.json` (add `--diff` to limit it
-   to what changed).
-4. Exit code `0` → done. `1` → read the `failed` target's `errors` with severity
-   `>= 30`, fix those lines, repeat. Use `joblog` when `errors` is empty (for
+2. Build with the sources where the IBM i compiles from:
+   - remote: `java -jar MC.jar -f build.yaml --push /home/USER/build --since HEAD --json report.json`
+   - on the IBM i (sources already in the IFS): `java -jar MC.jar -f build.yaml --since HEAD --json report.json`
+3. Exit code `0` → done. `1` → read the `failed` target's `errors` with severity
+   `>= 20`, fix those lines, repeat. Use `joblog` when `errors` is empty (for
    example a binding or authority failure rather than a compile error).
 
 ## Gotchas
@@ -140,8 +192,6 @@ member ↔ stream file migration), `--lib <name>` (library for scanned targets).
 - **SQLRPGLE:** errors from the RPG step point at the precompiler's temporary member
   (`/QSYS.LIB/QTEMP.LIB/QSQLTEMP1.FILE/<name>.MBR`), not your source line. SQL
   precompile errors do point at the source.
-- **`--diff` compares file modification times with object creation times.** A fresh
-  `git clone` gives every file a new time, so the first `--diff` rebuilds everything.
 - DDS targets compile from source members; MC migrates the stream file to a member
   first, so their errors name the member (`LIB/QDSPFSRC(NAME)`).
 - Objects of types without `REPLACE` (PF, LF, BNDDIR, DTAARA, DTAQ, MSGF, SQL tables)

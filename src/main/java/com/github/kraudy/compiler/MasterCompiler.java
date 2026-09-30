@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.CompilationPattern.ValCmd;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400JDBCDataSource;
@@ -48,6 +50,11 @@ public class MasterCompiler{
   private boolean diff = false;     // Diff build flag
   private boolean noMigrate = false;  // Source migration
   private String jsonReport = null;   // --json <file>: machine-readable build report
+  private String since = null;        // --since <git-ref>: build what git says changed, plus dependents
+  private String push = null;         // --push <ifs-dir>: upload local sources there before building
+  private String compileBaseDir = null; // where the IBM i job resolves relative SRCSTMF (spec dir or pushed dir)
+  private boolean collectReport = false; // keep the report in memory (MCP) even without --json
+  private Set<String> changedFiles = null; // explicit changed sources (MCP build/plan files), like --since
 
   private boolean compilationError = false;
   private int builtCount = 0;
@@ -90,6 +97,36 @@ public class MasterCompiler{
     this.jsonReport = jsonReport;
   }
 
+  public void setSince(String since) {
+    this.since = since;
+  }
+
+  public void setPush(String push) {
+    this.push = push;
+  }
+
+  public void setCollectReport(boolean collectReport) {
+    this.collectReport = collectReport;
+  }
+
+  /* Canonical absolute paths of changed sources; targets built = those + dependents */
+  public void setChangedFiles(Set<String> changedFiles) {
+    this.changedFiles = changedFiles;
+  }
+
+  public BuildReport getReport() {
+    return report;
+  }
+
+  private boolean reporting() {
+    return jsonReport != null || collectReport;
+  }
+
+  /* --diff and --since both build a rebuild set and skip the rest */
+  private boolean isIncremental() {
+    return diff || since != null || changedFiles != null;
+  }
+
   public void build() {
 
     /* Init command executor */
@@ -99,7 +136,7 @@ public class MasterCompiler{
     if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
 
     /* Init dependency awareness */
-    if (diff) depAwareness = new DependencyAwareness(system, debug, verbose);
+    if (isIncremental()) depAwareness = new DependencyAwareness(system, debug, verbose);
 
 
     /* Init source descriptor */
@@ -109,7 +146,15 @@ public class MasterCompiler{
     /* Init object descriptor */
     odes = new ObjectDescriptor(connection, debug, verbose);
 
+    compileBaseDir = baseDir;
+
     try {
+      /* Push local sources to the IFS; the job then compiles from that copy */
+      if (push != null) {
+        compileBaseDir = SourcePusher.push(system, baseDir, push, since, changedFiles, dryRun, verbose);
+        globalSpec.before.add(0, new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, compileBaseDir));
+      }
+
       /* Global before */
       if(!globalSpec.before.isEmpty()){
         if (verbose) logger.info("Executing global before: " + globalSpec.before.size() + " commands found");
@@ -118,9 +163,10 @@ public class MasterCompiler{
 
       if(verbose) logger.info(showLibraryList());
 
-      if (diff) {
+      if (isIncremental()) {
         depAwareness.detectDependencies(globalSpec);
-        collectDiffRebuildSet();
+        if (since != null || changedFiles != null) collectSinceRebuildSet();
+        else collectDiffRebuildSet();
       }
 
       /* Build each target */
@@ -170,7 +216,7 @@ public class MasterCompiler{
       /* Show chain of commands */
       if (verbose) logger.info("Chain of commands: {}", commandExec.getExecutionChain());
 
-      if (jsonReport != null) writeReport();
+      if (reporting()) finishReport();
     }
 
   }
@@ -181,12 +227,12 @@ public class MasterCompiler{
       TargetKey key = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
 
-      /* Skip target if diff and not in the rebuild set (seed + fathers) */
-      if (diff) {
+      /* Skip target if incremental and not in the rebuild set (seed + fathers) */
+      if (isIncremental()) {
         if (!rebuildSet.contains(key)) {
           this.skippedCount++;
           report.add(key.asString(), BuildReport.SKIPPED);
-          if (verbose) logger.info("Skipping unchanged target: " + key.asString() + key.getTimestmaps());
+          if (verbose) logger.info("Skipping unchanged target: " + key.asString() + (diff ? key.getTimestmaps() : ""));
           continue;
         }
       }
@@ -194,7 +240,7 @@ public class MasterCompiler{
       this.builtCount++;
       if (verbose) logger.info("Building: " + key.asString());
 
-      Timestamp targetStart = jsonReport != null ? commandExec.getCurrentTime() : null;
+      Timestamp targetStart = reporting() ? commandExec.getCurrentTime() : null;
       String command = null;
 
       try{
@@ -225,7 +271,7 @@ public class MasterCompiler{
         if (!noMigrate) migrator.migrateSource(key);
 
         /* Execute compilation command */
-        if (jsonReport != null) command = CommandStringParser.toPasteableCommand(key);
+        if (reporting()) command = CommandStringParser.toPasteableCommand(key);
         commandExec.executeCommand(key);
 
         /* Per target success */
@@ -240,12 +286,12 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.after);
         } 
 
-        if (jsonReport != null) reportTarget(key, dryRun ? BuildReport.PLANNED : BuildReport.BUILT, command, null, targetStart);
+        if (reporting()) reportTarget(key, dryRun ? BuildReport.PLANNED : BuildReport.BUILT, command, null, targetStart);
 
       } catch (CompilerException e){
         compilationError = true;
         if (verbose) logger.error("Target compilation failed: " + key.asString());
-        if (jsonReport != null) reportTarget(key, BuildReport.FAILED, command, e.getMessage(), targetStart);
+        if (reporting()) reportTarget(key, BuildReport.FAILED, command, e.getMessage(), targetStart);
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
@@ -258,7 +304,7 @@ public class MasterCompiler{
       } catch (Exception e){
         compilationError = true;
         if (verbose) logger.error("Unhandled exception in Target: " + key.asString());
-        if (jsonReport != null) reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
+        if (reporting()) reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
 
         throw e; // Raise
 
@@ -279,16 +325,15 @@ public class MasterCompiler{
     try {
       result.joblog = commandExec.getJoblogMessages(since);
       if (command != null) {
-        String baseDir = globalSpec != null ? globalSpec.getBaseDirectory() : null;
-        result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, baseDir);
+        result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, compileBaseDir);
       }
     } catch (Exception e) {
       logger.info("Could not collect report details for {}: {}", key.asString(), e.getMessage());
     }
   }
 
-  /* Targets never reached are listed as not built, then the report is written */
-  private void writeReport() {
+  /* Targets never reached are listed as not built, then the report is written (--json) */
+  private void finishReport() {
     if (compilationError) report.success = false;
     report.dryRun = dryRun;
 
@@ -302,6 +347,7 @@ public class MasterCompiler{
       report.add(key.asString(), BuildReport.NOT_BUILT);
     }
 
+    if (jsonReport == null) return;
     try {
       report.writeToFile(jsonReport);
       logger.info("Build report: {}", jsonReport);
@@ -353,6 +399,34 @@ public class MasterCompiler{
     if (verbose) {
       logger.info("Diff rebuild set: " + rebuildSet.size() + " of " + globalSpec.targets.size());
     }
+  }
+
+  /* Seeds: targets whose source stream file or any attached /copy|/include changed since the git ref */
+  private void collectSinceRebuildSet() {
+    Set<String> changed = changedFiles != null
+        ? changedFiles
+        : GitChanges.changedFiles(globalSpec.getBaseDirectory(), since);
+    Set<TargetKey> seeds = new HashSet<TargetKey>();
+    for (TargetKey key : globalSpec.targets.keySet()) {
+      if (sourceChanged(key, changed)) {
+        seeds.add(key);
+        if (verbose) logger.info("Since seed: " + key.asString());
+      }
+    }
+    rebuildSet = DiffPlanner.expand(globalSpec, seeds);
+    logger.info("{}: {} changed files, rebuilding {} of {} targets",
+        since != null ? "Since " + since : "Changed files", changed.size(), rebuildSet.size(), globalSpec.targets.size());
+  }
+
+  private boolean sourceChanged(TargetKey key, Set<String> changed) {
+    if (key.containsStreamFile()) {
+      String source = SourceDescriptor.resolveFullPath(globalSpec.getBaseDirectory(), key.getStreamFile());
+      if (changed.contains(GitChanges.canonical(source))) return true;
+    }
+    for (String include : key.getIncludeFiles()) {
+      if (changed.contains(GitChanges.canonical(include))) return true;
+    }
+    return false;
   }
 
   private String showLibraryList() throws SQLException{
@@ -409,6 +483,12 @@ public class MasterCompiler{
 
       ArgParser parser = new ArgParser(args);
       parser.validate();
+
+      /* MCP server: one IBM i job kept across tool calls; stdout becomes the protocol channel */
+      if (parser.isMcp()) {
+        new McpServer(parser).serve();
+        return exitCode;
+      }
 
       /* Generate-only can run without IBMi when scanning a local tree or rewriting a spec */
       if (parser.isGenerateOnly()) {
@@ -486,6 +566,8 @@ public class MasterCompiler{
             parser.isNoMigrate()
         );
       compiler.setJsonReport(parser.getJsonReport());
+      compiler.setSince(parser.getSince());
+      compiler.setPush(parser.getPush());
       compiler.build();
       if (compiler.foundCompilationError()) exitCode = 1;
 
