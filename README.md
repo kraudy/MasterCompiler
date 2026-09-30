@@ -183,6 +183,15 @@ Fully transparent and traceble flow of execution and changes.
 
 [Traceability docs](./docs/Traceability.md)
 
+## Agent skills
+
+Skills for AI coding agents live in [`skills/`](./skills):
+
+* [`mastercompiler`](./skills/mastercompiler/SKILL.md): specs, scan, `--dry-run`, `--json` reports and the edit-compile-fix loop.
+* [`ibm-i-pase`](./skills/ibm-i-pase/SKILL.md): working on an IBM i over SSH/PASE (CL, SQL, IFS, CCSID, EVFEVENT).
+
+Copy a skill folder into your agent's skills directory (for Claude Code: `~/.claude/skills/`).
+
 ## Contributing
 
 Here is the rule: **You want to reduce complexity, increase readability, and provide functionality.**
