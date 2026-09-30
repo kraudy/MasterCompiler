@@ -11,6 +11,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +30,14 @@ import org.slf4j.LoggerFactory;
  *             version, file id, annot class, stmt line, start line, start col,
  *             end line, end col, msg id, sev char, sev num, msg length, msg text
  * File ids restart with every PROCESSOR block.
+ *
+ * SQLRPGLE: the SQL precompiler's block has FILEID 999 (its output, the temporary member
+ * QTEMP/QSQLTEMP1(OBJECT)) and EXPANSION records for the code it inserted:
+ *   EXPANSION 0 001 000333 000333 999 000423 000431
+ *             version, source file id, source start, source end, 999, temp start, temp end
+ * The RPG compiler then compiles the temporary member, so its errors are mapped back:
+ * a temp line inside an expansion becomes the SQL statement's source line, any other temp
+ * line is shifted back by the size of the expansions before it.
  */
 public final class EventFile {
   private static final Logger logger = LoggerFactory.getLogger(EventFile.class);
@@ -66,7 +76,9 @@ public final class EventFile {
 
   public static List<BuildReport.CompileError> parse(List<String> records, String baseDir) {
     List<BuildReport.CompileError> errors = new ArrayList<BuildReport.CompileError>();
-    Map<String, String> files = new HashMap<String, String>();
+    Map<String, String> files = new HashMap<String, String>();                  // file id -> name, per processor
+    Map<String, SqlExpansion> expansions = new HashMap<String, SqlExpansion>(); // temp member -> original source
+    SqlExpansion precompile = null;  // set while reading the SQL precompiler's block
 
     for (String record : records) {
       if (record == null) continue;
@@ -74,6 +86,7 @@ public final class EventFile {
 
       if (line.startsWith("PROCESSOR")) {
         files.clear();
+        precompile = null;
         continue;
       }
 
@@ -81,8 +94,21 @@ public final class EventFile {
         String[] t = line.split("\\s+", 6);  // FILEID ver id line len rest
         if (t.length < 6) continue;
         int length = toInt(t[4]);
-        String name = t[5].length() >= length ? t[5].substring(0, length) : t[5];
-        if (!name.trim().isEmpty()) files.put(t[2], relative(name.trim(), baseDir));  // no name: summary records
+        String name = (t[5].length() >= length ? t[5].substring(0, length) : t[5]).trim();
+        if (name.isEmpty()) continue;  // no name: summary records
+        files.put(t[2], name);
+        if (t[2].equals(SqlExpansion.TEMP_FILE_ID)) {
+          precompile = new SqlExpansion();
+          expansions.put(memberName(name), precompile);
+        }
+        continue;
+      }
+
+      if (line.startsWith("EXPANSION")) {
+        String[] t = line.split("\\s+");
+        if (precompile == null || t.length < 8) continue;
+        if (precompile.source == null) precompile.source = files.get(t[2]);
+        precompile.add(toInt(t[3]), toInt(t[6]), toInt(t[7]));
         continue;
       }
 
@@ -90,7 +116,7 @@ public final class EventFile {
         String[] t = line.split("\\s+", 14);
         if (t.length < 14) continue;
         BuildReport.CompileError error = new BuildReport.CompileError();
-        error.file = files.get(t[2]);
+        String file = files.get(t[2]);
         error.line = toInt(t[5]);
         error.column = toInt(t[6]);
         error.endLine = toInt(t[7]);
@@ -98,11 +124,55 @@ public final class EventFile {
         error.id = t[9];
         error.severity = toInt(t[11]);
         error.message = t[13].trim();
+
+        SqlExpansion temp = file != null ? expansions.get(memberName(file)) : null;
+        if (temp != null && temp.source != null) {  // RPG error in the precompiler's output
+          file = temp.source;
+          error.line = temp.toSource(error.line);
+          error.endLine = temp.toSource(error.endLine);
+        }
+        error.file = file != null ? relative(file, baseDir) : null;
         errors.add(error);
       }
     }
     return errors;
   }
+
+  /* Maps lines of the SQL precompiler's temporary member back to the original source */
+  private static final class SqlExpansion {
+    static final String TEMP_FILE_ID = "999";
+
+    String source;                                     // original source path
+    final List<int[]> ranges = new ArrayList<int[]>(); // {source line, temp start, temp end}, in temp order
+
+    void add(int sourceLine, int tempStart, int tempEnd) {
+      if (tempEnd >= tempStart) ranges.add(new int[] { sourceLine, tempStart, tempEnd });
+    }
+
+    int toSource(int tempLine) {
+      if (tempLine <= 0) return tempLine;
+      int inserted = 0;
+      for (int[] range : ranges) {
+        if (tempLine < range[1]) break;
+        if (tempLine <= range[2]) return range[0];  // generated code: the SQL statement's line
+        inserted += range[2] - range[1] + 1;
+      }
+      return tempLine - inserted;
+    }
+  }
+
+  /*
+   * Same member in both spellings the compilers use:
+   * QTEMP/QSQLTEMP1(ART200) and /QSYS.LIB/QTEMP.LIB/QSQLTEMP1.FILE/ART200.MBR
+   */
+  private static String memberName(String name) {
+    Matcher qsys = QSYS_MEMBER.matcher(name.trim());
+    if (qsys.matches()) return (qsys.group(1) + "/" + qsys.group(2) + "(" + qsys.group(3) + ")").toUpperCase();
+    return name.trim().toUpperCase();
+  }
+
+  private static final Pattern QSYS_MEMBER = Pattern.compile(
+      "(?i)/QSYS\\.LIB/([^/]+)\\.LIB/([^/]+)\\.FILE/([^/]+)\\.MBR");
 
   /* First record is "TIMESTAMP 0 yyyyMMddHHmmss"; the member must not predate the target build */
   private static boolean isFresh(List<String> records, Timestamp since) {

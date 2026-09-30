@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -55,6 +56,7 @@ public class MasterCompiler{
   private String compileBaseDir = null; // where the IBM i job resolves relative SRCSTMF (spec dir or pushed dir)
   private boolean collectReport = false; // keep the report in memory (MCP) even without --json
   private Set<String> changedFiles = null; // explicit changed sources (MCP build/plan files), like --since
+  private boolean keepGoing = false;  // --keep-going: after a failure, build everything that does not depend on it
 
   private boolean compilationError = false;
   private int builtCount = 0;
@@ -114,6 +116,10 @@ public class MasterCompiler{
     this.changedFiles = changedFiles;
   }
 
+  public void setKeepGoing(boolean keepGoing) {
+    this.keepGoing = keepGoing;
+  }
+
   public BuildReport getReport() {
     return report;
   }
@@ -136,7 +142,7 @@ public class MasterCompiler{
     if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
 
     /* Init dependency awareness */
-    if (isIncremental()) depAwareness = new DependencyAwareness(system, debug, verbose);
+    if (isIncremental() || keepGoing) depAwareness = new DependencyAwareness(system, debug, verbose);
 
 
     /* Init source descriptor */
@@ -163,11 +169,10 @@ public class MasterCompiler{
 
       if(verbose) logger.info(showLibraryList());
 
-      if (isIncremental()) {
-        depAwareness.detectDependencies(globalSpec);
-        if (since != null || changedFiles != null) collectSinceRebuildSet();
-        else collectDiffRebuildSet();
-      }
+      /* The dependency graph drives incremental selection and, with keep-going, what a failure blocks */
+      if (isIncremental() || keepGoing) depAwareness.detectDependencies(globalSpec);
+      if (since != null || changedFiles != null) collectSinceRebuildSet();
+      else if (diff) collectDiffRebuildSet();
 
       /* Build each target */
       buildTargets(globalSpec.targets);
@@ -223,6 +228,9 @@ public class MasterCompiler{
 
   private void buildTargets(LinkedHashMap<TargetKey, BuildSpec.TargetSpec> targets) throws Exception{
     /* This is intended for a YAML file with multiple objects in a toposort order */
+    Set<TargetKey> blocked = new HashSet<TargetKey>();  // keep-going: dependents of failed targets
+    List<String> failedTargets = new ArrayList<String>();
+
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : targets.entrySet()) {
       TargetKey key = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
@@ -235,6 +243,12 @@ public class MasterCompiler{
           if (verbose) logger.info("Skipping unchanged target: " + key.asString() + (diff ? key.getTimestmaps() : ""));
           continue;
         }
+      }
+
+      if (blocked.contains(key)) {
+        if (verbose) logger.info("Blocked by a failed dependency: " + key.asString());
+        if (reporting()) report.add(key.asString(), BuildReport.BLOCKED).error = "Depends on a failed target";
+        continue;
       }
 
       this.builtCount++;
@@ -299,20 +313,29 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.failure);
         } 
 
-        throw e; // Raise
+        if (!keepGoing) throw e; // Raise
+        failedTargets.add(key.asString());
+        blocked.addAll(DiffPlanner.expand(globalSpec, Collections.singleton(key)));
 
       } catch (Exception e){
         compilationError = true;
         if (verbose) logger.error("Unhandled exception in Target: " + key.asString());
         if (reporting()) reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
 
-        throw e; // Raise
+        if (!keepGoing) throw e; // Raise
+        failedTargets.add(key.asString());
+        blocked.addAll(DiffPlanner.expand(globalSpec, Collections.singleton(key)));
 
       } finally {
         //TODO: Do something cool here.
       }
     }
 
+
+    /* Keep-going ran every buildable target; the build still fails (global failure hooks, exit 1) */
+    if (!failedTargets.isEmpty()) {
+      throw new CompilerException(failedTargets.size() + " target(s) failed: " + String.join(", ", failedTargets));
+    }
   }
 
   /* Adds the target to the report with its joblog and, when compiled, its EVFEVENT errors */
@@ -568,6 +591,7 @@ public class MasterCompiler{
       compiler.setJsonReport(parser.getJsonReport());
       compiler.setSince(parser.getSince());
       compiler.setPush(parser.getPush());
+      compiler.setKeepGoing(parser.isKeepGoing());
       compiler.build();
       if (compiler.foundCompilationError()) exitCode = 1;
 

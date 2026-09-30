@@ -86,6 +86,7 @@ root. Copy members (`*.RPGLEINC`, `*.include.RPGLE`) are not targets.
 java -jar MC.jar -f build.yaml                       # build every target
 java -jar MC.jar -f build.yaml --dry-run --json plan.json   # plan only: connects, compiles nothing
 java -jar MC.jar -f build.yaml --json report.json    # build + machine-readable report
+java -jar MC.jar -f build.yaml -k --json report.json # keep going: every error in one run
 java -jar MC.jar -f build.yaml --since origin/master # what git says changed + dependents
 java -jar MC.jar -f build.yaml --push /home/USER/build --json report.json   # upload, then build
 java -jar MC.jar -f build.yaml --diff                # sources newer than their objects + dependents
@@ -96,6 +97,10 @@ Flags: `-x` debug, `-v` verbose (combine as `-xv`), `--no-migrate` (skip
 member ↔ stream file migration), `--lib <name>` (library for scanned targets).
 
 **Exit codes:** `0` success, `1` a target or command failed, `2` invalid arguments.
+
+**`-k`, `--keep-going`:** by default MC stops at the first failed target. With `-k` it
+skips only that target's dependents (reported as `blocked`) and builds everything else,
+so one run reports every broken target. The build still exits `1` when anything failed.
 
 ### Incremental builds
 
@@ -132,14 +137,21 @@ the spec: it would run after MC's and point the job back at the old directory.
 ```
 
 - `status`: `built`, `failed`, `skipped` (`--since`/`--diff`, unchanged), `planned` (`--dry-run`),
-  `not_built` (never reached: MC stops at the first failed target).
+  `blocked` (`-k`: depends on a failed target), `not_built` (never reached: without `-k`
+  MC stops at the first failed target).
 - `errors` come from the compiler's EVFEVENT member (needs `OPTION(*EVENTF)`, the
   default). `file` is relative to the spec's directory (or the pushed copy of it);
-  errors inside copy members point at the copy member's own file and line.
+  errors inside copy members point at the copy member's own file and line. For SQLRPGLE,
+  errors from the RPG step are mapped from the precompiler's temporary member back to
+  your source line; errors inside SQL-generated code point at the SQL statement's last
+  line.
 - **Severity:** `00` informational (e.g. RNF7031 "not referenced"; many per
   compile, safe to ignore), `10` warning. Anything above the compile's `GENLVL`
   (default 10) stops the compile, so **severity `20` and up are the errors to fix**.
   The compiler's final `RNS9308` summary record has line 0; skip it.
+- Binder failures (`CPD5D02 Definition not found for symbol 'X'`) have no `file`: a
+  procedure's module or service program is missing from the spec or its binding
+  directory. `joblog` names the symbol.
 - A top-level `error` means a failure outside any target (global hook, connection).
 
 ## MCP server
@@ -149,7 +161,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 
 | Tool | Arguments | Returns |
 |------|-----------|---------|
-| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything | The build report above; `isError` when the build failed |
+| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true`) | The build report above; `isError` when the build failed |
 | `plan` | same as `build` | The report with `planned` targets; compiles nothing |
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `joblog` | none | The job's messages since the previous `joblog` call |
@@ -179,8 +191,8 @@ pushing sources before each build:
 2. Build with the sources where the IBM i compiles from:
    - remote: `java -jar MC.jar -f build.yaml --push /home/USER/build --since HEAD --json report.json`
    - on the IBM i (sources already in the IFS): `java -jar MC.jar -f build.yaml --since HEAD --json report.json`
-3. Exit code `0` → done. `1` → read the `failed` target's `errors` with severity
-   `>= 20`, fix those lines, repeat. Use `joblog` when `errors` is empty (for
+3. Exit code `0` → done. `1` → read every `failed` target's `errors` with severity
+   `>= 20` (use `-k` so one run shows them all), fix those lines, repeat. Use `joblog` when `errors` is empty (for
    example a binding or authority failure rather than a compile error).
 
 ## Gotchas
@@ -189,9 +201,6 @@ pushing sources before each build:
   were already in the library before the build.** Before using it in a shared
   library, check that no existing object has a target's name, or build into a
   scratch library.
-- **SQLRPGLE:** errors from the RPG step point at the precompiler's temporary member
-  (`/QSYS.LIB/QTEMP.LIB/QSQLTEMP1.FILE/<name>.MBR`), not your source line. SQL
-  precompile errors do point at the source.
 - DDS targets compile from source members; MC migrates the stream file to a member
   first, so their errors name the member (`LIB/QDSPFSRC(NAME)`).
 - Objects of types without `REPLACE` (PF, LF, BNDDIR, DTAARA, DTAQ, MSGF, SQL tables)

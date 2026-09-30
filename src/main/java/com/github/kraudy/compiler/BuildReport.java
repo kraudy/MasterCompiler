@@ -20,12 +20,14 @@ public class BuildReport {
   public static final String SKIPPED = "skipped";     // --diff: unchanged
   public static final String PLANNED = "planned";     // --dry-run
   public static final String NOT_BUILT = "not_built"; // never reached (an earlier target failed)
+  public static final String BLOCKED = "blocked";     // --keep-going: depends on a failed target
 
   public boolean success = true;
   public boolean dryRun;
   public int built;
   public int failed;
   public int skipped;
+  public int blocked;
   public String error;  // failure outside a target (global hooks, connection, ...)
   public List<TargetResult> targets = new ArrayList<TargetResult>();
 
@@ -68,6 +70,7 @@ public class BuildReport {
     if (BUILT.equals(status) || PLANNED.equals(status)) built++;
     if (FAILED.equals(status)) { failed++; success = false; }
     if (SKIPPED.equals(status)) skipped++;
+    if (BLOCKED.equals(status)) blocked++;
     return result;
   }
 

@@ -124,7 +124,8 @@ public class McpServer {
         "Compile targets on the IBM i. With 'files' or 'since' only the targets whose sources " +
         "(or /copy members) changed are built, plus everything that depends on them; with neither, " +
         "every target is built. Returns the build report: per target status, command, compile errors " +
-        "(file, line, column, id, severity, message) and joblog. MC stops at the first failed target.",
+        "(file, line, column, id, severity, message) and joblog. A failed target does not stop the build: " +
+        "everything that does not depend on it is still built, its dependents are reported as blocked.",
         selectionSchema()));
     tools.add(tool("plan",
         "Dry run of build: which targets would compile, in order, and with which commands. " +
@@ -162,6 +163,9 @@ public class McpServer {
     ObjectNode since = props.putObject("since");
     since.put("type", "string");
     since.put("description", "Git ref: build what changed since it (committed, uncommitted and untracked)");
+    ObjectNode keepGoing = props.putObject("keepGoing");
+    keepGoing.put("type", "boolean");
+    keepGoing.put("description", "build only (default true): false stops at the first failed target");
     return schema;
   }
 
@@ -199,6 +203,8 @@ public class McpServer {
         parser.isDebug(), parser.isVerbose(), false, false, parser.isNoMigrate());
     compiler.setCollectReport(true);
     compiler.setPush(parser.getPush());
+    /* One round trip should show every error: keep going unless the agent asks otherwise */
+    compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));
 
     Set<String> files = files(args, spec);
     if (files != null) compiler.setChangedFiles(files);
