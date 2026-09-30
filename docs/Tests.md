@@ -39,6 +39,19 @@ Every CRT* / RUNSQLSTM line from a real `--scan -o` of McOnTobi and McOnSJLennon
 
 Needs `git` on PATH and network. Tagged `@Tag("deps")`; Surefire runs it with the other local tests (`./mvnw test` / `./mvnw clean package`). IBM i is not used here.
 
+## Community repositories (pinned)
+
+Public IBM i repositories are cloned at one pinned commit ([`PinnedRepo`](../src/test/java/com/github/kraudy/compiler/PinnedRepo.java)), converted or scanned offline, and checked. Their code is never copied into MC; moving a pin is a deliberate change made together with its assertions.
+
+* [TobiConverterTest](../src/test/java/com/github/kraudy/compiler/TobiConverterTest.java) — `--from-tobi` on [IBM/tobi-example](https://github.com/IBM/tobi-example) (113 targets, 26 skipped, description files, rule params, ordering) and [IBM/ibmi-company_system](https://github.com/IBM/ibmi-company_system) (15 targets; builds 14/15 on PUB400, the 15th needs RPGUnit).
+* [ScanConventionsTest](../src/test/java/com/github/kraudy/compiler/ScanConventionsTest.java) — `--scan` on [NickLitten/nick.litten.public](https://github.com/NickLitten/nick.litten.public) (TOBi `NAME-description` file names) and [MarcoDeSenas/IBMi-topics-thanks-to-pub400](https://github.com/MarcoDeSenas/IBMi-topics-thanks-to-pub400) (`.dspf`, `NAME.srvpgm.rpgle`, CL `BNDSRVPGM`, command `PGM` default).
+
+```bash
+./mvnw test -Dtest=TobiConverterTest,ScanConventionsTest
+```
+
+Needs `git` and network, like `ScanDepsTest`.
+
 ## Incremental (`--diff`) tests
 
 Rebuild **logic** is local. IBM i only proves that a real compile skips the rest.
