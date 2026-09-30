@@ -25,7 +25,10 @@ build is a real build. For shell access to the IBM i itself see the
 | **Remote** (laptop, CI, container) | JT400 host servers | `.env` with `IBMI_HOSTNAME`, `IBMI_USERNAME`, `IBMI_PASSWORD` in the working directory |
 | **Offline** (`--generate-only`) | none | Nothing; scan and spec writing only |
 
-Build the jar with `./mvnw clean package` (`target/MasterCompiler-1.0-SNAPSHOT.jar`).
+Get the jar from the latest release,
+`https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
+(`curl -LO` works in PASE too), or build it with `./mvnw clean package`
+(`target/MasterCompiler-1.0-SNAPSHOT.jar`). The examples below call it `MC.jar`.
 Running on the IBM i is the simplest agent path: copy the jar next to the sources and
 run it over SSH. No password ever lands in a file.
 
@@ -79,6 +82,23 @@ SQL table refs, binding directories) and writes them in compile-safe order. It a
 writes `build.cl`, the same plan as a CL command list. Values scan cannot infer
 (binding directories, data areas, CMD `PGM`, hooks) go in `mc-base.yaml` at the scan
 root. Copy members (`*.RPGLEINC`, `*.include.RPGLE`) are not targets.
+
+## Import an existing library
+
+```bash
+java -jar MC.jar --import MYLIB -o /home/USER/mylib-repo            # whole library
+java -jar MC.jar --import "MYLIB/QRPGLESRC,MYLIB/QDDSSRC/ART*,OTHER" -o repo
+```
+
+Writes each member as `<SRCPF>/<name>` (one folder per library when several are
+selected), plus `mc-import.json` and a scanned `build.yaml`. Names come from the objects
+built from the members: OPM programs, DDS files and commands from the object
+description, ILE programs and modules from `BOUND_MODULE_INFO`, binder source from
+`PROGRAM_INFO`, SQL sources by object name. In the report, `how` says which:
+`assumed` members had no object in the library (the scan treats them by source
+type: `.rpgle` is a program), `copybook` members are `/COPY`d by others, `other`
+members are not a type MC compiles. Review `assumed` before building. `/COPY FILE,MBR`
+statements are not rewritten; they still resolve against the members on the system.
 
 ## Commands
 

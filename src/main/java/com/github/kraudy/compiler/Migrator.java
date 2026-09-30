@@ -102,10 +102,12 @@ public class Migrator {
   }
 
   public void createSourceMember(TargetKey key) throws Exception {
+    /* DDS members are typed by what they describe (PF, LF, DSPF, PRTF), as IBM tools expect */
+    String sourceType = key.getSourceType().equals("DDS") ? key.getObjectTypeEnum().name() : key.getSourceType();
     CommandObject cmd = new CommandObject(SysCmd.ADDPFM)
       .put(ParamCmd.FILE, key.getQualifiedSourceFile())
       .put(ParamCmd.MBR, key.getSourceName())
-      .put(ParamCmd.SRCTYPE, key.getSourceType());
+      .put(ParamCmd.SRCTYPE, sourceType);
 
     commandExec.executeCommand(cmd);
 

@@ -507,6 +507,21 @@ public class MasterCompiler{
       ArgParser parser = new ArgParser(args);
       parser.validate();
 
+      /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
+      if (parser.getImportSelection() != null) {
+        system = IBMiDotEnv.getNewSystemConnection(true);
+        connection = new AS400JDBCDataSource(system).getConnection();
+        String outDir = parser.getOutputFile();
+        LibraryImporter.ImportReport imported = new LibraryImporter(system, connection, parser.isVerbose())
+            .run(parser.getImportSelection(), outDir);
+
+        BuildSpec spec = new SpecGenerator(system, connection, parser.isDebug(), parser.isVerbose())
+            .generate(outDir, parser.getLibrary(), null);
+        SpecWriter.writeToFile(spec, outDir + "/build.yaml", outDir);
+        logger.info("Generated YAML: {}/build.yaml", outDir);
+        return imported.errors > 0 ? 1 : exitCode;
+      }
+
       /* MCP server: one IBM i job kept across tool calls; stdout becomes the protocol channel */
       if (parser.isMcp()) {
         new McpServer(parser).serve();

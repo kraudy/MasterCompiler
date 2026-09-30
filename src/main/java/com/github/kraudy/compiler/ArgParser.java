@@ -22,6 +22,7 @@ public class ArgParser {
   private enum Option {
     FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
     SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
+    IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
     OUTPUT        ("o", "output",        Kind.VALUE, "Write generated YAML to this path"),
     LIB           (null, "lib",          Kind.VALUE, "Default library for scanned targets (default: curlib)"),
@@ -90,6 +91,7 @@ public class ArgParser {
   private String push;
   private boolean mcp;
   private boolean keepGoing;
+  private String importSelection;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -216,6 +218,9 @@ public class ArgParser {
       case PUSH:
         push = value;
         break;
+      case IMPORT:
+        importSelection = value;
+        break;
       default:
         throw new IllegalStateException("Option does not take a value: " + opt);
     }
@@ -228,6 +233,16 @@ public class ArgParser {
   public void validate() {
     boolean hasFile = yamlFile != null;
     boolean hasScan = scanRoot != null;
+
+    if (importSelection != null) {
+      if (hasFile || hasScan || mcp || generateOnly) {
+        throw new IllegalArgumentException("--import takes only -o <dir>, --lib, -x, -v");
+      }
+      if (outputFile == null) {
+        throw new IllegalArgumentException("--import requires -o|--output <dir>");
+      }
+      return;
+    }
 
     if (!hasFile && !hasScan) {
       throw new IllegalArgumentException(
@@ -360,6 +375,11 @@ public class ArgParser {
   /** {@code --since} git ref, or null for a full (or --diff) build. */
   public String getSince() {
     return since;
+  }
+
+  /** {@code --import} selection (LIB, LIB/SRCPF, LIB/SRCPF/MBR, comma-separated), or null. */
+  public String getImportSelection() {
+    return importSelection;
   }
 
   public boolean isKeepGoing() {
