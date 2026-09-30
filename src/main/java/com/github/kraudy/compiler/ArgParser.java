@@ -22,6 +22,10 @@ public class ArgParser {
   private enum Option {
     FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
     SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
+    PROJECT       (null, "project",      Kind.VALUE, "Project root: build.yaml if present, else TOBi Rules.mk, else scan"),
+    CODE4I        (null, "code4i",       Kind.FLAG,  "Connect with the Code for IBM i connection from VS Code settings (password: IBMI_PASSWORD)"),
+    CONNECTION    (null, "connection",   Kind.VALUE, "Code for IBM i connection name, when there are several"),
+    SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json and .github/skills for Copilot in the --project folder (default: current)"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
@@ -94,6 +98,10 @@ public class ArgParser {
   private boolean keepGoing;
   private String importSelection;
   private String tobiRoot;
+  private String projectRoot;
+  private boolean code4i;
+  private String connection;
+  private boolean setupVscode;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -188,6 +196,8 @@ public class ArgParser {
       case NO_MIGRATE:    noMigrate = true; break;
       case GENERATE_ONLY: generateOnly = true; break;
       case MCP:           mcp = true; break;
+      case CODE4I:        code4i = true; break;
+      case SETUP_VSCODE:  setupVscode = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -226,6 +236,13 @@ public class ArgParser {
       case FROM_TOBI:
         tobiRoot = value;
         break;
+      case PROJECT:
+        projectRoot = value;
+        break;
+      case CONNECTION:
+        connection = value;
+        code4i = true;
+        break;
       default:
         throw new IllegalStateException("Option does not take a value: " + opt);
     }
@@ -236,6 +253,22 @@ public class ArgParser {
    * Call before using getters that require a mode.
    */
   public void validate() {
+    if (setupVscode) {
+      if (yamlFile != null || scanRoot != null || tobiRoot != null || mcp || importSelection != null) {
+        throw new IllegalArgumentException("--setup-vscode takes only --project, --code4i, --connection, -v");
+      }
+      return;
+    }
+
+    /* --project: pick the spec the project already has */
+    if (projectRoot != null && yamlFile == null && scanRoot == null && tobiRoot == null) {
+      File root = new File(projectRoot);
+      if (!root.isDirectory()) throw new IllegalArgumentException("--project is not a directory: " + projectRoot);
+      if (new File(root, "build.yaml").isFile()) yamlFile = new File(root, "build.yaml").getPath();
+      else if (new File(root, "Rules.mk").isFile()) tobiRoot = projectRoot;
+      else scanRoot = projectRoot;
+    }
+
     boolean hasFile = yamlFile != null;
     boolean hasScan = scanRoot != null;
 
@@ -318,6 +351,24 @@ public class ArgParser {
 
   public boolean hasScan() {
     return scanRoot != null;
+  }
+
+  public boolean isSetupVscode() {
+    return setupVscode;
+  }
+
+  /** {@code --project} folder, or null. */
+  public String getProjectRoot() {
+    return projectRoot;
+  }
+
+  public boolean isCode4i() {
+    return code4i;
+  }
+
+  /** {@code --connection} name, or null to use the only Code for IBM i connection. */
+  public String getConnection() {
+    return connection;
   }
 
   public boolean hasTobi() {

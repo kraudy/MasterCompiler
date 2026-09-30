@@ -191,11 +191,18 @@ Fully transparent and traceble flow of execution and changes.
 
 [Traceability docs](./docs/Traceability.md)
 
+## Copilot and Code for IBM i
+
+Teams on Windows with VS Code and Code for IBM i can let Copilot's agent mode build and fix IBM i code with MC,
+reusing their Code for IBM i connection: `java -jar MasterCompiler.jar --setup-vscode --project .` in a repository.
+See [docs/Copilot.md](./docs/Copilot.md).
+
 ## Agent skills
 
 Skills for AI coding agents live in [`skills/`](./skills):
 
 * [`mastercompiler`](./skills/mastercompiler/SKILL.md): specs, scan, `--dry-run`, `--json` reports and the edit-compile-fix loop.
+* [`mastercompiler-vscode`](./skills/mastercompiler-vscode/SKILL.md): setting MC up as an MCP server for Copilot in VS Code.
 * [`ibm-i-pase`](./skills/ibm-i-pase/SKILL.md): working on an IBM i over SSH/PASE (CL, SQL, IFS, CCSID, EVFEVENT).
 
 Copy a skill folder into your agent's skills directory (for Claude Code: `~/.claude/skills/`).

@@ -70,6 +70,16 @@
   </dependencies>
 
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <!-- Agent skills ship inside the jar for the setup-vscode option -->
+      <resource>
+        <directory>skills</directory>
+        <targetPath>mc-skills</targetPath>
+      </resource>
+    </resources>
     <plugins>
       <!-- Maven Compiler Plugin -->
       <plugin>

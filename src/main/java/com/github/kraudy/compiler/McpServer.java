@@ -202,7 +202,9 @@ public class McpServer {
     MasterCompiler compiler = new MasterCompiler(system, connection, spec, dryRun,
         parser.isDebug(), parser.isVerbose(), false, false, parser.isNoMigrate());
     compiler.setCollectReport(true);
-    compiler.setPush(parser.getPush());
+    Code4iConfig code4i = MasterCompiler.code4i(parser);
+    compiler.setCode4i(code4i);
+    compiler.setPush(MasterCompiler.pushDir(parser, code4i, spec));
     /* One round trip should show every error: keep going unless the agent asks otherwise */
     compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));
 
@@ -284,7 +286,13 @@ public class McpServer {
   private void connect() throws Exception {
     if (connection != null && !connection.isClosed()) return;
     disconnect();
-    system = IBMiDotEnv.getNewSystemConnection(true);
+    /* An MCP server cannot prompt: without credentials, say how to provide them */
+    if (!parser.isCode4i() && !IBMiDotEnv.isIBMi() && System.getenv("IBMI_PASSWORD") == null && !new File(".env").isFile()) {
+      throw new IllegalArgumentException("No IBM i credentials: start MC with --code4i and IBMI_PASSWORD from a password "
+          + "input in .vscode/mcp.json (java -jar MasterCompiler.jar --setup-vscode writes it), or set "
+          + "IBMI_HOSTNAME / IBMI_USERNAME / IBMI_PASSWORD, or put them in a .env file.");
+    }
+    system = MasterCompiler.connect(parser);
     connection = new AS400JDBCDataSource(system).getConnection();
     lastJoblog = new CommandExecutor(connection, false, false, false).getCurrentTime();
     logger.info("Connected to IBM i as {}", system.getUserId());

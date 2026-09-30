@@ -1,0 +1,35 @@
+name: CI
+
+# Unit and offline tests on Linux and Windows (developers on Windows run MC next to VS Code).
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'   # builds Java 8 bytecode (maven.compiler.target 1.8)
+          cache: maven
+
+      - name: Build and test (Linux)
+        if: runner.os != 'Windows'
+        run: ./mvnw -B test
+
+      - name: Build and test (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: mvnw.cmd -B test

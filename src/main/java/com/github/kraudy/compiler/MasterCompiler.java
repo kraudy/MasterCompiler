@@ -57,6 +57,7 @@ public class MasterCompiler{
   private boolean collectReport = false; // keep the report in memory (MCP) even without --json
   private Set<String> changedFiles = null; // explicit changed sources (MCP build/plan files), like --since
   private boolean keepGoing = false;  // --keep-going: after a failure, build everything that does not depend on it
+  private Code4iConfig code4i = null; // --code4i: library list of the developer's Code for IBM i connection
 
   private boolean compilationError = false;
   private int builtCount = 0;
@@ -116,6 +117,10 @@ public class MasterCompiler{
     this.changedFiles = changedFiles;
   }
 
+  public void setCode4i(Code4iConfig code4i) {
+    this.code4i = code4i;
+  }
+
   public void setKeepGoing(boolean keepGoing) {
     this.keepGoing = keepGoing;
   }
@@ -155,6 +160,9 @@ public class MasterCompiler{
     compileBaseDir = baseDir;
 
     try {
+      /* The build job gets the developer's Code for IBM i library list (spec hooks run after it) */
+      if (code4i != null) globalSpec.before.addAll(0, code4i.libraryHooks());
+
       /* Push local sources to the IFS; the job then compiles from that copy */
       if (push != null) {
         compileBaseDir = SourcePusher.push(system, baseDir, push, since, changedFiles, dryRun, verbose);
@@ -514,6 +522,24 @@ public class MasterCompiler{
     System.exit(run(args));
   }
 
+  /* IBM i connection: the Code for IBM i one (--code4i), else .env / IBMI_* variables (or the local system on IBM i) */
+  static AS400 connect(ArgParser parser) throws Exception {
+    Code4iConfig code4i = code4i(parser);
+    if (code4i != null) return code4i.connect();
+    return IBMiDotEnv.getNewSystemConnection(true);
+  }
+
+  static Code4iConfig code4i(ArgParser parser) throws Exception {
+    return parser.isCode4i() ? Code4iConfig.load(parser.getConnection()) : null;
+  }
+
+  /* --push, or with --code4i off the IBM i: <home>/mc/<project folder> */
+  static String pushDir(ArgParser parser, Code4iConfig code4i, BuildSpec spec) {
+    if (parser.getPush() != null) return parser.getPush();
+    if (code4i == null || IBMiDotEnv.isIBMi() || spec.getBaseDirectory() == null) return null;
+    return code4i.defaultPushDir(new java.io.File(spec.getBaseDirectory()));
+  }
+
   /* Exit code: 0 success, 1 build failed, 2 invalid arguments */
   public static int run(String... args){
     AS400 system = null;
@@ -526,9 +552,14 @@ public class MasterCompiler{
       ArgParser parser = new ArgParser(args);
       parser.validate();
 
+      /* VS Code + Copilot setup: .vscode/mcp.json and .github/skills in the project */
+      if (parser.isSetupVscode()) {
+        return VscodeSetup.run(parser);
+      }
+
       /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
       if (parser.getImportSelection() != null) {
-        system = IBMiDotEnv.getNewSystemConnection(true);
+        system = connect(parser);
         connection = new AS400JDBCDataSource(system).getConnection();
         String outDir = parser.getOutputFile();
         LibraryImporter.ImportReport imported = new LibraryImporter(system, connection, parser.isVerbose())
@@ -551,7 +582,7 @@ public class MasterCompiler{
       if (parser.isGenerateOnly()) {
         system = null;
         try {
-          system = IBMiDotEnv.getNewSystemConnection(true);
+          system = connect(parser);
         } catch (Exception ignore) {
           /* local-only generation */
           if (parser.isVerbose()) {
@@ -591,7 +622,7 @@ public class MasterCompiler{
         return exitCode;
       }
 
-      system = IBMiDotEnv.getNewSystemConnection(true); // Get system
+      system = connect(parser);
       connection = new AS400JDBCDataSource(system).getConnection();
 
       BuildSpec spec;
@@ -633,7 +664,9 @@ public class MasterCompiler{
         );
       compiler.setJsonReport(parser.getJsonReport());
       compiler.setSince(parser.getSince());
-      compiler.setPush(parser.getPush());
+      Code4iConfig code4i = code4i(parser);
+      compiler.setCode4i(code4i);
+      compiler.setPush(pushDir(parser, code4i, spec));
       compiler.setKeepGoing(parser.isKeepGoing());
       compiler.build();
       if (compiler.foundCompilationError()) exitCode = 1;

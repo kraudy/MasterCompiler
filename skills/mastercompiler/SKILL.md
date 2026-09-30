@@ -200,7 +200,12 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `joblog` | none | The job's messages since the previous `joblog` call |
 
-Run it **on the IBM i over SSH**, so it uses the SSH user's own job and no credentials
+In VS Code with Copilot (Windows included), `java -jar MC.jar --setup-vscode --project .` writes
+`.vscode/mcp.json` for you: MC runs on the PC with `--code4i` (the Code for IBM i connection:
+host, user, library list) and `--project ${workspaceFolder}`, and VS Code prompts for the
+password. See the `mastercompiler-vscode` skill.
+
+Or run it **on the IBM i over SSH**, so it uses the SSH user's own job and no credentials
 file (the login banner goes to stderr, so stdio stays clean):
 
 ```json
