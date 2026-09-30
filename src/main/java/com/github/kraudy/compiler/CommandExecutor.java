@@ -198,41 +198,54 @@ public class CommandExecutor {
     StringBuilder messages = new StringBuilder();
     messages.append("\nJoblog info\n");
 
+    List<BuildReport.JoblogMessage> joblog = getJoblogMessages(commandTime);
+    for (BuildReport.JoblogMessage msg : joblog) {
+      messages.append(String.format("%-20s | %-10s | %-4s | %s%n",
+              msg.time, msg.id, msg.severity, msg.text));
+    }
+
+    if (joblog.isEmpty()) {
+      messages.append("No relevant joblog messages found.\n");
+    }
+
+    return messages.toString();
+  }
+
+  /* Joblog messages of this job since the given time */
+  public List<BuildReport.JoblogMessage> getJoblogMessages(Timestamp since) {
+    List<BuildReport.JoblogMessage> joblog = new ArrayList<BuildReport.JoblogMessage>();
+
     try (Statement stmt = connection.createStatement();
          ResultSet rsMessages = stmt.executeQuery(
              "SELECT MESSAGE_TIMESTAMP, MESSAGE_ID, SEVERITY, MESSAGE_TEXT " +
              "FROM TABLE(QSYS2.JOBLOG_INFO('*')) " +
              "WHERE FROM_USER = USER " +
-             "AND MESSAGE_TIMESTAMP > '" + commandTime + "' " +
+             "AND MESSAGE_TIMESTAMP > '" + since + "' " +
              "AND MESSAGE_ID NOT IN ('SQL0443', 'CPC0904', 'CPF2407') " +
              "ORDER BY MESSAGE_TIMESTAMP ASC"
          )) {
 
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-        boolean hasMessages = false;
 
         while (rsMessages.next()) {
-            hasMessages = true;
-            Timestamp messageTime = rsMessages.getTimestamp("MESSAGE_TIMESTAMP");
-            String messageId = rsMessages.getString("MESSAGE_ID").trim();
-            String severity = rsMessages.getString("SEVERITY").trim();
-            String message = rsMessages.getString("MESSAGE_TEXT").trim();
-
-            String formattedTime = sdf.format(messageTime);
-            messages.append(String.format("%-20s | %-10s | %-4s | %s%n",
-                    formattedTime, messageId, severity, message));
-        }
-
-        if (!hasMessages) {
-            messages.append("No relevant joblog messages found.\n");
+            BuildReport.JoblogMessage msg = new BuildReport.JoblogMessage();
+            msg.time = sdf.format(rsMessages.getTimestamp("MESSAGE_TIMESTAMP"));
+            msg.id = trim(rsMessages.getString("MESSAGE_ID"));
+            msg.severity = rsMessages.getInt("SEVERITY");
+            msg.text = trim(rsMessages.getString("MESSAGE_TEXT"));
+            joblog.add(msg);
         }
 
     } catch (SQLException e) {
       throw new CompilerException("Error retrieving joblog", e);
     }
 
-    return messages.toString();
-}
+    return joblog;
+  }
+
+  private static String trim(String value) {
+    return value == null ? "" : value.trim();
+  }
 
   public String getExecutionChain() {
     return CmdExecutionChain.toString();

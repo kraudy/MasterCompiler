@@ -31,7 +31,8 @@ public class ArgParser {
     CLEAN         ("c", "clean",         Kind.FLAG,  "Delete created objects after build"),
     DRY_RUN       (null, "dry-run",      Kind.FLAG,  "Show commands without executing"),
     DIFF          (null, "diff",         Kind.FLAG,  "Only build changed objects"),
-    NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration");
+    NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration"),
+    JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 
     final String shortName;
     final String longName;
@@ -80,6 +81,7 @@ public class ArgParser {
   private boolean clean;
   private boolean diff;
   private boolean noMigrate;
+  private String jsonReport;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -195,6 +197,9 @@ public class ArgParser {
       case LIB:
         library = value;
         break;
+      case JSON:
+        jsonReport = value;
+        break;
       default:
         throw new IllegalStateException("Option does not take a value: " + opt);
     }
@@ -219,6 +224,10 @@ public class ArgParser {
     if (generateOnly && outputFile == null) {
       throw new IllegalArgumentException(
           "--generate-only requires -o|--output <file>");
+    }
+    if (generateOnly && jsonReport != null) {
+      throw new IllegalArgumentException(
+          "--json reports a build; it cannot be used with --generate-only");
     }
     if (hasFile && !isValidFile(yamlFile)) {
       throw new IllegalArgumentException(
@@ -314,6 +323,11 @@ public class ArgParser {
 
   public boolean isNoMigrate() {
     return noMigrate;
+  }
+
+  /** {@code --json} report path, or null when no report is requested. */
+  public String getJsonReport() {
+    return jsonReport;
   }
 
   public static String getUsage() {

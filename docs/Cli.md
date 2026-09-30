@@ -22,6 +22,15 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 * No migrate flag ommits souce files migration `{--no-migrate}`
 * Incremental build `{--diff}`: compile targets whose source is newer than the object (or whose object is missing), plus every dependent. Source time is the newest of the stream file and any `/copy`/`/include` attachments (`File` / `IFSFile`). Does not `touch` sources.
 * Clean deletes created objects after the build `{ -c, --clean }`
+* JSON build report `{--json <file>}`: one entry per target with `status` (`built`, `failed`, `skipped`, `planned`, `not_built`), the paste-ready `command`, the target's joblog messages and the compile errors read from its EVFEVENT member (`file`, `line`, `column`, `id`, `severity`, `message`; needs `OPTION(*EVENTF)`, the MC default). For CI and agents; the console log is unchanged.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Build (or generation) succeeded |
+| `1` | A target or command failed |
+| `2` | Invalid arguments |
 
 ## Params permutation
 

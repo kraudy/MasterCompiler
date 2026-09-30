@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -46,11 +47,13 @@ public class MasterCompiler{
   private boolean clean = false;  // Delete spec objects after compilation
   private boolean diff = false;     // Diff build flag
   private boolean noMigrate = false;  // Source migration
+  private String jsonReport = null;   // --json <file>: machine-readable build report
 
   private boolean compilationError = false;
   private int builtCount = 0;
   private int skippedCount = 0;
   private Set<TargetKey> rebuildSet = new HashSet<TargetKey>();
+  private BuildReport report = new BuildReport();
 
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
@@ -81,6 +84,10 @@ public class MasterCompiler{
     this.clean = clean;
     this.diff = diff;
     this.noMigrate = noMigrate;
+  }
+
+  public void setJsonReport(String jsonReport) {
+    this.jsonReport = jsonReport;
   }
 
   public void build() {
@@ -137,6 +144,7 @@ public class MasterCompiler{
 
       /* Get full compiler exception context */
       logger.error(e.getFullContext());
+      if (report.failed == 0 && report.error == null) report.error = e.getMessage();
 
       /* Global compiler failure */
       try{
@@ -152,6 +160,7 @@ public class MasterCompiler{
       compilationError = true;
       /* Unhandled Exception. Fail loudly */
       logger.error("Unhandled Exception. Fail loudly", e);
+      if (report.failed == 0 && report.error == null) report.error = e.toString();
 
     } finally {
       if (clean) {
@@ -160,6 +169,8 @@ public class MasterCompiler{
       }
       /* Show chain of commands */
       if (verbose) logger.info("Chain of commands: {}", commandExec.getExecutionChain());
+
+      if (jsonReport != null) writeReport();
     }
 
   }
@@ -174,6 +185,7 @@ public class MasterCompiler{
       if (diff) {
         if (!rebuildSet.contains(key)) {
           this.skippedCount++;
+          report.add(key.asString(), BuildReport.SKIPPED);
           if (verbose) logger.info("Skipping unchanged target: " + key.asString() + key.getTimestmaps());
           continue;
         }
@@ -181,6 +193,9 @@ public class MasterCompiler{
 
       this.builtCount++;
       if (verbose) logger.info("Building: " + key.asString());
+
+      Timestamp targetStart = jsonReport != null ? commandExec.getCurrentTime() : null;
+      String command = null;
 
       try{
 
@@ -210,6 +225,7 @@ public class MasterCompiler{
         if (!noMigrate) migrator.migrateSource(key);
 
         /* Execute compilation command */
+        if (jsonReport != null) command = CommandStringParser.toPasteableCommand(key);
         commandExec.executeCommand(key);
 
         /* Per target success */
@@ -224,9 +240,12 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.after);
         } 
 
+        if (jsonReport != null) reportTarget(key, dryRun ? BuildReport.PLANNED : BuildReport.BUILT, command, null, targetStart);
+
       } catch (CompilerException e){
         compilationError = true;
         if (verbose) logger.error("Target compilation failed: " + key.asString());
+        if (jsonReport != null) reportTarget(key, BuildReport.FAILED, command, e.getMessage(), targetStart);
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
@@ -239,6 +258,7 @@ public class MasterCompiler{
       } catch (Exception e){
         compilationError = true;
         if (verbose) logger.error("Unhandled exception in Target: " + key.asString());
+        if (jsonReport != null) reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
 
         throw e; // Raise
 
@@ -247,6 +267,47 @@ public class MasterCompiler{
       }
     }
 
+  }
+
+  /* Adds the target to the report with its joblog and, when compiled, its EVFEVENT errors */
+  private void reportTarget(TargetKey key, String status, String command, String error, Timestamp since) {
+    BuildReport.TargetResult result = report.add(key.asString(), status);
+    result.command = command;
+    result.error = error;
+    if (dryRun || since == null) return;
+
+    try {
+      result.joblog = commandExec.getJoblogMessages(since);
+      if (command != null) {
+        String baseDir = globalSpec != null ? globalSpec.getBaseDirectory() : null;
+        result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, baseDir);
+      }
+    } catch (Exception e) {
+      logger.info("Could not collect report details for {}: {}", key.asString(), e.getMessage());
+    }
+  }
+
+  /* Targets never reached are listed as not built, then the report is written */
+  private void writeReport() {
+    if (compilationError) report.success = false;
+    report.dryRun = dryRun;
+
+    Set<String> reported = new HashSet<String>();
+    for (BuildReport.TargetResult result : report.targets) reported.add(result.target);
+    for (TargetKey key : globalSpec.targets.keySet()) {
+      if (reported.contains(key.asString())) continue;
+      try {
+        if (key.isCurLib()) key.setLibrary(getCurLIb());  // same library naming as the built targets
+      } catch (Exception ignored) {}
+      report.add(key.asString(), BuildReport.NOT_BUILT);
+    }
+
+    try {
+      report.writeToFile(jsonReport);
+      logger.info("Build report: {}", jsonReport);
+    } catch (Exception e) {
+      logger.error("Could not write build report " + jsonReport, e);
+    }
   }
 
   public boolean foundCompilationError(){
@@ -334,9 +395,15 @@ public class MasterCompiler{
   }
 
   public static void main(String... args ){
+    System.exit(run(args));
+  }
+
+  /* Exit code: 0 success, 1 build failed, 2 invalid arguments */
+  public static int run(String... args){
     AS400 system = null;
     MasterCompiler compiler = null;
     Connection connection = null;
+    int exitCode = 0;
     try {
       if (args.length == 0) throw new IllegalArgumentException("Params are required");
 
@@ -381,7 +448,7 @@ public class MasterCompiler{
         }
         SpecWriter.writeToFile(generated, parser.getOutputFile(), scanRootComment);
         logger.info("Generated YAML: {}", parser.getOutputFile());
-        return;
+        return exitCode;
       }
 
       system = IBMiDotEnv.getNewSystemConnection(true); // Get system
@@ -418,17 +485,22 @@ public class MasterCompiler{
             parser.isDiff(),
             parser.isNoMigrate()
         );
+      compiler.setJsonReport(parser.getJsonReport());
       compiler.build();
+      if (compiler.foundCompilationError()) exitCode = 1;
 
     } catch (IllegalArgumentException e) {
       logger.error("Parsing error: ", e);
       logger.info(ArgParser.getUsage());
+      exitCode = 2;
       
     } catch (CompilerException e){
       logger.error(e.getFullContext());
+      exitCode = 1;
 
     } catch (Exception e) {
       logger.error("Unhandled  exception", e);
+      exitCode = 1;
     } finally {
        try {
         if (connection != null && !connection.isClosed()) {
@@ -442,5 +514,6 @@ public class MasterCompiler{
         logger.error("Error cleaning up", e);
       }
     }
+    return exitCode;
   }
 }
