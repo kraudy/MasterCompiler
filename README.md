@@ -23,7 +23,7 @@ Java 8.
 ### Build 
 
 * `git clone git@github.com:kraudy/MasterCompiler.git`
-* `mvn clean package`. 
+* `./mvnw clean package` (Maven wrapper: only Java is needed, Maven downloads on first run).
 
 ### Test
 
@@ -39,7 +39,7 @@ IBMI_PASSWORD=BIGMONEY
 
 Then, run the integration test to watch a thing of beauty. Note that this is the *heavy* test.
 
-* `mvn clean verify -Pintegration-heavy`
+* `./mvnw clean verify -Pintegration-heavy`
 
 [Tests doc](./docs/Tests.md#integration-tests)
 

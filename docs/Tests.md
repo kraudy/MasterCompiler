@@ -18,7 +18,7 @@ These classes are very important because they contain core logic functionality.
 * [TargetKey Test](../src/test/java/com/github/kraudy/compiler/TargetKeyTest.java)
 * [Utilities Test](../src/test/java/com/github/kraudy/compiler/UtilitiesTest.java)
 
-These test are executed automatically with every `mvn clean package`. 
+These test are executed automatically with every `./mvnw clean package`. 
 
 ## Dependency scan tests
 
@@ -34,10 +34,10 @@ Every CRT* / RUNSQLSTM line from a real `--scan -o` of McOnTobi and McOnSJLennon
 `CompilePlanAssert.assertGoldenCommands` matches **all** of them (verb, object, SRCSTMF / MODULE / PGM / …). A miss or extra is reported as a full list. `TGTRLS` from live object inspection is not required on a local scan.
 
 ```bash
-mvn test -Dtest=ScanDepsTest
+./mvnw test -Dtest=ScanDepsTest
 ```
 
-Needs `git` on PATH and network. Tagged `@Tag("deps")`; Surefire runs it with the other local tests (`mvn test` / `mvn clean package`). IBM i is not used here.
+Needs `git` on PATH and network. Tagged `@Tag("deps")`; Surefire runs it with the other local tests (`./mvnw test` / `./mvnw clean package`). IBM i is not used here.
 
 ## Incremental (`--diff`) tests
 
@@ -47,7 +47,7 @@ Rebuild **logic** is local. IBM i only proves that a real compile skips the rest
 * [ScanDiffTest](../src/test/java/com/github/kraudy/compiler/ScanDiffTest.java) — clone McOnTobi, `--scan`, bump one local file mtime, assert fan-out (`ARTICLE.PF`, `ART301`, `ART200`, `ARTICLE.RPGLEINC` → ART201).
 
 ```bash
-mvn test -Dtest=DiffPlannerTest,ScanDiffTest
+./mvnw test -Dtest=DiffPlannerTest,ScanDiffTest
 ```
 
 `StreamCompilationIT.test_Diff_Build` (`-Pintegration-diff`) remains the on-box check: full compile, touch `ARTICLE.PF`, `--diff`, dependents rebuilt, existing BNDDIR skipped.
@@ -70,9 +70,9 @@ IBMI_PASSWORD=BIGMONEY
 
 Then you get various flavors of tests.
 ```bash
-mvn clean verify -Pintegration-heavy # Build the full tobi recursive test
+./mvnw clean verify -Pintegration-heavy # Build the full tobi recursive test
 
-mvn clean verify -Pintegration-fast # Build an object with many dependencies
+./mvnw clean verify -Pintegration-fast # Build an object with many dependencies
 
 ```
 

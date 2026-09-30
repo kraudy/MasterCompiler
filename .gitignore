@@ -1,3 +1,4 @@
 target/
 notes.md
 .env
+dependency-reduced-pom.xml
