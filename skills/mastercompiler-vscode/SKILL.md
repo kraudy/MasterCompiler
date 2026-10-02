@@ -73,6 +73,13 @@ With several Code for IBM i connections, the server asks which one to use each t
 `--connection "<name>"` fixes one. With no Code for IBM i connection, VS Code also asks for
 host and user.
 
+**SSH or host servers.** By default MC reaches the IBM i through the host servers (ports 449,
+8470–8476, the ones ACS uses). If those are blocked, or the user prefers SSH (port 22, what Code
+for IBM i uses), add `--ssh` to the setup command: MC then uploads itself and the sources over
+SSH and runs on the IBM i. It logs in with the user's SSH key (`~/.ssh/id_ed25519`, `id_ecdsa`,
+`id_rsa`, or the Code for IBM i connection's key) or the password. Unsure which one works? Ask
+whether ACS connects from this PC; if not, use `--ssh`.
+
 If you cannot run commands but can create files: with the user's OK, read their Code for IBM i
 connections (`code-for-ibmi.connections` in VS Code's user `settings.json`) and create
 `.vscode/mcp.json` from the template under "Manual configuration", with the full paths of their
@@ -138,7 +145,9 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | `IBMI_PASSWORD is not set` | `mcp.json` lacks the password input or `env` entry; rerun `--setup-vscode`. |
 | `Several Code for IBM i connections` | Only when starting MC by hand: pass `--connection "<name>"` (setup's `mcp.json` asks at start). |
 | `VS Code user settings not found` | Set `MC_VSCODE_SETTINGS` to the `settings.json` holding `code-for-ibmi.connections`, or configure without `--code4i`. |
-| Connection refused / timeouts | MC uses the IBM i host servers (the same as ACS: ports 449, 8470-8476, or 9470-9476 with TLS). If ACS works from this PC, MC should too. |
+| Connection refused / timeouts | Without `--ssh`, MC uses the IBM i host servers (the same as ACS: ports 449, 8470-8476, or 9470-9476 with TLS). If ACS does not work from this PC, set up with `--ssh` (port 22, like Code for IBM i). |
+| `--ssh`: host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator. |
+| `--ssh`: no key and no password | Enter the password when the server starts, or create an SSH key the IBM i accepts. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |
 
 Once MC's tools work, follow the `mastercompiler` skill for the edit–compile–fix loop.

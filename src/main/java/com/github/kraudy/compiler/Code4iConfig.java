@@ -27,12 +27,16 @@ public final class Code4iConfig {
   public final String currentLibrary;
   public final List<String> libraryList;
   public final String homeDirectory;
+  public final int port;                // SSH port Code for IBM i uses (--ssh)
+  public final String privateKeyPath;   // SSH key, when the connection has one
 
   private Code4iConfig(String name, String host, String username, String currentLibrary,
-      List<String> libraryList, String homeDirectory) {
+      List<String> libraryList, String homeDirectory, int port, String privateKeyPath) {
     this.name = name;
     this.host = host;
     this.username = username;
+    this.port = port;
+    this.privateKeyPath = privateKeyPath;
     this.currentLibrary = currentLibrary;
     this.libraryList = libraryList;
     this.homeDirectory = homeDirectory;
@@ -95,8 +99,11 @@ public final class Code4iConfig {
     String username = connection.path("username").asText();
     if (homeDirectory == null) homeDirectory = "/home/" + username.toUpperCase();
 
+    String key = text(connection, "privateKeyPath");
+    if (key == null) key = text(connection, "privateKey");
     return new Code4iConfig(name, connection.path("host").asText(), username,
-        currentLibrary != null ? currentLibrary.toUpperCase() : null, libraryList, homeDirectory);
+        currentLibrary != null ? currentLibrary.toUpperCase() : null, libraryList, homeDirectory,
+        connection.path("port").asInt(22), key);
   }
 
   /* VS Code user settings: MC_VSCODE_SETTINGS, else the usual per-OS locations (Code, Insiders, VSCodium) */

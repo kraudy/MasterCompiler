@@ -33,6 +33,19 @@ Or ask Copilot: *"set up MasterCompiler for this repository"*. The `mastercompil
 what to ask you when it cannot do a step itself. To make that skill available before MC is set up, copy
 [`skills/mastercompiler-vscode`](../skills/mastercompiler-vscode) into the repository's `.github/skills/`.
 
+## SSH instead of the host servers
+
+By default MC on the PC talks to the IBM i through the host servers (ports 449, 8470–8476), like ACS. Corporate
+firewalls often block those while SSH (port 22, what Code for IBM i uses) is open. Then set it up with `--ssh`:
+
+```powershell
+java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --ssh --print
+```
+
+With `--ssh`, MC uploads itself and the project's changed sources over SSH and runs on the IBM i as your own job.
+It logs in with your SSH key (`%USERPROFILE%\.ssh\id_ed25519`, `id_ecdsa` or `id_rsa`, or the key of the Code for
+IBM i connection) or the password you enter when the server starts (leave it empty when you use a key).
+
 ## What the agent gets
 
 | Tool | Use |

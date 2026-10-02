@@ -75,7 +75,7 @@ public class Code4iConfigTest {
     assertTrue(VscodeSetup.isPlainJson(mcp));
 
     ObjectNode root = (ObjectNode) new ObjectMapper().readTree(mcp);
-    VscodeSetup.addServer(root, Collections.singletonList(dev));
+    VscodeSetup.addServer(root, Collections.singletonList(dev), false);
     assertTrue(root.path("servers").has("other"), "existing servers are kept");
     JsonNode mc = root.path("servers").path(VscodeSetup.SERVER);
     assertEquals("stdio", mc.path("type").asText());
@@ -90,7 +90,8 @@ public class Code4iConfigTest {
     List<Code4iConfig> all = Code4iConfig.loadAll(write(dir.resolve("settings.json"), SETTINGS));
     assertEquals(2, all.size());
 
-    ObjectNode fragment = VscodeSetup.fragment(all);
+    ObjectNode fragment = VscodeSetup.fragment(all, true);
+    assertTrue(fragment.path("servers").path(VscodeSetup.SERVER).path("args").toString().contains("--ssh"));
     JsonNode pick = fragment.path("inputs").get(0);
     assertEquals("pickString", pick.path("type").asText());
     assertEquals("[\"DEV\",\"PROD\"]", pick.path("options").toString());
@@ -105,7 +106,7 @@ public class Code4iConfigTest {
 
   @Test
   void test_Setup_Without_Code4i_Prompts_For_Host_And_User() {
-    JsonNode env = VscodeSetup.fragment(Collections.<Code4iConfig>emptyList())
+    JsonNode env = VscodeSetup.fragment(Collections.<Code4iConfig>emptyList(), false)
         .path("servers").path(VscodeSetup.SERVER).path("env");
     assertEquals("${input:ibmiHost}", env.path("IBMI_HOSTNAME").asText());
     assertEquals("${input:ibmiUser}", env.path("IBMI_USERNAME").asText());

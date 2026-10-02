@@ -26,6 +26,9 @@ public class ArgParser {
     CODE4I        (null, "code4i",       Kind.FLAG,  "Connect with the Code for IBM i connection from VS Code settings (password: IBMI_PASSWORD)"),
     CONNECTION    (null, "connection",   Kind.VALUE, "Code for IBM i connection name, when there are several"),
     SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json and .github/skills for Copilot in the --project folder (default: current)"),
+    LIBL          (null, "libl",         Kind.VALUE, "Library list for the build job (CHGLIBL), space-separated"),
+    CURLIB        (null, "curlib",       Kind.VALUE, "Current library for the build job (CHGCURLIB)"),
+    SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
@@ -104,6 +107,9 @@ public class ArgParser {
   private String connection;
   private boolean setupVscode;
   private boolean print;
+  private String libl;
+  private String curlib;
+  private boolean ssh;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -201,6 +207,7 @@ public class ArgParser {
       case CODE4I:        code4i = true; break;
       case SETUP_VSCODE:  setupVscode = true; break;
       case PRINT:         print = true; break;
+      case SSH:           ssh = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -242,6 +249,12 @@ public class ArgParser {
       case PROJECT:
         projectRoot = value;
         break;
+      case LIBL:
+        libl = value;
+        break;
+      case CURLIB:
+        curlib = value;
+        break;
       case CONNECTION:
         connection = value;
         code4i = true;
@@ -256,12 +269,18 @@ public class ArgParser {
    * Call before using getters that require a mode.
    */
   public void validate() {
+    if (ssh && !mcp && !setupVscode) {
+      throw new IllegalArgumentException("--ssh goes with --mcp (or --setup-vscode)");
+    }
+    if (ssh && mcp && projectRoot == null) {
+      throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
+    }
     if (print && !setupVscode) {
       throw new IllegalArgumentException("--print goes with --setup-vscode");
     }
     if (setupVscode) {
       if (yamlFile != null || scanRoot != null || tobiRoot != null || mcp || importSelection != null) {
-        throw new IllegalArgumentException("--setup-vscode takes only --project, --code4i, --connection, -v");
+        throw new IllegalArgumentException("--setup-vscode takes only --project, --connection, --ssh, --print, -v");
       }
       return;
     }
@@ -357,6 +376,18 @@ public class ArgParser {
 
   public boolean hasScan() {
     return scanRoot != null;
+  }
+
+  public String getLibl() {
+    return libl;
+  }
+
+  public String getCurlib() {
+    return curlib;
+  }
+
+  public boolean isSsh() {
+    return ssh;
   }
 
   public boolean isPrint() {

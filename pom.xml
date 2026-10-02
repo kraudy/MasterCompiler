@@ -22,6 +22,12 @@
   <dependencies>
 
     <dependency>
+        <!-- SSH transport (the ssh option): maintained JSch fork, Java 8 compatible -->
+        <groupId>com.github.mwiede</groupId>
+        <artifactId>jsch</artifactId>
+        <version>0.2.25</version>
+    </dependency>
+    <dependency>
         <groupId>net.sf.jt400</groupId>
         <artifactId>jt400</artifactId>
         <version>21.0.4</version>
@@ -138,6 +144,10 @@
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>com.github.kraudy.compiler.MasterCompiler</mainClass>
+                  <manifestEntries>
+                    <!-- JSch's Java 15+ classes (ssh-ed25519) live under META-INF/versions -->
+                    <Multi-Release>true</Multi-Release>
+                  </manifestEntries>
                 </transformer>
               </transformers>
             </configuration>

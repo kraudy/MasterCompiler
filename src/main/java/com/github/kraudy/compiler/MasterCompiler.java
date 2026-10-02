@@ -57,7 +57,7 @@ public class MasterCompiler{
   private boolean collectReport = false; // keep the report in memory (MCP) even without --json
   private Set<String> changedFiles = null; // explicit changed sources (MCP build/plan files), like --since
   private boolean keepGoing = false;  // --keep-going: after a failure, build everything that does not depend on it
-  private Code4iConfig code4i = null; // --code4i: library list of the developer's Code for IBM i connection
+  private List<CommandObject> libraryHooks = new ArrayList<CommandObject>(); // --code4i / --libl / --curlib
 
   private boolean compilationError = false;
   private int builtCount = 0;
@@ -117,8 +117,8 @@ public class MasterCompiler{
     this.changedFiles = changedFiles;
   }
 
-  public void setCode4i(Code4iConfig code4i) {
-    this.code4i = code4i;
+  public void setLibraryHooks(List<CommandObject> libraryHooks) {
+    this.libraryHooks = libraryHooks;
   }
 
   public void setKeepGoing(boolean keepGoing) {
@@ -160,8 +160,8 @@ public class MasterCompiler{
     compileBaseDir = baseDir;
 
     try {
-      /* The build job gets the developer's Code for IBM i library list (spec hooks run after it) */
-      if (code4i != null) globalSpec.before.addAll(0, code4i.libraryHooks());
+      /* The build job gets the developer's library list (spec hooks run after it) */
+      globalSpec.before.addAll(0, libraryHooks);
 
       /* Push local sources to the IFS; the job then compiles from that copy */
       if (push != null) {
@@ -533,6 +533,21 @@ public class MasterCompiler{
     return parser.isCode4i() ? Code4iConfig.load(parser.getConnection()) : null;
   }
 
+  /* CHGLIBL / CHGCURLIB for the build job: --libl / --curlib, else the Code for IBM i connection's */
+  static List<CommandObject> libraryHooks(ArgParser parser, Code4iConfig code4i) {
+    List<CommandObject> hooks = new ArrayList<CommandObject>();
+    if (parser.getLibl() != null || parser.getCurlib() != null) {
+      if (parser.getLibl() != null) {
+        hooks.add(new CommandObject(SysCmd.CHGLIBL).put(ParamCmd.LIBL, parser.getLibl().trim().toUpperCase()));
+      }
+      if (parser.getCurlib() != null) {
+        hooks.add(new CommandObject(SysCmd.CHGCURLIB).put(ParamCmd.CURLIB, parser.getCurlib().trim().toUpperCase()));
+      }
+      return hooks;
+    }
+    return code4i != null ? code4i.libraryHooks() : hooks;
+  }
+
   /* --push, or with --code4i off the IBM i: <home>/mc/<project folder> */
   static String pushDir(ArgParser parser, Code4iConfig code4i, BuildSpec spec) {
     if (parser.getPush() != null) return parser.getPush();
@@ -574,7 +589,8 @@ public class MasterCompiler{
 
       /* MCP server: one IBM i job kept across tool calls; stdout becomes the protocol channel */
       if (parser.isMcp()) {
-        new McpServer(parser).serve();
+        if (parser.isSsh()) new SshMcpProxy(parser).serve();  // MC runs on the IBM i, reached over SSH
+        else new McpServer(parser).serve();
         return exitCode;
       }
 
@@ -665,7 +681,7 @@ public class MasterCompiler{
       compiler.setJsonReport(parser.getJsonReport());
       compiler.setSince(parser.getSince());
       Code4iConfig code4i = code4i(parser);
-      compiler.setCode4i(code4i);
+      compiler.setLibraryHooks(libraryHooks(parser, code4i));
       compiler.setPush(pushDir(parser, code4i, spec));
       compiler.setKeepGoing(parser.isKeepGoing());
       compiler.build();

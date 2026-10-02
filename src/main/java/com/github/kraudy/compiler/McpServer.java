@@ -203,7 +203,7 @@ public class McpServer {
         parser.isDebug(), parser.isVerbose(), false, false, parser.isNoMigrate());
     compiler.setCollectReport(true);
     Code4iConfig code4i = MasterCompiler.code4i(parser);
-    compiler.setCode4i(code4i);
+    compiler.setLibraryHooks(MasterCompiler.libraryHooks(parser, code4i));
     compiler.setPush(MasterCompiler.pushDir(parser, code4i, spec));
     /* One round trip should show every error: keep going unless the agent asks otherwise */
     compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));

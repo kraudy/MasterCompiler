@@ -74,6 +74,10 @@ public final class VscodeSetup {
     }
     if (connections.size() > 1) out.append("  Several connections: you pick one each time the server starts.\n");
 
+    if (parser.isSsh()) {
+      out.append("  SSH: MC runs on the IBM i through the SSH port Code for IBM i uses (an SSH key or the password).\n");
+    }
+
     /* .vscode/mcp.json */
     File mcp = new File(project, ".vscode/mcp.json");
     out.append("\n.vscode/mcp.json\n");
@@ -81,10 +85,10 @@ public final class VscodeSetup {
       out.append("  kept: already has a \"").append(SERVER).append("\" server\n");
     } else if (mcp.isFile() && !isPlainJson(mcp)) {
       out.append("  not changed: it has comments, which rewriting would lose. Add this to it by hand:\n")
-          .append(indent(WRITER.writeValueAsString(fragment(connections)))).append('\n');
+          .append(indent(WRITER.writeValueAsString(fragment(connections, parser.isSsh())))).append('\n');
     } else {
       ObjectNode content = mcp.isFile() ? (ObjectNode) JSONC.readTree(mcp) : WRITER.createObjectNode();
-      addServer(content, connections);
+      addServer(content, connections, parser.isSsh());
       if (print) {
         out.append(mcp.isFile() ? "  would add the server, keeping the rest:\n" : "  would write:\n")
             .append(indent(WRITER.writeValueAsString(content))).append('\n');
@@ -117,8 +121,8 @@ public final class VscodeSetup {
   }
 
   /* The server (and its inputs) added to an mcp.json content; inputs already there are kept */
-  static void addServer(ObjectNode root, List<Code4iConfig> connections) {
-    ObjectNode fragment = fragment(connections);
+  static void addServer(ObjectNode root, List<Code4iConfig> connections, boolean ssh) {
+    ObjectNode fragment = fragment(connections, ssh);
     ArrayNode inputs = root.has("inputs") ? (ArrayNode) root.get("inputs") : root.putArray("inputs");
     for (JsonNode input : fragment.path("inputs")) {
       boolean present = false;
@@ -130,7 +134,7 @@ public final class VscodeSetup {
   }
 
   /* {"inputs": [...], "servers": {"mastercompiler": {...}}} for these connections */
-  static ObjectNode fragment(List<Code4iConfig> connections) {
+  static ObjectNode fragment(List<Code4iConfig> connections, boolean ssh) {
     ObjectNode root = WRITER.createObjectNode();
     ArrayNode inputs = root.putArray("inputs");
 
@@ -139,6 +143,7 @@ public final class VscodeSetup {
     server.put("command", javaExecutable());
     ArrayNode args = server.putArray("args");
     args.add("-jar").add(jarPath()).add("--mcp");
+    if (ssh) args.add("--ssh");
     ObjectNode env = WRITER.createObjectNode();
 
     if (connections.size() == 1) {
@@ -160,7 +165,9 @@ public final class VscodeSetup {
     }
     args.add("--project").add("${workspaceFolder}");
 
-    input(inputs, "ibmiPassword", "IBM i password (the one you use in Code for IBM i / ACS)", true);
+    input(inputs, "ibmiPassword", ssh
+        ? "IBM i password (leave empty if you log in with an SSH key)"
+        : "IBM i password (the one you use in Code for IBM i / ACS)", true);
     env.put("IBMI_PASSWORD", "${input:ibmiPassword}");
     server.set("env", env);
     return root;
@@ -213,7 +220,7 @@ public final class VscodeSetup {
     return (exe.isFile() ? exe : new File(bin, "java")).getAbsolutePath();
   }
 
-  private static String jarPath() {
+  static String jarPath() {
     try {
       File location = new File(MasterCompiler.class.getProtectionDomain().getCodeSource().getLocation().toURI());
       if (location.isFile()) return location.getAbsolutePath();
