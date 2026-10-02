@@ -49,25 +49,36 @@ public final class Code4iConfig {
   }
 
   static Code4iConfig load(File settingsFile, String connectionName) throws Exception {
+    List<Code4iConfig> all = loadAll(settingsFile);
+    List<String> names = new ArrayList<String>();
+    for (Code4iConfig c : all) names.add(c.name);
+    for (Code4iConfig c : all) {
+      if (connectionName == null ? all.size() == 1 : connectionName.equals(c.name)) return c;
+    }
+    throw new IllegalArgumentException(names.isEmpty()
+        ? "No Code for IBM i connections in " + settingsFile
+        : (connectionName == null ? "Several Code for IBM i connections, pick one with --connection <name>: "
+            : "No Code for IBM i connection named '" + connectionName + "'. Connections: ") + names);
+  }
+
+  /* Every Code for IBM i connection in the VS Code user settings (empty when there are none) */
+  public static List<Code4iConfig> loadAll() throws Exception {
+    File settings = settingsFile();
+    return settings == null ? new ArrayList<Code4iConfig>() : loadAll(settings);
+  }
+
+  static List<Code4iConfig> loadAll(File settingsFile) throws Exception {
     ObjectMapper mapper = JsonMapper.builder()
         .enable(JsonReadFeature.ALLOW_JAVA_COMMENTS)
         .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
         .build();
     JsonNode root = mapper.readTree(settingsFile);
+    List<Code4iConfig> all = new ArrayList<Code4iConfig>();
+    for (JsonNode c : root.path("code-for-ibmi.connections")) all.add(fromSettings(root, c));
+    return all;
+  }
 
-    JsonNode connections = root.path("code-for-ibmi.connections");
-    List<String> names = new ArrayList<String>();
-    JsonNode connection = null;
-    for (JsonNode c : connections) {
-      names.add(c.path("name").asText());
-      if (connectionName == null ? connections.size() == 1 : connectionName.equals(c.path("name").asText())) connection = c;
-    }
-    if (connection == null) {
-      throw new IllegalArgumentException(names.isEmpty()
-          ? "No Code for IBM i connections in " + settingsFile
-          : (connectionName == null ? "Several Code for IBM i connections, pick one with --code4i <name>: "
-              : "No Code for IBM i connection named '" + connectionName + "'. Connections: ") + names);
-    }
+  private static Code4iConfig fromSettings(JsonNode root, JsonNode connection) {
     String name = connection.path("name").asText();
 
     String currentLibrary = null;

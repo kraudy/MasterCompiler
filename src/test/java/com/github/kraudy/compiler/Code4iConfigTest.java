@@ -6,6 +6,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 
@@ -68,11 +70,12 @@ public class Code4iConfigTest {
   @Test
   void test_Setup_Merges_Into_Existing_McpJson(@TempDir Path dir) throws Exception {
     File mcp = write(dir.resolve(".vscode/mcp.json"),
-        "{ // mine\n \"servers\": { \"other\": { \"type\": \"stdio\", \"command\": \"x\" } }, }\n");
+        "{ \"servers\": { \"other\": { \"type\": \"stdio\", \"command\": \"x\" } } }\n");
     Code4iConfig dev = Code4iConfig.load(write(dir.resolve("settings.json"), SETTINGS), "DEV");
+    assertTrue(VscodeSetup.isPlainJson(mcp));
 
-    assertTrue(VscodeSetup.writeMcpJson(mcp, dev));
-    JsonNode root = new ObjectMapper().readTree(mcp);
+    ObjectNode root = (ObjectNode) new ObjectMapper().readTree(mcp);
+    VscodeSetup.addServer(root, Collections.singletonList(dev));
     assertTrue(root.path("servers").has("other"), "existing servers are kept");
     JsonNode mc = root.path("servers").path(VscodeSetup.SERVER);
     assertEquals("stdio", mc.path("type").asText());
@@ -80,15 +83,30 @@ public class Code4iConfigTest {
     assertTrue(mc.path("args").toString().contains("DEV"));
     assertEquals("${input:ibmiPassword}", mc.path("env").path("IBMI_PASSWORD").asText());
     assertTrue(root.path("inputs").get(0).path("password").asBoolean());
-
-    assertFalse(VscodeSetup.writeMcpJson(mcp, dev), "a second run keeps the existing server");
   }
 
   @Test
-  void test_Setup_Without_Code4i_Prompts_For_Host_And_User(@TempDir Path dir) throws Exception {
-    File mcp = dir.resolve(".vscode/mcp.json").toFile();
-    assertTrue(VscodeSetup.writeMcpJson(mcp, null));
-    JsonNode env = new ObjectMapper().readTree(mcp).path("servers").path(VscodeSetup.SERVER).path("env");
+  void test_Setup_Several_Connections_Picked_At_Start(@TempDir Path dir) throws Exception {
+    List<Code4iConfig> all = Code4iConfig.loadAll(write(dir.resolve("settings.json"), SETTINGS));
+    assertEquals(2, all.size());
+
+    ObjectNode fragment = VscodeSetup.fragment(all);
+    JsonNode pick = fragment.path("inputs").get(0);
+    assertEquals("pickString", pick.path("type").asText());
+    assertEquals("[\"DEV\",\"PROD\"]", pick.path("options").toString());
+    assertTrue(fragment.path("servers").path(VscodeSetup.SERVER).path("args").toString().contains("${input:ibmiConnection}"));
+  }
+
+  @Test
+  void test_Setup_Leaves_Commented_McpJson_Alone(@TempDir Path dir) throws Exception {
+    File mcp = write(dir.resolve(".vscode/mcp.json"), "{ // mine\n \"servers\": {}, }\n");
+    assertFalse(VscodeSetup.isPlainJson(mcp), "comments would be lost on rewrite");
+  }
+
+  @Test
+  void test_Setup_Without_Code4i_Prompts_For_Host_And_User() {
+    JsonNode env = VscodeSetup.fragment(Collections.<Code4iConfig>emptyList())
+        .path("servers").path(VscodeSetup.SERVER).path("env");
     assertEquals("${input:ibmiHost}", env.path("IBMI_HOSTNAME").asText());
     assertEquals("${input:ibmiUser}", env.path("IBMI_USERNAME").asText());
   }

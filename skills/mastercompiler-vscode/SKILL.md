@@ -17,8 +17,9 @@ repository's sources to the IBM i (`--push`), compiles there and returns errors 
 and line. It reuses the Code for IBM i connection (host, user, current library, library list),
 so the only thing the user types is their IBM i password, once, in a VS Code prompt.
 
-Run the steps yourself when you can execute terminal commands. When you cannot, or a step
-fails, give the user the exact commands and explain what each one does.
+Run the steps yourself when you can execute terminal commands. When you cannot (some chat
+modes only read and create files), or a step fails, give the user the exact commands and
+explain what each one does. Never write into the repository without asking first.
 
 ## 1. Java
 
@@ -26,9 +27,17 @@ fails, give the user the exact commands and explain what each one does.
 java -version
 ```
 
-MC needs Java 8 or newer. If it is missing, tell the user: a portable JDK zip (for example
-Eclipse Temurin) unzipped anywhere works without admin rights; then use its `bin\java.exe`
-by full path in the next steps. Do not install software system-wide without asking.
+MC needs Java 8 or newer. When `java` is not on PATH, look for one that is already installed
+before asking the user to install anything:
+
+- VS Code's Red Hat Java extension bundles one:
+  `%USERPROFILE%\.vscode\extensions\redhat.java-*\jre\*\bin\java.exe`
+  (macOS / Linux: `~/.vscode/extensions/redhat.java-*/jre/*/bin/java`).
+- A JDK under `C:\Program Files\Java`, `C:\Program Files\Eclipse Adoptium` or `JAVA_HOME`.
+
+Use the full path of that `java` in the next steps. If there is none: a portable JDK zip (for
+example Eclipse Temurin) unzipped anywhere works without admin rights. Do not install software
+system-wide without asking.
 
 ## 2. The MasterCompiler jar
 
@@ -43,17 +52,31 @@ macOS / Linux: `curl -L -o ~/tools/MasterCompiler.jar <same URL>`.
 
 ## 3. Configure the repository
 
-From the repository root:
+Preview first, from the repository root; it writes nothing:
 
 ```powershell
-java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project .
+java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --print
 ```
 
-It writes `.vscode/mcp.json` (the `mastercompiler` server, started with this same java and
-jar) and installs MC's skills into `.github/skills/`. It prints which Code for IBM i
-connection it used. If the user has several, it stops and lists them: rerun with
-`--connection "<name>"`. With no Code for IBM i connection, VS Code will also ask for host
-and user.
+Show the user the preview and get their OK. It lists, per Code for IBM i connection, the
+library objects will be created in (builds replace objects there: it must be a development
+library), the library list, and the IBM i folder sources are uploaded to. Then run the same
+command without `--print`. It:
+
+- adds the `mastercompiler` server to `.vscode/mcp.json`, started with this same java and jar,
+  keeping any other servers. If the file has comments it is not changed (rewriting would lose
+  them); MC prints the entry to paste instead.
+- installs MC's skills into `.github/skills/`.
+
+With several Code for IBM i connections, the server asks which one to use each time it starts
+(a `pickString` input), so the user can switch systems without running setup again;
+`--connection "<name>"` fixes one. With no Code for IBM i connection, VS Code also asks for
+host and user.
+
+If you cannot run commands but can create files: with the user's OK, read their Code for IBM i
+connections (`code-for-ibmi.connections` in VS Code's user `settings.json`) and create
+`.vscode/mcp.json` from the template under "Manual configuration", with the full paths of their
+java and jar.
 
 The server runs `--project ${workspaceFolder}`: MC uses `build.yaml` when the repository has
 one, TOBi `Rules.mk` files when it is a TOBi / Bob project, and otherwise scans the sources.
@@ -64,7 +87,7 @@ Tell the user:
 
 1. Command Palette → **MCP: List Servers** → `mastercompiler` → **Start** (VS Code may ask
    to trust the server first).
-2. Enter the IBM i password when prompted. VS Code stores it securely and passes it only to
+2. Pick the connection (when there are several), then enter the IBM i password. VS Code stores it securely and passes it only to
    MC; it is never written to the repository.
 3. Back in Copilot Chat (Agent mode), MC's tools are available.
 
@@ -78,6 +101,8 @@ IBM i and understood the project.
 ```json
 {
   "inputs": [
+    { "id": "ibmiConnection", "type": "pickString", "description": "Code for IBM i connection to build on",
+      "options": ["CONNECTION 1", "CONNECTION 2"], "default": "CONNECTION 1" },
     { "id": "ibmiPassword", "type": "promptString", "description": "IBM i password", "password": true }
   ],
   "servers": {
@@ -85,12 +110,14 @@ IBM i and understood the project.
       "type": "stdio",
       "command": "C:\\path\\to\\java.exe",
       "args": ["-jar", "C:\\Users\\USER\\tools\\MasterCompiler.jar",
-               "--mcp", "--code4i", "--connection", "CONNECTION NAME", "--project", "${workspaceFolder}"],
+               "--mcp", "--code4i", "--connection", "${input:ibmiConnection}", "--project", "${workspaceFolder}"],
       "env": { "IBMI_PASSWORD": "${input:ibmiPassword}" }
     }
   }
 }
 ```
+
+With a single connection, drop the `ibmiConnection` input and put its name after `--connection`.
 
 Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME` and
 `IBMI_USERNAME` to `env` (as values or as more `promptString` inputs).
@@ -109,7 +136,7 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 |---------|-------------|
 | No MCP servers listed, or MCP disabled | The organization's Copilot policy may block MCP servers; the user must ask their admin. |
 | `IBMI_PASSWORD is not set` | `mcp.json` lacks the password input or `env` entry; rerun `--setup-vscode`. |
-| `Several Code for IBM i connections` | Rerun setup with `--connection "<name>"`. |
+| `Several Code for IBM i connections` | Only when starting MC by hand: pass `--connection "<name>"` (setup's `mcp.json` asks at start). |
 | `VS Code user settings not found` | Set `MC_VSCODE_SETTINGS` to the `settings.json` holding `code-for-ibmi.connections`, or configure without `--code4i`. |
 | Connection refused / timeouts | MC uses the IBM i host servers (the same as ACS: ports 449, 8470-8476, or 9470-9476 with TLS). If ACS works from this PC, MC should too. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |

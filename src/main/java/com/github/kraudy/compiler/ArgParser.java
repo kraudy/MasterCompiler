@@ -26,6 +26,7 @@ public class ArgParser {
     CODE4I        (null, "code4i",       Kind.FLAG,  "Connect with the Code for IBM i connection from VS Code settings (password: IBMI_PASSWORD)"),
     CONNECTION    (null, "connection",   Kind.VALUE, "Code for IBM i connection name, when there are several"),
     SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json and .github/skills for Copilot in the --project folder (default: current)"),
+    PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
@@ -102,6 +103,7 @@ public class ArgParser {
   private boolean code4i;
   private String connection;
   private boolean setupVscode;
+  private boolean print;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -198,6 +200,7 @@ public class ArgParser {
       case MCP:           mcp = true; break;
       case CODE4I:        code4i = true; break;
       case SETUP_VSCODE:  setupVscode = true; break;
+      case PRINT:         print = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -253,6 +256,9 @@ public class ArgParser {
    * Call before using getters that require a mode.
    */
   public void validate() {
+    if (print && !setupVscode) {
+      throw new IllegalArgumentException("--print goes with --setup-vscode");
+    }
     if (setupVscode) {
       if (yamlFile != null || scanRoot != null || tobiRoot != null || mcp || importSelection != null) {
         throw new IllegalArgumentException("--setup-vscode takes only --project, --code4i, --connection, -v");
@@ -351,6 +357,10 @@ public class ArgParser {
 
   public boolean hasScan() {
     return scanRoot != null;
+  }
+
+  public boolean isPrint() {
+    return print;
   }
 
   public boolean isSetupVscode() {

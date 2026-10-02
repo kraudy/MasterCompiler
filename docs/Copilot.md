@@ -18,13 +18,16 @@ password, which VS Code asks for once and stores securely.
 1. Java 8 or newer on the PC. A portable JDK zip works without admin rights.
 2. Download the jar: `https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
    (for example into `%USERPROFILE%\tools`).
-3. In the repository root:
+3. In the repository root, preview what setup would do (it writes nothing):
    ```powershell
-   java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project .
+   java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --print
    ```
-   This writes `.vscode/mcp.json` and installs MC's agent skills into `.github/skills/`. With several Code for IBM i
-   connections, add `--connection "<name>"`.
-4. In VS Code: Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, and enter the IBM i password.
+   Check, for each Code for IBM i connection, the library objects go into (builds replace objects there) and the
+   IBM i folder sources go to. Then run it without `--print`: it adds the `mastercompiler` server to
+   `.vscode/mcp.json` (other servers are kept; a file with comments is left alone and the entry to paste is printed)
+   and installs MC's agent skills into `.github/skills/`.
+4. In VS Code: Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, pick the connection when you
+   have several, and enter the IBM i password.
 
 Or ask Copilot: *"set up MasterCompiler for this repository"*. The `mastercompiler-vscode` skill tells it how, and
 what to ask you when it cannot do a step itself. To make that skill available before MC is set up, copy
