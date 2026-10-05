@@ -431,14 +431,15 @@ public class TargetKey {
     return !this.childs.isEmpty();
   }
 
-  public void addChild(TargetKey child) {
+  /* synchronized: dependency scanning runs in parallel and many targets add to the same object's lists */
+  public synchronized void addChild(TargetKey child) {
     if (child == null) return; /* Prevents nulls */
     if (child.equals(this)) return; /* Prevents cycles */
     if (childs.contains(child)) return; /* Prevents cylces */
     childs.add(child);
   }
 
-  public void addIncludeFile(String path) {
+  public synchronized void addIncludeFile(String path) {
     if (path == null || path.isEmpty()) return;
     if (includeFiles.contains(path)) return;
     includeFiles.add(path);
@@ -448,7 +449,7 @@ public class TargetKey {
     return Collections.unmodifiableList(includeFiles);
   }
 
-  public void addFather(TargetKey father) {
+  public synchronized void addFather(TargetKey father) {
     if (father == null) return; /* Prevents nulls */
     if (father.equals(this)) return; /* Prevents cycles */
     if (fathers.contains(father)) return; /* Prevents cycles */
