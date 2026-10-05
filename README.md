@@ -194,8 +194,15 @@ Fully transparent and traceble flow of execution and changes.
 ## Copilot and Code for IBM i
 
 Teams on Windows with VS Code and Code for IBM i can let Copilot's agent mode build and fix IBM i code with MC,
-reusing their Code for IBM i connection: `java -jar MasterCompiler.jar --setup-vscode --project .` in a repository.
-See [docs/Copilot.md](./docs/Copilot.md).
+reusing their Code for IBM i connection. Once per PC, give Copilot MC's setup skill (PowerShell, no Java needed):
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode" | Out-Null
+Invoke-WebRequest https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
+```
+
+Then, in any repository, ask Copilot in **Agent mode**: *"set up MasterCompiler for this repository"*. It checks Java,
+downloads MC, previews the setup with you and writes `.vscode/mcp.json`. See [docs/Copilot.md](./docs/Copilot.md).
 
 ## Agent skills
 

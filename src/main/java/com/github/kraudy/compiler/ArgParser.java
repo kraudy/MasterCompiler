@@ -30,6 +30,7 @@ public class ArgParser {
     CURLIB        (null, "curlib",       Kind.VALUE, "Current library for the build job (CHGCURLIB)"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
+    INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code)"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
@@ -112,6 +113,7 @@ public class ArgParser {
   private String curlib;
   private boolean ssh;
   private boolean hostServers;
+  private boolean installSkills;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -211,6 +213,7 @@ public class ArgParser {
       case PRINT:         print = true; break;
       case SSH:           ssh = true; break;
       case HOST_SERVERS:  hostServers = true; break;
+      case INSTALL_SKILLS: installSkills = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -278,6 +281,8 @@ public class ArgParser {
     if (ssh && mcp && projectRoot == null) {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
     }
+    if (installSkills) return;  // needs nothing else
+
     if (hostServers && !setupVscode) {
       throw new IllegalArgumentException("--host-servers goes with --setup-vscode");
     }
@@ -397,6 +402,10 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  public boolean isInstallSkills() {
+    return installSkills;
   }
 
   public boolean isHostServers() {

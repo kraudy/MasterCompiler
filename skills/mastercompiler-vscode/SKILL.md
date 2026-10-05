@@ -17,9 +17,10 @@ repository's sources to the IBM i (`--push`), compiles there and returns errors 
 and line. It reuses the Code for IBM i connection (host, user, current library, library list),
 so the only thing the user types is their IBM i password, once, in a VS Code prompt.
 
-Run the steps yourself when you can execute terminal commands. When you cannot (some chat
-modes only read and create files), or a step fails, give the user the exact commands and
-explain what each one does. Never write into the repository without asking first.
+Run the steps yourself when you can execute terminal commands (Copilot's Agent mode can; Ask
+mode cannot: then suggest switching to Agent mode). When you cannot, or a step fails, give the
+user the exact commands and explain what each one does. Never write into the repository without
+asking first.
 
 ## 1. Java
 

@@ -572,6 +572,15 @@ public class MasterCompiler{
         return VscodeSetup.run(parser);
       }
 
+      /* Personal skills: Copilot in VS Code loads ~/.copilot/skills in every workspace */
+      if (parser.isInstallSkills()) {
+        java.io.File dir = new java.io.File(System.getProperty("user.home"), ".copilot/skills");
+        int installed = VscodeSetup.installSkills(dir);
+        logger.info("Installed {} MasterCompiler skills in {}. In any repository, ask Copilot (Agent mode): "
+            + "\"set up MasterCompiler for this repository\".", installed, dir);
+        return exitCode;
+      }
+
       /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
       if (parser.getImportSelection() != null) {
         system = connect(parser);

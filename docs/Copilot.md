@@ -13,7 +13,24 @@ Code for IBM i and ACS stay as they are (browsing, 5250, spooled files). MC reus
 connection: host, user, current library, library list and home directory. The only extra input is the IBM i
 password, which VS Code asks for once and stores securely.
 
-## Setup (once per repository)
+## Let Copilot do the setup
+
+Copilot in VS Code loads personal skills from `%USERPROFILE%\.copilot\skills` in every workspace. Install MC's setup
+skill there once per PC (PowerShell, no Java needed):
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode" | Out-Null
+Invoke-WebRequest https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
+```
+
+(With MC already downloaded, `java -jar MasterCompiler.jar --install-skills` installs all of MC's skills there.)
+
+Then open the repository, switch Copilot Chat to **Agent mode** (other modes cannot run commands) and ask:
+*"set up MasterCompiler for this repository"*. Copilot follows the skill: it finds Java, downloads MC, shows you the
+`--print` preview (target library, library list, IBM i folder) and, once you agree, writes `.vscode/mcp.json`. You
+then start the server and type your password; nobody types the steps below by hand.
+
+## Setup by hand (once per repository)
 
 1. Java 8 or newer on the PC. A portable JDK zip works without admin rights.
 2. Download the jar: `https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
