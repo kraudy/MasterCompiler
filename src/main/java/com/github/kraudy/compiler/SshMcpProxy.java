@@ -12,6 +12,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -22,7 +23,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jcraft.jsch.ChannelExec;
-import com.jcraft.jsch.SftpATTRS;
 
 /*
  * --mcp --ssh --project <local folder>: MCP server on the PC that runs MC on the IBM i over SSH,
@@ -67,9 +67,12 @@ public class SshMcpProxy {
 
     ssh = SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
         code4i != null ? code4i.privateKeyPath : null);
+    long start = System.currentTimeMillis();
     String jar = ensureRemoteJar(home);
+    long jarDone = System.currentTimeMillis();
     int uploaded = sync(projectFiles());
-    logger.info("Project synced to {}: {} files uploaded", remoteDir, uploaded);
+    logger.info("Project synced to {}: {} files uploaded ({} s for MC, {} s for sources)", remoteDir, uploaded,
+        (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
 
     ChannelExec remote = ssh.start(remoteCommand(jar, code4i));
     remote.setErrStream(System.err, true);
@@ -151,18 +154,19 @@ public class SshMcpProxy {
 
   /* Uploads files whose size or modification time differs on the IBM i; removes deleted ones there */
   int sync(Set<String> localFiles) throws Exception {
+    Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
     List<String> uploaded = new ArrayList<String>();
     for (String path : localFiles) {
       File local = new File(path);
       String rel = relative(local);
       if (rel == null) continue;  // outside the project
       String remote = remoteDir + "/" + rel;
-      SftpATTRS attrs = ssh.stat(remote);
+      long[] attrs = remoteFiles.get(rel);
       if (!local.isFile()) {
         if (attrs != null) ssh.exec("rm -f " + SshTarget.quote(remote));
         continue;
       }
-      if (attrs != null && attrs.getSize() == local.length() && attrs.getMTime() == (int) (local.lastModified() / 1000)) {
+      if (attrs != null && attrs[0] == local.length() && attrs[1] == local.lastModified() / 1000) {
         continue;
       }
       ssh.upload(local, remote);

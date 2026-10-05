@@ -4,7 +4,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.Vector;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +34,7 @@ public final class SshTarget implements AutoCloseable {
 
   private final Session session;
   private ChannelSftp sftp;
+  private final Set<String> knownDirs = new HashSet<String>();  // created or seen: no need to check again
 
   private SshTarget(Session session) {
     this.session = session;
@@ -123,9 +129,35 @@ public final class SshTarget implements AutoCloseable {
   }
 
   public void mkdirs(String dir) throws Exception {
-    if (dir.isEmpty() || stat(dir) != null) return;
-    mkdirs(dir.substring(0, Math.max(0, dir.lastIndexOf('/'))));
-    sftp().mkdir(dir);
+    if (dir.isEmpty() || knownDirs.contains(dir)) return;
+    if (stat(dir) == null) {
+      mkdirs(dir.substring(0, Math.max(0, dir.lastIndexOf('/'))));
+      sftp().mkdir(dir);
+    }
+    knownDirs.add(dir);
+  }
+
+  /*
+   * Every file under a remote directory as relative path -> {size, mtime}: one listing per directory
+   * instead of one round trip per file (that matters at 150+ ms per round trip). Empty when it does not exist.
+   */
+  public Map<String, long[]> listTree(String dir) throws Exception {
+    Map<String, long[]> files = new HashMap<String, long[]>();
+    if (stat(dir) == null) return files;
+    listInto(dir, "", files);
+    return files;
+  }
+
+  @SuppressWarnings("unchecked")
+  private void listInto(String dir, String prefix, Map<String, long[]> files) throws Exception {
+    knownDirs.add(dir);
+    for (ChannelSftp.LsEntry entry : (Vector<ChannelSftp.LsEntry>) sftp().ls(dir)) {
+      String name = entry.getFilename();
+      if (name.equals(".") || name.equals("..")) continue;
+      SftpATTRS attrs = entry.getAttrs();
+      if (attrs.isDir()) listInto(dir + "/" + name, prefix + name + "/", files);
+      else files.put(prefix + name, new long[] { attrs.getSize(), attrs.getMTime() });
+    }
   }
 
   /* Tag stream files as UTF-8 so the compilers read them right (SFTP leaves the default CCSID) */
