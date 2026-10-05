@@ -307,7 +307,8 @@ public class McpServer {
       return new TobiConverter(parser.isVerbose()).convert(parser.getTobiRoot(), parser.getLibrary());
     }
     if (parser.hasScan()) {
-      return new SpecGenerator(system, connection, parser.isDebug(), parser.isVerbose())
+      /* no object inspection: builds use the sources and MC's defaults, not whatever object exists */
+      return new SpecGenerator(system, null, parser.isDebug(), parser.isVerbose())
           .generate(parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
     }
     return parser.getSpecFromYamlFile();

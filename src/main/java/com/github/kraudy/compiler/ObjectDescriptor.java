@@ -84,17 +84,18 @@ public class ObjectDescriptor {
     return;
   }
 
+  /*
+   * Whether the target exists in its own library (the current library for curlib targets): a same-named
+   * object elsewhere in the library list is not this target.
+   */
   public void objectExists(TargetKey key) throws SQLException {
     if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
       try (Statement stmt = connection.createStatement();
           ResultSet rs = stmt.executeQuery(
-            "With " +
-            Utilities.CteLibraryList +
-            "SELECT 1 " + 
+            "SELECT 1 " +
             "FROM QSYS2.SYSFUNCS " +
-            "INNER JOIN Libs " +
-            "ON (SPECIFIC_SCHEMA = Libs.Libraries) " +
-            "WHERE SPECIFIC_NAME = '" + key.getObjectName() + "' " +
+            "WHERE SPECIFIC_SCHEMA = " + library(key) + " " +
+            "AND SPECIFIC_NAME = '" + key.getObjectName() + "' " +
             "LIMIT 1")) {
         if (!rs.next()) {
           if (verbose) logger.info("Function object not found: " + key.asString());
@@ -110,13 +111,10 @@ public class ObjectDescriptor {
     if (key.getObjectTypeEnum() == ObjectType.INDEX) {
       try (Statement stmt = connection.createStatement();
           ResultSet rs = stmt.executeQuery(
-            "With " +
-            Utilities.CteLibraryList +
             "SELECT 1 " +
             "FROM QSYS2.SYSINDEXES " +
-            "INNER JOIN Libs " +
-            "ON (SYSTEM_INDEX_SCHEMA = Libs.Libraries) " +
-            "WHERE SYSTEM_INDEX_NAME = '" + key.getObjectName() + "' " +
+            "WHERE SYSTEM_INDEX_SCHEMA = " + library(key) + " " +
+            "AND SYSTEM_INDEX_NAME = '" + key.getObjectName() + "' " +
             "LIMIT 1")) {
         if (!rs.next()) {
           if (verbose) logger.info("Function object not found: " + key.asString());
@@ -132,13 +130,10 @@ public class ObjectDescriptor {
     if (key.getObjectTypeEnum() == ObjectType.TRIGGER) {
       try (Statement stmt = connection.createStatement();
           ResultSet rs = stmt.executeQuery(
-            "WITH " + 
-            Utilities.CteLibraryList +
             " SELECT 1 " +
             " FROM QSYS2.SYSTRIGGERS " +
-            " INNER JOIN Libs " +
-            "   ON TRIGGER_SCHEMA = Libs.Libraries " +
-            " WHERE TRIGGER_NAME = '" + key.getObjectName() + "' " +
+            " WHERE TRIGGER_SCHEMA = " + library(key) + " " +
+            " AND TRIGGER_NAME = '" + key.getObjectName() + "' " +
             " LIMIT 1")) {
         if (!rs.next()) {
           if (verbose) logger.info("Trigger object not found: " + key.asString());
@@ -157,7 +152,7 @@ public class ObjectDescriptor {
           "Select 1  " +
           "From TABLE( " +
             "QSYS2.OBJECT_STATISTICS( " +
-              "OBJECT_SCHEMA => '" + ValCmd.LIBL.toString() + "', " +
+              "OBJECT_SCHEMA => '" + (key.isCurLib() ? ValCmd.CURLIB.toString() : key.getLibrary()) + "', " +
               "OBJTYPELIST => '" + key.getObjectType() + "', " +
               "OBJECT_NAME => '" + key.getObjectName() + "' " +
             ") " +
@@ -172,6 +167,13 @@ public class ObjectDescriptor {
       key.setObjectExists(true);
       return;
     }
+  }
+
+  /* The target's library as an SQL expression */
+  private static String library(TargetKey key) {
+    return key.isCurLib()
+        ? "(SELECT SCHEMA_NAME FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT')"
+        : "'" + key.getLibrary() + "'";
   }
 
   /* *PGM */

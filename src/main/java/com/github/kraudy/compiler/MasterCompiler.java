@@ -739,8 +739,9 @@ public class MasterCompiler{
           logger.info("Generated YAML: {}", parser.getOutputFile());
         }
       } else if (parser.hasScan()) {
+        /* no object inspection: a build uses the sources and MC's defaults, not the existing objects */
         SpecGenerator generator = new SpecGenerator(
-            system, connection, parser.isDebug(), parser.isVerbose());
+            system, null, parser.isDebug(), parser.isVerbose());
         spec = generator.generate(
             parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
         if (parser.getOutputFile() != null) {
@@ -750,8 +751,7 @@ public class MasterCompiler{
       } else {
         spec = parser.getSpecFromYamlFile();
         if (parser.getOutputFile() != null) {
-          SpecResolver.resolveAll(
-              spec, new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose()));
+          SpecResolver.resolveAll(spec, null);  // the build must not take params from existing objects
           SpecWriter.writeToFile(spec, parser.getOutputFile(), null);
           logger.info("Generated YAML: {}", parser.getOutputFile());
         }
