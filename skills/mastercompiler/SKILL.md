@@ -198,7 +198,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true`) | The build report above; `isError` when the build failed |
 | `plan` | same as `build` | The report with `planned` targets; compiles nothing |
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
-| `clean` | none | Deletes every target object from the build library, dependents first. Only when the user asks: it removes any object with a target's name |
+| `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
 | `joblog` | none | The job's messages since the previous `joblog` call |
 
 In VS Code with Copilot (Windows included), `java -jar MC.jar --setup-vscode --project .` writes

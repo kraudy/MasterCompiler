@@ -1,5 +1,5 @@
-# What the scan cannot read from the sources: the binding directory MCDHELLO names in ctl-opt,
-# and the service program it holds.
+# The scan sees that MCDHELLO binds with the MCDDEMO binding directory (ctl-opt bnddir), but
+# cannot know what goes in it: the binding directory and its entry are declared here.
 targets:
   curlib.MCDDEMO.bnddir.bnddir:
     params:

@@ -129,6 +129,11 @@ public final class SshTarget implements AutoCloseable {
     sftp().setMtime(remote, (int) (local.lastModified() / 1000));
   }
 
+  public void upload(byte[] data, String remote) throws Exception {
+    mkdirs(remote.substring(0, remote.lastIndexOf('/')));
+    sftp().put(new java.io.ByteArrayInputStream(data), remote, ChannelSftp.OVERWRITE);
+  }
+
   public void mkdirs(String dir) throws Exception {
     if (dir.isEmpty() || knownDirs.contains(dir)) return;
     if (stat(dir) == null) {

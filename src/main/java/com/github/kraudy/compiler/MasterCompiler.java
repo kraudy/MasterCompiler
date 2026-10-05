@@ -394,23 +394,46 @@ public class MasterCompiler{
    * Modules and service programs this build creates are referred to in their own library (*CURLIB for
    * curlib targets), not *LIBL: a same-named object earlier in the library list must not be bound instead.
    * Covers MODULE / BNDSRVPGM params and ADDBNDDIRE OBJ in hooks; external objects keep *LIBL.
+   * ADDBNDDIRE OBJ does not take *CURLIB (CPD0078): there it is the current library's name.
    */
   private void qualifyProjectObjects() {
     java.util.Map<String, String> modules = new java.util.HashMap<String, String>();
     java.util.Map<String, String> srvpgms = new java.util.HashMap<String, String>();
+    java.util.Map<String, String> entries = new java.util.HashMap<String, String>();
+    String curlib = null;
     for (TargetKey key : globalSpec.targets.keySet()) {
       String lib = key.isCurLib() ? ValCmd.CURLIB.toString() : key.getLibrary();
       if (key.isModule()) modules.put(key.getObjectName().toUpperCase(), lib);
-      if (key.isServiceProgram()) srvpgms.put(key.getObjectName().toUpperCase(), lib);
+      if (key.isServiceProgram()) {
+        srvpgms.put(key.getObjectName().toUpperCase(), lib);
+        if (key.isCurLib() && curlib == null) curlib = buildCurLib();
+        entries.put(key.getObjectName().toUpperCase(), key.isCurLib() ? curlib : lib);
+      }
     }
     for (BuildSpec.TargetSpec spec : globalSpec.targets.values()) {
       if (spec == null) continue;
       qualify(spec.params, ParamCmd.MODULE, modules);
       qualify(spec.params, ParamCmd.BNDSRVPGM, srvpgms);
-      for (List<CommandObject> hooks : Arrays.asList(spec.before, spec.after, spec.success, spec.failure)) qualifyHooks(hooks, srvpgms);
+      for (List<CommandObject> hooks : Arrays.asList(spec.before, spec.after, spec.success, spec.failure)) qualifyHooks(hooks, entries);
     }
     for (List<CommandObject> hooks : Arrays.asList(globalSpec.before, globalSpec.after, globalSpec.success, globalSpec.failure)) {
-      qualifyHooks(hooks, srvpgms);
+      qualifyHooks(hooks, entries);
+    }
+  }
+
+  /* What *CURLIB will be once the job's hooks ran: the last CHGCURLIB among them, else the job's own */
+  private String buildCurLib() {
+    String lib = null;
+    List<CommandObject> hooks = new ArrayList<CommandObject>(libraryHooks);
+    hooks.addAll(globalSpec.before);
+    for (CommandObject hook : hooks) {
+      if (hook.getSystemCommand() == SysCmd.CHGCURLIB && hook.get(ParamCmd.CURLIB) != null) lib = hook.get(ParamCmd.CURLIB).trim();
+    }
+    if (lib != null && !lib.startsWith("*")) return lib.toUpperCase();
+    try {
+      return getCurLIb();
+    } catch (Exception e) {
+      return ValCmd.LIBL.toString();  // no current library: *LIBL still finds it
     }
   }
 

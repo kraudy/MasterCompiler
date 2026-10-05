@@ -10,10 +10,15 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,17 +40,26 @@ import com.jcraft.jsch.ChannelExec;
  *   4. start "java -jar MC.jar --mcp --project <remote folder>" there: it builds as the SSH user's own job
  *   5. relay MCP messages; before build / plan / impact, upload what changed. A git "since" becomes an
  *      explicit file list, since the remote copy has no git history.
+ * initialize and tools/list are answered here at once while steps 1-4 run in the background.
  */
 public class SshMcpProxy {
   private static final Logger logger = LoggerFactory.getLogger(SshMcpProxy.class);
   private static final String REMOTE_JAVA = "/QOpenSys/usr/bin/java";
+  static final int TAR_FROM = 10;  // changed files from which one tar beats file by file
 
   private final ArgParser parser;
   private final ObjectMapper mapper = new ObjectMapper();
   private PrintStream protocolOut;
-  private SshTarget ssh;
+  private volatile SshTarget ssh;
   private File project;
   private String remoteDir;
+  private volatile ChannelExec remote;
+  private final CompletableFuture<OutputStream> remoteReady = new CompletableFuture<OutputStream>();
+  private final ExecutorService calls = Executors.newSingleThreadExecutor(r -> {
+    Thread t = new Thread(r, "mc-ssh-calls");
+    t.setDaemon(true);
+    return t;
+  });
   private volatile boolean closing;  // VS Code closed the session: the remote end stopping is expected
 
   public SshMcpProxy(ArgParser parser) {
@@ -66,6 +80,53 @@ public class SshMcpProxy {
     project = new File(parser.getProjectRoot()).getCanonicalFile();
     remoteDir = parser.getPush() != null ? trimSlash(parser.getPush()) : home + "/mc/" + project.getName();
 
+    /*
+     * initialize and tools/list are answered here right away; connecting, the first jar upload and the
+     * first sync run meanwhile, so a slow link does not hit VS Code's start timeout. Tool calls wait for them.
+     */
+    Thread setup = new Thread(() -> {
+      try {
+        remoteReady.complete(startRemote(code4i, host, port, user, home));
+      } catch (Throwable e) {
+        logger.error("Could not start MasterCompiler on " + host, e);
+        remoteReady.completeExceptionally(e);
+      }
+    }, "mc-ssh-setup");
+    setup.setDaemon(true);
+    setup.start();
+
+    McpServer local = new McpServer(parser);
+    BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+    String line;
+    try {
+      while ((line = in.readLine()) != null) {
+        if (line.trim().isEmpty()) continue;
+        JsonNode request;
+        try {
+          request = mapper.readTree(line);
+        } catch (Exception e) {
+          logger.error("Not a JSON-RPC message, ignored: {}", line);
+          continue;
+        }
+        JsonNode id = request.get("id");
+        if (id == null) continue;  // notifications: the remote server ignores them as well
+        JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
+        if (result != null) {
+          sendResult(id, result);
+          continue;
+        }
+        String call = line;
+        calls.execute(() -> forward(call));  // one at a time, in order
+      }
+    } finally {
+      closing = true;
+      if (remote != null) remote.disconnect();
+      if (ssh != null) ssh.close();
+    }
+  }
+
+  /* SSH in, upload MC when this version is new, sync the sources and start MC there; returns its stdin */
+  private OutputStream startRemote(Code4iConfig code4i, String host, int port, String user, String home) throws Exception {
     ssh = SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
         code4i != null ? code4i.privateKeyPath : null);
     long start = System.currentTimeMillis();
@@ -75,7 +136,7 @@ public class SshMcpProxy {
     logger.info("Project synced to {}: {} files uploaded ({} s for MC, {} s for sources)", remoteDir, uploaded,
         (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
 
-    ChannelExec remote = ssh.start(remoteCommand(jar, code4i));
+    remote = ssh.start(remoteCommand(jar, code4i));
     remote.setErrStream(System.err, true);
     InputStream fromRemote = remote.getInputStream();
     OutputStream toRemote = remote.getOutputStream();
@@ -85,21 +146,26 @@ public class SshMcpProxy {
     Thread pump = new Thread(() -> relayResponses(fromRemote), "mc-ssh-responses");
     pump.setDaemon(true);
     pump.start();
+    return toRemote;
+  }
 
-    BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-    String line;
+  /* A call the remote MC answers: wait until it runs, upload what changed, pass it on */
+  private void forward(String line) {
+    OutputStream toRemote;
     try {
-      while ((line = in.readLine()) != null) {
-        if (line.trim().isEmpty()) continue;
-        String forward = beforeForwarding(line);
-        if (forward == null) continue;  // answered here (sync failed)
-        toRemote.write((forward + "\n").getBytes(StandardCharsets.UTF_8));
-        toRemote.flush();
-      }
-    } finally {
-      closing = true;
-      remote.disconnect();
-      ssh.close();
+      toRemote = remoteReady.get();
+    } catch (Exception e) {
+      Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+      sendToolError(line, "Could not start MasterCompiler on the IBM i: " + cause.getMessage());
+      return;
+    }
+    String forward = beforeForwarding(line);
+    if (forward == null) return;  // answered here (sync failed)
+    try {
+      toRemote.write((forward + "\n").getBytes(StandardCharsets.UTF_8));
+      toRemote.flush();
+    } catch (Exception e) {
+      sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
     }
   }
 
@@ -153,26 +219,40 @@ public class SshMcpProxy {
     }
   }
 
-  /* Uploads files whose size or modification time differs on the IBM i; removes deleted ones there */
+  /*
+   * Uploads files whose size or modification time differs on the IBM i; removes deleted ones there.
+   * Many files go as one tar (one upload and one command instead of a few round trips per file).
+   */
   int sync(Set<String> localFiles) throws Exception {
     Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
-    List<String> uploaded = new ArrayList<String>();
+    Map<String, File> changed = new LinkedHashMap<String, File>();
     for (String path : localFiles) {
       File local = new File(path);
       String rel = relative(local);
       if (rel == null) continue;  // outside the project
-      String remote = remoteDir + "/" + rel;
       long[] attrs = remoteFiles.get(rel);
       if (!local.isFile()) {
-        if (attrs != null) ssh.exec("rm -f " + SshTarget.quote(remote));
+        if (attrs != null) ssh.exec("rm -f " + SshTarget.quote(remoteDir + "/" + rel));
         continue;
       }
       if (attrs != null && attrs[0] == local.length() && attrs[1] == local.lastModified() / 1000) {
         continue;
       }
-      ssh.upload(local, remote);
-      uploaded.add(remote);
+      changed.put(rel, local);
     }
+
+    List<String> uploaded = new ArrayList<String>();
+    if (changed.size() >= TAR_FROM) {
+      TarWriter tar = new TarWriter();
+      for (Map.Entry<String, File> file : changed.entrySet()) tar.add(file.getKey(), file.getValue());
+      String archive = remoteDir + "/.mc-sync.tar";
+      ssh.upload(tar.finish(), archive);
+      ssh.exec("cd " + SshTarget.quote(remoteDir) + " && " + env("MC_REMOTE_TAR", "/QOpenSys/usr/bin/tar")
+          + " -xf .mc-sync.tar; status=$?; rm -f .mc-sync.tar; exit $status");
+    } else {
+      for (Map.Entry<String, File> file : changed.entrySet()) ssh.upload(file.getValue(), remoteDir + "/" + file.getKey());
+    }
+    for (String rel : changed.keySet()) uploaded.add(remoteDir + "/" + rel);
     if (!uploaded.isEmpty()) ssh.setUtf8(uploaded);
     return uploaded.size();
   }
@@ -256,6 +336,18 @@ public class SshMcpProxy {
   private synchronized void send(String line) {
     protocolOut.println(line);
     protocolOut.flush();
+  }
+
+  private void sendResult(JsonNode id, JsonNode result) {
+    try {
+      ObjectNode response = mapper.createObjectNode();
+      response.put("jsonrpc", "2.0");
+      response.set("id", id);
+      response.set("result", result);
+      send(mapper.writeValueAsString(response));
+    } catch (Exception e) {
+      logger.error("Could not answer the request", e);
+    }
   }
 
   private void sendToolError(String requestLine, String message) {

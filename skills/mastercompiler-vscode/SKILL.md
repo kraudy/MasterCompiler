@@ -85,7 +85,8 @@ code $demo
 ```
 
 Continue in that window. Suggest `plan` first (compiles nothing), then `build`. When the user is
-done, offer the `clean` tool to delete the five `MCD*` objects from their library.
+done, offer the `clean` tool to delete the five `MCD*` objects from their library: call it once
+to list them, show the list, and only after the user agrees call it again with `confirm: true`.
 
 Preview first, from the repository root; it writes nothing:
 

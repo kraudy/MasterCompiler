@@ -102,6 +102,16 @@ public class McpServer {
     }
   }
 
+  /* Answers that need no IBM i (the SSH proxy gives them while it is still connecting); null for the rest */
+  JsonNode localResult(String method, JsonNode params) {
+    switch (method) {
+      case "initialize": return initialize(params);
+      case "ping":       return mapper.createObjectNode();
+      case "tools/list": return toolsList();
+      default:           return null;
+    }
+  }
+
   private ObjectNode initialize(JsonNode params) {
     ObjectNode result = mapper.createObjectNode();
     result.put("protocolVersion", params.path("protocolVersion").asText(DEFAULT_PROTOCOL));
@@ -296,11 +306,7 @@ public class McpServer {
       try {
         executor.deleteObject(key);
         listed.add(name);
-        try {
-          executor.executeCommand("RMVM FILE(*CURLIB/EVFEVENT) MBR(" + key.getObjectName() + ")", executor.getCurrentTime());
-        } catch (Exception noMember) {
-          /* not compiled with *EVENTF, or already removed with a same-named target */
-        }
+        removeEventMember(key.getObjectName());
       } catch (Exception e) {
         failed.add(name + ": " + e.getMessage());
       }
@@ -310,6 +316,23 @@ public class McpServer {
           : "Nothing deleted yet. Show this list to the user; if they agree, call clean again with confirm: true.");
     }
     return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* Its compile's EVFEVENT member, when there is one (not every command writes it; same-named targets share it) */
+  private void removeEventMember(String name) {
+    try (java.sql.Statement stmt = connection.createStatement();
+         java.sql.ResultSet rs = stmt.executeQuery(
+           "SELECT 1 FROM QSYS2.SYSPARTITIONSTAT WHERE TABLE_NAME = 'EVFEVENT' AND SYSTEM_TABLE_MEMBER = '" + name + "'" +
+           " AND TABLE_SCHEMA = (SELECT SCHEMA_NAME FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT')")) {
+      if (!rs.next()) return;
+    } catch (Exception e) {
+      return;
+    }
+    try (java.sql.Statement stmt = connection.createStatement()) {
+      stmt.execute("CALL QSYS2.QCMDEXC('RMVM FILE(*CURLIB/EVFEVENT) MBR(" + name + ")')");
+    } catch (Exception e) {
+      logger.info("EVFEVENT member {} not removed: {}", name, e.getMessage());
+    }
   }
 
   private String currentLibrary() throws Exception {
