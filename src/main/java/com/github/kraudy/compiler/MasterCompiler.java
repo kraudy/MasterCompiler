@@ -522,6 +522,12 @@ public class MasterCompiler{
     System.exit(run(args));
   }
 
+  /* Release tag stamped into the jar by the release workflow; "dev" for local builds */
+  public static String version() {
+    String version = MasterCompiler.class.getPackage().getImplementationVersion();
+    return version != null ? version : "dev";
+  }
+
   /* IBM i connection: the Code for IBM i one (--code4i), else .env / IBMI_* variables (or the local system on IBM i) */
   static AS400 connect(ArgParser parser) throws Exception {
     Code4iConfig code4i = code4i(parser);
@@ -562,10 +568,22 @@ public class MasterCompiler{
     Connection connection = null;
     int exitCode = 0;
     try {
-      if (args.length == 0) throw new IllegalArgumentException("Params are required");
+      /* Invalid arguments: one line saying what is wrong, then the usage (no stack trace) */
+      ArgParser parser;
+      try {
+        if (args.length == 0) throw new IllegalArgumentException("Params are required");
+        parser = new ArgParser(args);
+        parser.validate();
+      } catch (IllegalArgumentException e) {
+        logger.error(e.getMessage());
+        logger.info(ArgParser.getUsage());
+        return 2;
+      }
 
-      ArgParser parser = new ArgParser(args);
-      parser.validate();
+      if (parser.isVersion()) {
+        System.out.println("MasterCompiler " + version());
+        return exitCode;
+      }
 
       /* VS Code + Copilot setup: .vscode/mcp.json and .github/skills in the project */
       if (parser.isSetupVscode()) {
@@ -697,9 +715,9 @@ public class MasterCompiler{
       if (compiler.foundCompilationError()) exitCode = 1;
 
     } catch (IllegalArgumentException e) {
-      logger.error("Parsing error: ", e);
-      logger.info(ArgParser.getUsage());
-      exitCode = 2;
+      /* configuration problems found while running (connection, settings, ...): the message says it all */
+      logger.error(e.getMessage());
+      exitCode = 1;
       
     } catch (CompilerException e){
       logger.error(e.getFullContext());

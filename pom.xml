@@ -14,6 +14,7 @@
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <mc.version>dev</mc.version> <!-- the release workflow sets the tag: -Dmc.version=v1.2.3 -->
     <junit.version>5.10.3</junit.version> <!-- Last JUnit 5 version supporting Java 8 -->
     <surefire.version>3.2.5</surefire.version> <!-- Surefire for JUnit 5 + Java 8 support -->
     <failsafe.version>3.2.5</failsafe.version>
@@ -147,6 +148,7 @@
                   <manifestEntries>
                     <!-- JSch's Java 15+ classes (ssh-ed25519) live under META-INF/versions -->
                     <Multi-Release>true</Multi-Release>
+                    <Implementation-Version>${mc.version}</Implementation-Version>
                   </manifestEntries>
                 </transformer>
               </transformers>

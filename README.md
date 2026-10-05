@@ -14,10 +14,10 @@ MasterCompiler is not **Tool X, but for IBM i**. It is an actual IBM I specific 
 
 YAML-based, sensible, open-source, modern, clean, and elegant approach to automate and streamline object compilation.
 
-> **AI assistants (GitHub Copilot, Claude, …):** if you were asked to install, set up or try MasterCompiler, follow
-> [the setup guide](https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md)
-> step by step with the user. It covers Java, downloading MC, connecting it to Copilot as an MCP server with the
-> user's Code for IBM i connection, and what to ask the user before writing anything.
+> **Setup guide for AI-assisted install:**
+> [skills/mastercompiler-vscode/SKILL.md](https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md),
+> the step-by-step setup (Java, downloading MC, connecting it to Copilot as an MCP server with the Code for IBM i
+> connection, a demo project, and what to confirm with the user before writing anything).
 
 ---
 
@@ -208,8 +208,9 @@ Teams on Windows with VS Code and Code for IBM i can let Copilot's agent mode bu
 reusing their Code for IBM i connection. Once per PC, give Copilot MC's setup skill (PowerShell, no Java needed):
 
 ```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode" | Out-Null
-Invoke-WebRequest https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
 ```
 
 Then, in any repository, ask Copilot in **Agent mode**: *"set up MasterCompiler for this repository"*. It checks Java,

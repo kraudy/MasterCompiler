@@ -107,7 +107,7 @@ public class McpServer {
     result.putObject("capabilities").putObject("tools");
     ObjectNode info = result.putObject("serverInfo");
     info.put("name", "mastercompiler");
-    info.put("version", "1.0-SNAPSHOT");
+    info.put("version", MasterCompiler.version());
     result.put("instructions",
         "Builds IBM i objects from the MasterCompiler spec " + specName() + ". " +
         "Call plan to see what would compile, build to compile (errors come back with file, line, " +

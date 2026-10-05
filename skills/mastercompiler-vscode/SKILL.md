@@ -48,13 +48,40 @@ system-wide without asking.
 Keep it outside the repository, e.g. in the user's tools folder:
 
 ```powershell
+# Windows PowerShell 5.1 needs TLS 1.2; hiding the progress bar makes the download much faster
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ProgressPreference = 'SilentlyContinue'
 New-Item -ItemType Directory -Force "$env:USERPROFILE\tools" | Out-Null
-Invoke-WebRequest -Uri https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar -OutFile "$env:USERPROFILE\tools\MasterCompiler.jar"
+Invoke-WebRequest -UseBasicParsing -Uri https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar -OutFile "$env:USERPROFILE\tools\MasterCompiler.jar"
 ```
 
 macOS / Linux: `curl -L -o ~/tools/MasterCompiler.jar <same URL>`.
 
+Check the version:
+
+```powershell
+java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
+```
+
+It must print `MasterCompiler v0.3.0` or newer. An error (`Unknown option: --version`) means an
+old jar that cannot do the setup below: download it again.
+
 ## 3. Configure the repository
+
+**No repository yet?** If the user has none open (or just wants to try MC first), offer a demo
+with IBM's TOBi sample project: an order-entry application with DDS files, RPG and SQLRPGLE
+programs, modules, service programs, a binding directory, CL, commands and SQL. MC builds it
+straight from its `Rules.mk` files (113 targets); 26 targets it cannot build (C, C++, COBOL,
+programs bound from modules, panel groups, menus, triggers) are listed as skipped.
+
+```powershell
+git clone https://github.com/IBM/tobi-example.git "$env:USERPROFILE\mc-demo"
+code "$env:USERPROFILE\mc-demo"
+```
+
+Continue in that window: ask for a `plan` first, which compiles nothing. Its objects go into the
+user's current library, so make sure it is a development library. For a smaller demo, IBM's
+company sample app (`https://github.com/IBM/ibmi-company_system.git`, 15 targets) works the same.
 
 Preview first, from the repository root; it writes nothing:
 

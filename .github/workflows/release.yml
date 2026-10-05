@@ -26,7 +26,7 @@ jobs:
           cache: maven
 
       - name: Build and run unit tests
-        run: ./mvnw -B clean package
+        run: ./mvnw -B clean package -Dmc.version="$GITHUB_REF_NAME"   # --version prints the tag
 
       - name: Name the jar
         run: |

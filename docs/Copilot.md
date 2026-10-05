@@ -19,8 +19,9 @@ Copilot in VS Code loads personal skills from `%USERPROFILE%\.copilot\skills` in
 skill there once per PC (PowerShell, no Java needed):
 
 ```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode" | Out-Null
-Invoke-WebRequest https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
 ```
 
 (With MC already downloaded, `java -jar MasterCompiler.jar --install-skills` installs all of MC's skills there.)
@@ -33,8 +34,15 @@ then start the server and type your password; nobody types the steps below by ha
 ## Setup by hand (once per repository)
 
 1. Java 8 or newer on the PC. A portable JDK zip works without admin rights.
-2. Download the jar: `https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
-   (for example into `%USERPROFILE%\tools`).
+2. Download the jar (Windows PowerShell 5.1 included):
+   ```powershell
+   # Windows PowerShell 5.1 needs TLS 1.2; hiding the progress bar makes the download much faster
+   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+   $ProgressPreference = 'SilentlyContinue'
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\tools" | Out-Null
+   Invoke-WebRequest -UseBasicParsing -Uri https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar -OutFile "$env:USERPROFILE\tools\MasterCompiler.jar"
+   ```
+   `java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version` must print `v0.3.0` or newer.
 3. In the repository root, preview what setup would do (it writes nothing):
    ```powershell
    java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --print

@@ -31,6 +31,7 @@ public class ArgParser {
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
     INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code)"),
+    VERSION       (null, "version",      Kind.FLAG,  "Print the MasterCompiler version"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
@@ -114,6 +115,7 @@ public class ArgParser {
   private boolean ssh;
   private boolean hostServers;
   private boolean installSkills;
+  private boolean version;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -214,6 +216,7 @@ public class ArgParser {
       case SSH:           ssh = true; break;
       case HOST_SERVERS:  hostServers = true; break;
       case INSTALL_SKILLS: installSkills = true; break;
+      case VERSION:       version = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -281,7 +284,7 @@ public class ArgParser {
     if (ssh && mcp && projectRoot == null) {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
     }
-    if (installSkills) return;  // needs nothing else
+    if (installSkills || version) return;  // need nothing else
 
     if (hostServers && !setupVscode) {
       throw new IllegalArgumentException("--host-servers goes with --setup-vscode");
@@ -402,6 +405,10 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  public boolean isVersion() {
+    return version;
   }
 
   public boolean isInstallSkills() {
@@ -532,7 +539,7 @@ public class ArgParser {
 
   public static String getUsage() {
     StringBuilder sb = new StringBuilder();
-    sb.append("Usage: compiler (-f|--file <YAML> | --scan <root>) [options]")
+    sb.append("Usage: java -jar MasterCompiler.jar (-f <YAML> | --scan <root> | --from-tobi <root> | --project <dir>) [options]")
         .append("\n");
     for (Option opt : Option.values()) {
       sb.append("  ");
