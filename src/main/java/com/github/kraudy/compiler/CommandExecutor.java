@@ -67,12 +67,22 @@ public class CommandExecutor {
 
   }
 
+  /* Objects whose create command has no REPLACE: an existing one is deleted and created again */
+  public static final List<ObjectType> RECREATED = Arrays.asList(
+      ObjectType.PF, ObjectType.LF, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF);
+
   /* Executes targets compilation commands */
   public void executeCommand(TargetKey key) throws Exception{
-    /* If object exists and no REPLACE options exist, force delete */
     if (key.objectExists()) {
-      /* Delete object without REPLACE = *YES */
-      if (Arrays.asList(ObjectType.PF, ObjectType.LF, ObjectType.BNDDIR, ObjectType.DTAARA, ObjectType.DTAQ, ObjectType.MSGF, ObjectType.TABLE).contains(key.getObjectTypeEnum())){
+      /* A binding directory is kept as it is (other entries stay); its ADDBNDDIRE hooks still run */
+      if (key.getObjectTypeEnum() == ObjectType.BNDDIR) {
+        logger.info("Binding directory exists, kept: " + key.asString());
+        key.setLastBuild(getCurrentTime());
+        return;
+      }
+      /* SQL tables are never dropped: CREATE OR REPLACE keeps the rows, a plain CREATE fails instead */
+      if (RECREATED.contains(key.getObjectTypeEnum())) {
+        logger.warn("Deleting existing object to create it again (no REPLACE on its create command): " + key.asString());
         deleteObject(key);
       }
     }

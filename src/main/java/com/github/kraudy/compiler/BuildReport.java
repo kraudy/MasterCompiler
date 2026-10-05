@@ -36,6 +36,7 @@ public class BuildReport {
     public String status;
     public String command;
     public String error;
+    public String warning;  // destructive step, e.g. an existing PF deleted and created again
     public List<CompileError> errors;
     public List<JoblogMessage> joblog;
 

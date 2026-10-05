@@ -73,6 +73,11 @@ public final class SpecResolver {
       if (hasSrcstmf && (param == ParamCmd.SRCFILE || param == ParamCmd.SRCMBR)) {
         continue;
       }
+      /* EXPORT(*ALL) uses no binder source */
+      if ((param == ParamCmd.SRCFILE || param == ParamCmd.SRCMBR)
+          && key.getCompilationCommand() == CompCmd.CRTSRVPGM && key.get(ParamCmd.EXPORT).contains("ALL")) {
+        continue;
+      }
       if (isIdentity(key, param, value)) continue;
       if (param == ParamCmd.INCDIR) {  // list of quoted directories -> plain list, quoted again on load
         out.put(param, value.replace("'", "").trim());

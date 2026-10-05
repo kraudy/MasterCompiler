@@ -5,4 +5,8 @@ CREATE OR REPLACE TABLE MCDITEM (
   PRICE   DECIMAL(9, 2) NOT NULL
 );
 
-INSERT INTO MCDITEM VALUES ('A0001', 'Coffee', 4.50), ('A0002', 'Tea', 3.25);
+-- CREATE OR REPLACE keeps existing rows, so add the sample items only when missing: safe to run again
+MERGE INTO MCDITEM T
+  USING (VALUES ('A0001', 'Coffee', 4.50), ('A0002', 'Tea', 3.25)) S (ITEM_ID, NAME, PRICE)
+  ON T.ITEM_ID = S.ITEM_ID
+  WHEN NOT MATCHED THEN INSERT (ITEM_ID, NAME, PRICE) VALUES (S.ITEM_ID, S.NAME, S.PRICE);

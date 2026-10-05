@@ -97,8 +97,8 @@ public class Utilities {
       case CRTSRVPGM:
         targetKey.put(ParamCmd.SRVPGM, targetKey.getQualifiedObject())
           .put(ParamCmd.SRVPGM, targetKey.getQualifiedObject(ValCmd.CURLIB))
-          .put(ParamCmd.MODULE, targetKey.getQualifiedObject())
-          .put(ParamCmd.MODULE, targetKey.getQualifiedObject(ValCmd.LIBL))
+          /* the same-named module this build creates, in the service program's own library (not *LIBL) */
+          .put(ParamCmd.MODULE, targetKey.isCurLib() ? targetKey.getQualifiedObject(ValCmd.CURLIB) : targetKey.getQualifiedObject())
           .put(ParamCmd.BNDSRVPGM, ValCmd.NONE)
           .put(ParamCmd.EXPORT, ValCmd.ALL);
         break;

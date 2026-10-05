@@ -159,6 +159,8 @@ public class MasterCompiler{
 
     compileBaseDir = baseDir;
 
+    qualifyProjectObjects();
+
     try {
       /* The build job gets the developer's library list (spec hooks run after it) */
       globalSpec.before.addAll(0, libraryHooks);
@@ -285,8 +287,9 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.before);
         }
 
-        /* If the object exists, we try to extract its compilation params */
-        odes.getObjectInfo(key);
+        /* Only whether it exists: compile params come from the spec and MC's defaults, never from the
+           existing object (that would carry over whatever someone compiled by hand: TGTRLS, TEXT, ...) */
+        odes.objectExists(key);
 
         /* Set global defaults params per target */
         key.putAll(globalSpec.defaults);
@@ -297,6 +300,12 @@ public class MasterCompiler{
 
         /* Migrate source file */
         if (!noMigrate) migrator.migrateSource(key);
+
+        /* EXPORT(*ALL) takes no binder source: SRCFILE / SRCMBR would only be noise (or a wrong library) */
+        if (key.getCompilationCommand() == CompilationPattern.CompCmd.CRTSRVPGM && key.get(ParamCmd.EXPORT).contains("ALL")
+            && !key.containsStreamFile()) {
+          key.removeSourceFile().removeMember();
+        }
 
         /* Execute compilation command */
         if (reporting()) command = CommandStringParser.toPasteableCommand(key);
@@ -357,6 +366,10 @@ public class MasterCompiler{
     BuildReport.TargetResult result = report.add(key.asString(), status);
     result.command = command;
     result.error = error;
+    if (key.objectExists() && CommandExecutor.RECREATED.contains(key.getObjectTypeEnum())) {
+      result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *" + key.getObjectTypeEnum().name()
+          + " and create it again" + (key.getObjectTypeEnum() == CompilationPattern.ObjectType.PF ? ": its data is lost" : "");
+    }
     if (dryRun || since == null) return;
 
     try {
@@ -375,6 +388,56 @@ public class MasterCompiler{
     } catch (Exception e) {
       logger.info("Could not collect report details for {}: {}", key.asString(), e.getMessage());
     }
+  }
+
+  /*
+   * Modules and service programs this build creates are referred to in their own library (*CURLIB for
+   * curlib targets), not *LIBL: a same-named object earlier in the library list must not be bound instead.
+   * Covers MODULE / BNDSRVPGM params and ADDBNDDIRE OBJ in hooks; external objects keep *LIBL.
+   */
+  private void qualifyProjectObjects() {
+    java.util.Map<String, String> modules = new java.util.HashMap<String, String>();
+    java.util.Map<String, String> srvpgms = new java.util.HashMap<String, String>();
+    for (TargetKey key : globalSpec.targets.keySet()) {
+      String lib = key.isCurLib() ? ValCmd.CURLIB.toString() : key.getLibrary();
+      if (key.isModule()) modules.put(key.getObjectName().toUpperCase(), lib);
+      if (key.isServiceProgram()) srvpgms.put(key.getObjectName().toUpperCase(), lib);
+    }
+    for (BuildSpec.TargetSpec spec : globalSpec.targets.values()) {
+      if (spec == null) continue;
+      qualify(spec.params, ParamCmd.MODULE, modules);
+      qualify(spec.params, ParamCmd.BNDSRVPGM, srvpgms);
+      for (List<CommandObject> hooks : Arrays.asList(spec.before, spec.after, spec.success, spec.failure)) qualifyHooks(hooks, srvpgms);
+    }
+    for (List<CommandObject> hooks : Arrays.asList(globalSpec.before, globalSpec.after, globalSpec.success, globalSpec.failure)) {
+      qualifyHooks(hooks, srvpgms);
+    }
+  }
+
+  private static void qualify(Map<ParamCmd, String> params, ParamCmd param, Map<String, String> libs) {
+    if (params == null || params.get(param) == null) return;
+    params.put(param, qualifyNames(params.get(param), libs));
+  }
+
+  private static void qualifyHooks(List<CommandObject> hooks, Map<String, String> srvpgms) {
+    if (hooks == null) return;
+    for (CommandObject hook : hooks) {
+      if (hook.getSystemCommand() == SysCmd.ADDBNDDIRE && hook.containsKey(ParamCmd.OBJ)) {
+        hook.put(ParamCmd.OBJ, qualifyNames(hook.get(ParamCmd.OBJ), srvpgms));
+      }
+    }
+  }
+
+  /* "A *LIBL/B LIB/C" -> project names get their library, others are left as they are */
+  static String qualifyNames(String value, Map<String, String> libs) {
+    StringBuilder out = new StringBuilder();
+    for (String token : value.trim().split("\\s+")) {
+      String name = token.startsWith(ValCmd.LIBL.toString() + "/") ? token.substring(token.indexOf('/') + 1) : token;
+      if (!name.contains("/") && libs.containsKey(name.toUpperCase())) token = libs.get(name.toUpperCase()) + "/" + name;
+      if (out.length() > 0) out.append(' ');
+      out.append(token);
+    }
+    return out.toString();
   }
 
   /* Report entries of targets that were not built use the same library naming as the built ones */
