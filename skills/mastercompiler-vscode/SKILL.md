@@ -11,6 +11,9 @@ description: >-
 
 # Set up MasterCompiler for Copilot in VS Code
 
+You may be reading this because the user pointed you at https://github.com/kraudy/MasterCompiler
+and asked to install or try it: this is the guide to follow with them, step by step.
+
 Goal: the `mastercompiler` MCP server shows up in Copilot's agent mode, so you can call
 `build`, `plan`, `impact` and `joblog`. MC runs on the developer's PC, uploads the
 repository's sources to the IBM i (`--push`), compiles there and returns errors with file
@@ -152,3 +155,16 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |
 
 Once MC's tools work, follow the `mastercompiler` skill for the edit–compile–fix loop.
+
+## Keep these instructions for next time
+
+If you read this guide from the web (the user gave you MasterCompiler's repository URL), offer to
+save it as a personal skill, so future chats in any repository already know it. With the user's
+OK, run:
+
+```powershell
+java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --install-skills
+```
+
+It copies MC's skills (this setup guide, the build loop, IBM i over SSH) into
+`%USERPROFILE%\.copilot\skills`, where Copilot in VS Code loads them in every workspace.

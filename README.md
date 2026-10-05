@@ -8,6 +8,14 @@ MasterCompiler is not **Tool X, but for IBM i**. It is an actual IBM I specific 
 
 YAML-based, sensible, open-source, modern, clean, and elegant approach to automate and streamline object compilation.
 
+> **AI assistants (GitHub Copilot, Claude, …):** if you were asked to install, set up or try MasterCompiler, follow
+> [the setup guide](https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md)
+> step by step with the user. It covers Java, downloading MC, connecting it to Copilot as an MCP server with the
+> user's Code for IBM i connection, and what to ask the user before writing anything.
+>
+> **People:** in VS Code, switch Copilot Chat to *Agent mode* and say *"set up MasterCompiler from
+> https://github.com/kraudy/MasterCompiler"*. Or see [docs/Copilot.md](./docs/Copilot.md).
+
 ---
 
 MasterCompiler (**MC**) aims to give the whole IBM i community a standard way to describe the compilation flow of objects and allow easy integration with any DevOps pipeline to be run locally (just upload the JAR file) or remotely in a Docker container.
