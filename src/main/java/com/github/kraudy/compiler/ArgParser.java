@@ -47,7 +47,7 @@ public class ArgParser {
     SINCE         (null, "since",        Kind.VALUE, "Only build targets whose sources changed since this git ref, plus dependents"),
     PUSH          (null, "push",         Kind.VALUE, "Upload the local git repo's sources to this IFS directory and build from there"),
     KEEP_GOING    ("k", "keep-going", Kind.FLAG,  "After a failed target, keep building everything that does not depend on it"),
-    MCP           (null, "mcp",          Kind.FLAG,  "Run as an MCP server on stdio (tools: build, plan, impact, joblog)"),
+    MCP           (null, "mcp",          Kind.FLAG,  "Run as an MCP server on stdio (tools: build, plan, impact, clean, joblog)"),
     NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration"),
     JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 

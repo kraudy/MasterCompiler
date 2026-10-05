@@ -32,7 +32,7 @@ import io.github.theprez.dotenv_ibmi.IBMiDotEnv;
  * builds skip the connect cost and the library list and joblog carry over.
  * The spec is re-read on every call, so source and spec edits are picked up.
  *
- * Tools: build, plan, impact, joblog.
+ * Tools: build, plan, impact, clean, joblog.
  */
 public class McpServer {
   private static final Logger logger = LoggerFactory.getLogger(McpServer.class);
@@ -143,6 +143,15 @@ public class McpServer {
         "on it, directly or transitively, in build order. Reads sources only; compiles nothing.",
         impact));
 
+    ObjectNode clean = mapper.createObjectNode();
+    clean.put("type", "object");
+    clean.putObject("properties");
+    tools.add(tool("clean",
+        "Delete this project's objects (every build target) from the build library, dependents first. "
+        + "Only when the user asks, e.g. to remove a demo: it deletes any object with a target's name and type, "
+        + "including one that existed before MC built it.",
+        clean));
+
     ObjectNode joblog = mapper.createObjectNode();
     joblog.put("type", "object");
     joblog.putObject("properties");
@@ -185,6 +194,7 @@ public class McpServer {
         case "build":  return build(args, false);
         case "plan":   return build(args, true);
         case "impact": return impact(args);
+        case "clean":  return clean();
         case "joblog": return joblog();
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -239,6 +249,32 @@ public class McpServer {
     for (TargetKey key : spec.targets.keySet()) {  // spec order = build order
       if (!rebuild.contains(key)) continue;
       (seeds.contains(key) ? targets : dependents).add(key.asString());
+    }
+    return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* DLTOBJ for every target, in reverse build order, in the job's current library */
+  private ObjectNode clean() throws Exception {
+    connect();
+    BuildSpec spec = loadSpec();
+    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
+    for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
+      executor.executeCommand(hook);
+    }
+
+    List<TargetKey> targets = new java.util.ArrayList<TargetKey>(spec.targets.keySet());
+    java.util.Collections.reverse(targets);
+    ObjectNode result = mapper.createObjectNode();
+    ArrayNode deleted = result.putArray("deleted");
+    ArrayNode notFound = result.putArray("notFound");
+    for (TargetKey key : targets) {
+      String name = key.getObjectName() + " *" + key.getObjectTypeEnum().name();
+      try {
+        executor.deleteObject(key);
+        deleted.add(name);
+      } catch (Exception e) {
+        notFound.add(name);
+      }
     }
     return toolResult(pretty.writeValueAsString(result), false);
   }

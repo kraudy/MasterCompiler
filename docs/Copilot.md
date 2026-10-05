@@ -76,6 +76,7 @@ If your network allows the host servers (ports 449, 8470–8476, the ones ACS us
 | `plan` | What would compile, in order, and with which commands. Nothing is compiled. |
 | `build` | Upload changed sources, compile them and everything that depends on them, return every error with file and line. |
 | `impact` | What depends on an object. |
+| `clean` | Delete the project's objects from your library (when you ask, e.g. after the demo). |
 | `joblog` | The build job's recent messages. |
 
 The server runs with `--project ${workspaceFolder}`: a `build.yaml` is used when present, a TOBi / Bob project

@@ -68,20 +68,24 @@ old jar that cannot do the setup below: download it again.
 
 ## 3. Configure the repository
 
-**No repository yet?** If the user has none open (or just wants to try MC first), offer a demo
-with IBM's TOBi sample project: an order-entry application with DDS files, RPG and SQLRPGLE
-programs, modules, service programs, a binding directory, CL, commands and SQL. MC builds it
-straight from its `Rules.mk` files (113 targets); 26 targets it cannot build (C, C++, COBOL,
-programs bound from modules, panel groups, menus, triggers) are listed as skipped.
+**No repository yet?** If the user has none open (or just wants to try MC first), offer MC's
+small demo: four sources that build five objects, all named `MCD*` (a table, a module and its
+service program, a binding directory, and an SQLRPGLE program that uses them). Users usually have
+only one or two libraries and cannot create more, so the demo is kept small and is removed
+afterwards.
 
 ```powershell
-git clone https://github.com/IBM/tobi-example.git "$env:USERPROFILE\mc-demo"
-code "$env:USERPROFILE\mc-demo"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$demo = "$env:USERPROFILE\mc-demo"
+New-Item -ItemType Directory -Force $demo | Out-Null
+foreach ($f in 'MCDITEM.table.sql','MCDCALC.srvpgm.rpgle','mcdcalc_p.include.rpgle','MCDHELLO.pgm.sqlrpgle','mc-base.yaml','README.md') {
+  Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/MasterCompiler/master/examples/demo/$f" -OutFile "$demo\$f"
+}
+code $demo
 ```
 
-Continue in that window: ask for a `plan` first, which compiles nothing. Its objects go into the
-user's current library, so make sure it is a development library. For a smaller demo, IBM's
-company sample app (`https://github.com/IBM/ibmi-company_system.git`, 15 targets) works the same.
+Continue in that window. Suggest `plan` first (compiles nothing), then `build`. When the user is
+done, offer the `clean` tool to delete the five `MCD*` objects from their library.
 
 Preview first, from the repository root; it writes nothing:
 

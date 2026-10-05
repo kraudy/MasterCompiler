@@ -1,0 +1,10 @@
+# What the scan cannot read from the sources: the binding directory MCDHELLO names in ctl-opt,
+# and the service program it holds.
+targets:
+  curlib.MCDDEMO.bnddir.bnddir:
+    params:
+      TEXT: MasterCompiler demo
+    after:
+      AddBndDirE:
+        BndDir: MCDDEMO
+        Obj: MCDCALC
