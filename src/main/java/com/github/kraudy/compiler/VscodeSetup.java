@@ -47,6 +47,8 @@ public final class VscodeSetup {
   public static int run(ArgParser parser) throws Exception {
     File project = new File(parser.getProjectRoot() != null ? parser.getProjectRoot() : ".").getCanonicalFile();
     boolean print = parser.isPrint();
+    /* SSH by default: the port Code for IBM i already uses; --host-servers for the ACS ports */
+    boolean ssh = !parser.isHostServers();
 
     /* Connections: the one asked for, else all of them (several are picked when the server starts) */
     List<Code4iConfig> connections = new ArrayList<Code4iConfig>();
@@ -74,9 +76,9 @@ public final class VscodeSetup {
     }
     if (connections.size() > 1) out.append("  Several connections: you pick one each time the server starts.\n");
 
-    if (parser.isSsh()) {
-      out.append("  SSH: MC runs on the IBM i through the SSH port Code for IBM i uses (an SSH key or the password).\n");
-    }
+    out.append(ssh
+        ? "  Over SSH, like Code for IBM i: MC runs on the IBM i (SSH key or password). --host-servers to use the ACS ports instead.\n"
+        : "  Through the host servers (ports 449, 8470-8476, like ACS).\n");
 
     /* .vscode/mcp.json */
     File mcp = new File(project, ".vscode/mcp.json");
@@ -85,10 +87,10 @@ public final class VscodeSetup {
       out.append("  kept: already has a \"").append(SERVER).append("\" server\n");
     } else if (mcp.isFile() && !isPlainJson(mcp)) {
       out.append("  not changed: it has comments, which rewriting would lose. Add this to it by hand:\n")
-          .append(indent(WRITER.writeValueAsString(fragment(connections, parser.isSsh())))).append('\n');
+          .append(indent(WRITER.writeValueAsString(fragment(connections, ssh)))).append('\n');
     } else {
       ObjectNode content = mcp.isFile() ? (ObjectNode) JSONC.readTree(mcp) : WRITER.createObjectNode();
-      addServer(content, connections, parser.isSsh());
+      addServer(content, connections, ssh);
       if (print) {
         out.append(mcp.isFile() ? "  would add the server, keeping the rest:\n" : "  would write:\n")
             .append(indent(WRITER.writeValueAsString(content))).append('\n');

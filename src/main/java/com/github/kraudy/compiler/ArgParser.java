@@ -25,10 +25,11 @@ public class ArgParser {
     PROJECT       (null, "project",      Kind.VALUE, "Project root: build.yaml if present, else TOBi Rules.mk, else scan"),
     CODE4I        (null, "code4i",       Kind.FLAG,  "Connect with the Code for IBM i connection from VS Code settings (password: IBMI_PASSWORD)"),
     CONNECTION    (null, "connection",   Kind.VALUE, "Code for IBM i connection name, when there are several"),
-    SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json and .github/skills for Copilot in the --project folder (default: current)"),
+    SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json (MC over SSH) and .github/skills for Copilot in the --project folder (default: current)"),
     LIBL          (null, "libl",         Kind.VALUE, "Library list for the build job (CHGLIBL), space-separated"),
     CURLIB        (null, "curlib",       Kind.VALUE, "Current library for the build job (CHGCURLIB)"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
+    HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
@@ -110,6 +111,7 @@ public class ArgParser {
   private String libl;
   private String curlib;
   private boolean ssh;
+  private boolean hostServers;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -208,6 +210,7 @@ public class ArgParser {
       case SETUP_VSCODE:  setupVscode = true; break;
       case PRINT:         print = true; break;
       case SSH:           ssh = true; break;
+      case HOST_SERVERS:  hostServers = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -275,12 +278,18 @@ public class ArgParser {
     if (ssh && mcp && projectRoot == null) {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
     }
+    if (hostServers && !setupVscode) {
+      throw new IllegalArgumentException("--host-servers goes with --setup-vscode");
+    }
+    if (hostServers && ssh) {
+      throw new IllegalArgumentException("Use either --ssh or --host-servers");
+    }
     if (print && !setupVscode) {
       throw new IllegalArgumentException("--print goes with --setup-vscode");
     }
     if (setupVscode) {
       if (yamlFile != null || scanRoot != null || tobiRoot != null || mcp || importSelection != null) {
-        throw new IllegalArgumentException("--setup-vscode takes only --project, --connection, --ssh, --print, -v");
+        throw new IllegalArgumentException("--setup-vscode takes only --project, --connection, --host-servers, --print, -v");
       }
       return;
     }
@@ -388,6 +397,10 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  public boolean isHostServers() {
+    return hostServers;
   }
 
   public boolean isPrint() {
