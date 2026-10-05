@@ -1,3 +1,9 @@
+**Quick start with Copilot:** in VS Code, switch Copilot Chat to **Agent mode** and say:
+
+> set up MasterCompiler from https://github.com/kraudy/MasterCompiler
+
+Copilot walks you through the rest. Details in [docs/Copilot.md](./docs/Copilot.md).
+
 <div align="center">
 <img src="./images/Master%20Compiler.jpg" alt="Master Compiler logo" style="display: block; margin: 0 auto; width: 40%; max-width: 800px; height: auto; object-fit: cover; aspect-ratio: 1 / 1;">
 </div>
@@ -12,9 +18,6 @@ YAML-based, sensible, open-source, modern, clean, and elegant approach to automa
 > [the setup guide](https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md)
 > step by step with the user. It covers Java, downloading MC, connecting it to Copilot as an MCP server with the
 > user's Code for IBM i connection, and what to ask the user before writing anything.
->
-> **People:** in VS Code, switch Copilot Chat to *Agent mode* and say *"set up MasterCompiler from
-> https://github.com/kraudy/MasterCompiler"*. Or see [docs/Copilot.md](./docs/Copilot.md).
 
 ---
 
