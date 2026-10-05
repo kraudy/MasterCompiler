@@ -180,7 +180,7 @@ public class MasterCompiler{
       if(verbose) logger.info(showLibraryList());
 
       /* The dependency graph drives incremental selection and, with keep-going, what a failure blocks */
-      if (isIncremental() || keepGoing) depAwareness.detectDependencies(globalSpec);
+      if ((isIncremental() || keepGoing) && !globalSpec.isDependenciesDetected()) depAwareness.detectDependencies(globalSpec);
       if (since != null || changedFiles != null) collectSinceRebuildSet();
       else if (diff) collectDiffRebuildSet();
 
@@ -374,7 +374,7 @@ public class MasterCompiler{
 
     try {
       result.joblog = commandExec.getJoblogMessages(since);
-      if (command != null) {
+      if (command != null && writesEventFile(key)) {
         if (key.getCompilationCommand() == CompilationPattern.CompCmd.RUNSQLSTM) {
           /* The listing also carries warnings (e.g. SQL7905 not journaled): read it only on failure */
           if (!BuildReport.FAILED.equals(status)) return;
@@ -445,6 +445,24 @@ public class MasterCompiler{
     try {
       if (key.isCurLib()) key.setLibrary(getCurLIb());
     } catch (Exception ignored) {}
+  }
+
+  /* Commands that report compile errors (EVFEVENT, or RUNSQLSTM's listing); CRTBNDDIR, CRTDTAARA, ... do not */
+  private static boolean writesEventFile(TargetKey key) {
+    switch (key.getCompilationCommand()) {
+      case CRTBNDDIR: case CRTDTAARA: case CRTDTAQ: case CRTMSGF:
+        return false;
+      default:
+        return true;
+    }
+  }
+
+  /* MCP mode: stderr shows as warnings in VS Code, so keep it to warnings and errors unless -v */
+  static void quietLogs(boolean verbose) {
+    if (verbose) return;
+    ch.qos.logback.classic.LoggerContext context = (ch.qos.logback.classic.LoggerContext) LoggerFactory.getILoggerFactory();
+    context.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).setLevel(ch.qos.logback.classic.Level.WARN);
+    context.getLogger("com.github.kraudy.compiler").setLevel(ch.qos.logback.classic.Level.WARN);
   }
 
   /* Targets never reached are listed as not built, then the report is written (--json) */

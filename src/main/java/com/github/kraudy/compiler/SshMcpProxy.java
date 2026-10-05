@@ -55,6 +55,7 @@ public class SshMcpProxy {
   public void serve() throws Exception {
     protocolOut = new PrintStream(System.out, true, "UTF-8");
     System.setOut(System.err);  // stdout is the protocol channel
+    MasterCompiler.quietLogs(parser.isVerbose());
 
     Code4iConfig code4i = MasterCompiler.code4i(parser);
     String host = code4i != null ? code4i.host : required("IBMI_HOSTNAME");
@@ -182,7 +183,7 @@ public class SshMcpProxy {
     if (!local.isFile()) throw new IllegalStateException("Run MasterCompiler from its jar to use --ssh");
     String remote = home + "/mc/.mc/MasterCompiler-" + sha256(local).substring(0, 12) + ".jar";
     if (ssh.stat(remote) == null) {
-      logger.info("Uploading MasterCompiler to {}", remote);
+      logger.warn("First start of this MasterCompiler version: uploading it (about 10 MB) to {}", remote);
       ssh.upload(local, remote);
       /* keep only the version in use */
       String dir = remote.substring(0, remote.lastIndexOf('/'));

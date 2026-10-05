@@ -67,6 +67,7 @@ public final class SshTarget implements AutoCloseable {
     Session session = jsch.getSession(user, host, port);
     if (hasPassword) session.setPassword(password);
     session.setConfig("StrictHostKeyChecking", "ask");
+    session.setConfig("FingerprintHash", "SHA256");
     session.setConfig("PreferredAuthentications", "publickey,keyboard-interactive,password");
     session.setUserInfo(new AcceptNewHosts(password));
     session.setServerAliveInterval(30_000);
@@ -206,7 +207,9 @@ public final class SshTarget implements AutoCloseable {
     @Override public boolean promptYesNo(String message) {
       boolean changed = message.toUpperCase().contains("CHANGED");
       if (changed) logger.error("SSH host key changed, refusing to connect: {}", message);
-      else logger.info("Trusting new SSH host key (added to known_hosts)");
+      /* JSch's message names the host and the key fingerprint: show it so the user can check it */
+      else logger.warn("Trusting a new SSH host key, added to known_hosts. Check the fingerprint with your administrator: {}",
+          message.replace('\n', ' '));
       return !changed;
     }
     @Override public String getPassphrase() { return null; }

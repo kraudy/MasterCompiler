@@ -96,10 +96,6 @@ public class CommandExecutor {
       commandString = key.getCommandStringWithoutSummary();
     }
 
-    String paste = CommandStringParser.toPasteableCommand(key);
-    if (paste != null) {
-      logger.info("Paste: {}", paste);
-    }
 
     try {
       executeCommand(commandString, commandTime);
@@ -132,13 +128,13 @@ public class CommandExecutor {
     try (Statement cmdStmt = connection.createStatement()) {
       cmdStmt.execute("CALL QSYS2.QCMDEXC('" + commandString + "')");
     } catch (SQLException e) {
-      logger.error("Command failed: " + commandString);
+      logger.error("Command failed: " + CommandStringParser.toPasteable(commandString));
 
       String joblog = buildJoblogMessagesString(commandTime);
       throw new CompilerException("Command execution failed", e, commandString, commandTime, joblog);  // No target here
     }
 
-    logger.info("Command successful: " + commandString);
+    logger.info("Command successful: " + CommandStringParser.toPasteable(commandString));  // copy-pasteable form
     if(verbose) logger.info(buildJoblogMessagesString(commandTime));
   }
 

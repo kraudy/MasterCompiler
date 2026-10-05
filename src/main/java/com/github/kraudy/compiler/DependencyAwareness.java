@@ -292,6 +292,7 @@ public class DependencyAwareness {
     applySrvpgmBndDirFromModules(globalSpec);
 
     showLogs(globalSpec);
+    globalSpec.setDependenciesDetected(true);
   }
 
   /**

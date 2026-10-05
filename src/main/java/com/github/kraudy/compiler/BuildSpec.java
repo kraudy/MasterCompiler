@@ -22,6 +22,11 @@ public class BuildSpec {
   private ConcurrentHashMap<String, TargetKey> exportedProcToModule = new ConcurrentHashMap<>();
 
   public String getBaseDirectory() { return baseDirectory; }
+
+  /* Set once the dependency graph is built, so a build does not scan the sources a second time */
+  private boolean dependenciesDetected;
+  public boolean isDependenciesDetected() { return dependenciesDetected; }
+  public void setDependenciesDetected(boolean detected) { this.dependenciesDetected = detected; }
   public void setBaseDirectory(String baseDirectory) { this.baseDirectory = baseDirectory; }
 
   public void setExportedProcedures(ConcurrentHashMap<String, TargetKey> exportedProcToModule) { 

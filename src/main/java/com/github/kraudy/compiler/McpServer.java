@@ -58,6 +58,7 @@ public class McpServer {
     /* stdout is the protocol channel: everything else (logback, libraries) goes to stderr */
     protocolOut = new PrintStream(System.out, true, "UTF-8");
     System.setOut(System.err);
+    MasterCompiler.quietLogs(parser.isVerbose());
     logger.info("MasterCompiler MCP server ready");
 
     BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
@@ -145,11 +146,14 @@ public class McpServer {
 
     ObjectNode clean = mapper.createObjectNode();
     clean.put("type", "object");
-    clean.putObject("properties");
+    ObjectNode confirm = clean.putObject("properties").putObject("confirm");
+    confirm.put("type", "boolean");
+    confirm.put("description", "false (default): only list what would be deleted. true: delete, after the user agreed to that list");
     tools.add(tool("clean",
-        "Delete this project's objects (every build target) from the build library, dependents first. "
-        + "Only when the user asks, e.g. to remove a demo: it deletes any object with a target's name and type, "
-        + "including one that existed before MC built it.",
+        "Delete this project's objects from the current library, e.g. to remove a demo. Only when the user asks. "
+        + "First call it without confirm: it lists the target objects that exist there and deletes nothing. Show "
+        + "that list to the user (it includes any object with a target's name and type, even one MC did not build) "
+        + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members.",
         clean));
 
     ObjectNode joblog = mapper.createObjectNode();
@@ -183,6 +187,12 @@ public class McpServer {
     tool.put("name", name);
     tool.put("description", description);
     tool.set("inputSchema", inputSchema);
+    /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
+    boolean destructive = name.equals("build") || name.equals("clean");
+    ObjectNode annotations = tool.putObject("annotations");
+    annotations.put("readOnlyHint", !destructive);
+    annotations.put("destructiveHint", destructive);
+    annotations.put("openWorldHint", false);
     return tool;
   }
 
@@ -194,7 +204,7 @@ public class McpServer {
         case "build":  return build(args, false);
         case "plan":   return build(args, true);
         case "impact": return impact(args);
-        case "clean":  return clean();
+        case "clean":  return clean(args);
         case "joblog": return joblog();
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -253,30 +263,61 @@ public class McpServer {
     return toolResult(pretty.writeValueAsString(result), false);
   }
 
-  /* DLTOBJ for every target, in reverse build order, in the job's current library */
-  private ObjectNode clean() throws Exception {
+  /* Lists (confirm false) or deletes (confirm true) the targets that exist in the current library, dependents first */
+  private ObjectNode clean(JsonNode args) throws Exception {
     connect();
     BuildSpec spec = loadSpec();
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
     for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
-      executor.executeCommand(hook);
+      if (hook.getSystemCommand() == CompilationPattern.SysCmd.CHGCURLIB) executor.executeCommand(hook);  // DLTOBJ uses *CURLIB
     }
 
+    ObjectDescriptor objects = new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose());
+    List<TargetKey> existing = new java.util.ArrayList<TargetKey>();
     List<TargetKey> targets = new java.util.ArrayList<TargetKey>(spec.targets.keySet());
-    java.util.Collections.reverse(targets);
-    ObjectNode result = mapper.createObjectNode();
-    ArrayNode deleted = result.putArray("deleted");
-    ArrayNode notFound = result.putArray("notFound");
+    java.util.Collections.reverse(targets);  // dependents first
     for (TargetKey key : targets) {
+      objects.objectExists(key);
+      if (key.objectExists()) existing.add(key);
+    }
+
+    boolean confirmed = args.path("confirm").asBoolean(false);
+    ObjectNode result = mapper.createObjectNode();
+    result.put("library", currentLibrary());
+    result.put("confirmed", confirmed);
+    ArrayNode listed = result.putArray(confirmed ? "deleted" : "wouldDelete");
+    ArrayNode failed = result.putArray("notDeleted");
+    for (TargetKey key : existing) {
       String name = key.getObjectName() + " *" + key.getObjectTypeEnum().name();
+      if (!confirmed) {
+        listed.add(name);
+        continue;
+      }
       try {
         executor.deleteObject(key);
-        deleted.add(name);
+        listed.add(name);
+        try {
+          executor.executeCommand("RMVM FILE(*CURLIB/EVFEVENT) MBR(" + key.getObjectName() + ")", executor.getCurrentTime());
+        } catch (Exception noMember) {
+          /* not compiled with *EVENTF, or already removed with a same-named target */
+        }
       } catch (Exception e) {
-        notFound.add(name);
+        failed.add(name + ": " + e.getMessage());
       }
     }
+    if (!confirmed) {
+      result.put("next", existing.isEmpty() ? "Nothing to delete."
+          : "Nothing deleted yet. Show this list to the user; if they agree, call clean again with confirm: true.");
+    }
     return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  private String currentLibrary() throws Exception {
+    try (java.sql.Statement stmt = connection.createStatement();
+         java.sql.ResultSet rs = stmt.executeQuery(
+           "SELECT TRIM(SCHEMA_NAME) FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT'")) {
+      return rs.next() ? rs.getString(1) : "*CURLIB";
+    }
   }
 
   private ObjectNode joblog() throws Exception {
