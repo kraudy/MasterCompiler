@@ -20,6 +20,16 @@ repository's sources to the IBM i (`--push`), compiles there and returns errors 
 and line. It reuses the Code for IBM i connection (host, user, current library, library list),
 so the only thing the user types is their IBM i password, once, in a VS Code prompt.
 
+**The password is entered only in VS Code's MCP prompt.** When the user starts the
+`mastercompiler` server, VS Code shows a password box (the `ibmiPassword` input in
+`.vscode/mcp.json`), stores the value in its secret storage and passes it to MC as `IBMI_PASSWORD`.
+Never ask for the password in the chat, never have the user type it in a terminal (no
+`$env:IBMI_PASSWORD = ...`, no `set IBMI_PASSWORD`, no command-line argument), and never write it
+into `mcp.json`, `.env`, settings or any other file. Do not start MC yourself from a terminal to
+test the connection: it would need the password there. Start the server from VS Code and test
+with the `plan` tool. If the user pastes their password into the chat anyway, tell them not to and
+to change it if the chat may be logged or shared.
+
 Run the steps yourself when you can execute terminal commands (Copilot's Agent mode can; Ask
 mode cannot: then suggest switching to Agent mode). When you cannot, or a step fails, give the
 user the exact commands and explain what each one does. Never write into the repository without
@@ -134,8 +144,9 @@ Tell the user:
 
 1. Command Palette → **MCP: List Servers** → `mastercompiler` → **Start** (VS Code may ask
    to trust the server first).
-2. Pick the connection (when there are several), then enter the IBM i password. VS Code stores it securely and passes it only to
-   MC; it is never written to the repository.
+2. Pick the connection (when there are several), then enter the IBM i password in the box
+   VS Code shows. That box is the only place to type it: not the chat, not a terminal. VS Code
+   stores it securely and passes it only to MC; it is never written to the repository.
 3. Back in Copilot Chat (Agent mode), MC's tools are available.
 
 Then check it works: call `plan` without arguments. A list of targets means MC reached the
@@ -186,7 +197,7 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | Symptom | Cause / fix |
 |---------|-------------|
 | No MCP servers listed, or MCP disabled | The organization's Copilot policy may block MCP servers; the user must ask their admin. |
-| `IBMI_PASSWORD is not set` | `mcp.json` lacks the password input or `env` entry; rerun `--setup-vscode`. |
+| `IBMI_PASSWORD is not set` | `mcp.json` lacks the password input or `env` entry; rerun `--setup-vscode`. Do not set the variable in a terminal instead. |
 | `Several Code for IBM i connections` | Only when starting MC by hand: pass `--connection "<name>"` (setup's `mcp.json` asks at start). |
 | `VS Code user settings not found` | Set `MC_VSCODE_SETTINGS` to the `settings.json` holding `code-for-ibmi.connections`, or configure without `--code4i`. |
 | Connection refused / timeouts | Over SSH: the IBM i's SSH port must be reachable (Code for IBM i working from this PC proves it). With `--host-servers`: ports 449, 8470-8476 (or 9470-9476 with TLS), as for ACS. |

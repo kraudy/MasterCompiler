@@ -13,6 +13,10 @@ Code for IBM i and ACS stay as they are (browsing, 5250, spooled files). MC reus
 connection: host, user, current library, library list and home directory. The only extra input is the IBM i
 password, which VS Code asks for once and stores securely.
 
+Type the password only in that VS Code prompt, which appears when the `mastercompiler` server starts. Never type it
+in the Copilot chat or a terminal, and never put it in `mcp.json`, `.env` or another file. VS Code keeps it in its
+secret storage and hands it only to MC.
+
 ## Let Copilot do the setup
 
 Copilot in VS Code loads personal skills from `%USERPROFILE%\.copilot\skills` in every workspace. Install MC's setup
@@ -52,7 +56,7 @@ then start the server and type your password; nobody types the steps below by ha
    `.vscode/mcp.json` (other servers are kept; a file with comments is left alone and the entry to paste is printed)
    and installs MC's agent skills into `.github/skills/`.
 4. In VS Code: Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, pick the connection when you
-   have several, and enter the IBM i password.
+   have several, and enter the IBM i password in the box VS Code shows (the only place to type it).
 
 Or ask Copilot: *"set up MasterCompiler for this repository"*. The `mastercompiler-vscode` skill tells it how, and
 what to ask you when it cannot do a step itself. To make that skill available before MC is set up, copy
