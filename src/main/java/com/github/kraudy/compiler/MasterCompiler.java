@@ -490,6 +490,9 @@ public class MasterCompiler{
     context.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).setLevel(ch.qos.logback.classic.Level.WARN);
     context.getLogger("com.github.kraudy.compiler").setLevel(ch.qos.logback.classic.Level.WARN);
     context.getLogger(CommandExecutor.class).setLevel(ch.qos.logback.classic.Level.INFO);
+    /* SSH start-up stages, upload progress and stalls: the first thing to read when the server hangs */
+    context.getLogger(SshMcpProxy.class).setLevel(ch.qos.logback.classic.Level.INFO);
+    context.getLogger(SshTarget.class).setLevel(ch.qos.logback.classic.Level.INFO);
   }
 
   /* Targets never reached are listed as not built, then the report is written (--json) */

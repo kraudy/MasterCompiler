@@ -91,7 +91,7 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler <tag>` with the tag from above (v0.3.5 or newer).
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.6 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
 Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
@@ -258,6 +258,10 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | `--ssh`: host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator. |
 | `--ssh`: no key and no password | Enter the password when the server starts, or create an SSH key the IBM i accepts. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |
+| Server seems stuck at start | Read its log: **MCP: List Servers** → `mastercompiler` → **Show Output**. It shows each start-up stage (`MC start-up 1/5 connecting` … `5/5 ready`) and, for the jar upload, progress every 5 s. A tool call that waits logs which stage it waits for. |
+| `stalled: no data moved for 60 s after X of Y MB` | The SSH link stopped carrying data (VPN, firewall, network). Start the server again; it resumes cleanly (cut uploads never stay under the real name, and a broken jar on the IBM i is detected and uploaded again). `MC_STALL_SECONDS` in the server's `env` changes the limit. |
+| `Lost the SSH connection to the IBM i` | No answer for about 60 s: start the server again once the network is back. |
+| `Remote command did not finish in 600 s` | A command on the IBM i hung (e.g. unpacking or tagging the sources); `MC_REMOTE_TIMEOUT` changes the limit. |
 
 Once MC's tools work, follow the `mastercompiler` skill for the edit–compile–fix loop.
 

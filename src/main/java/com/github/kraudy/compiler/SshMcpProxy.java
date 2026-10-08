@@ -125,25 +125,31 @@ public class SshMcpProxy {
 
   /* SSH in, upload MC when this version is new, sync the sources and start MC there; returns its stdin */
   private OutputStream startRemote(Code4iConfig code4i, String host, int port, String user) throws Exception {
+    long start = System.currentTimeMillis();
+    stage("1/5 connecting to " + user + "@" + host + ":" + port + " over SSH");
     ssh = SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
         code4i != null ? code4i.privateKeyPath : null);
     /* Home: Code for IBM i's when it has one, else the SSH user's own */
     String home = code4i != null && code4i.homeKnown ? code4i.homeDirectory : ssh.exec("echo $HOME").trim();
     home = home.startsWith("/") ? trimSlash(home) : "/home/" + user.toUpperCase();
     remoteDir = parser.getPush() != null ? trimSlash(parser.getPush()) : home + "/mc/" + project.getName();
-    long start = System.currentTimeMillis();
+
+    stage("2/5 checking MasterCompiler on the IBM i");
     String jar = ensureRemoteJar(home);
     long jarDone = System.currentTimeMillis();
+    stage("3/5 syncing the sources to " + remoteDir);
     int uploaded = sync(projectFiles());
-    logger.info("Project synced to {}: {} files uploaded ({} s for MC, {} s for sources)", remoteDir, uploaded,
+    logger.info("Sources synced: {} files uploaded ({} s for MC, {} s for sources)", uploaded,
         (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
 
+    stage("4/5 starting MasterCompiler on the IBM i");
     remote = ssh.start(remoteCommand(jar, code4i));
     remote.setErrStream(System.err, true);
     InputStream fromRemote = remote.getInputStream();
     OutputStream toRemote = remote.getOutputStream();
     remote.connect(30_000);
-    logger.info("MasterCompiler running on {} in {}", host, remoteDir);
+    stage("5/5 ready: MasterCompiler running on " + host + " in " + remoteDir + " ("
+        + (System.currentTimeMillis() - start) / 1000 + " s)");
 
     Thread pump = new Thread(() -> relayResponses(fromRemote), "mc-ssh-responses");
     pump.setDaemon(true);
@@ -151,14 +157,23 @@ public class SshMcpProxy {
     return toRemote;
   }
 
+  /* Start-up stage, logged and kept for tool calls that wait or fail */
+  private volatile String stage = "not started";
+
+  private void stage(String now) {
+    stage = now;
+    logger.info("MC start-up {}", now);
+  }
+
   /* A call the remote MC answers: wait until it runs, upload what changed, pass it on */
   private void forward(String line) {
     OutputStream toRemote;
     try {
+      if (!remoteReady.isDone()) logger.info("Tool call waiting for the start-up, now at stage {}", stage);
       toRemote = remoteReady.get();
     } catch (Exception e) {
       Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-      sendToolError(line, "Could not start MasterCompiler on the IBM i: " + cause.getMessage());
+      sendToolError(line, "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + cause.getMessage());
       return;
     }
     String forward = beforeForwarding(line);
@@ -180,6 +195,11 @@ public class SshMcpProxy {
       logger.error("Lost the remote MasterCompiler", e);
     }
     if (closing) return;
+    if (ssh != null && !ssh.isConnected()) {
+      logger.error("Lost the SSH connection to the IBM i: it stopped answering for about 60 s (network, VPN or the "
+          + "IBM i itself). Start the mastercompiler server again.");
+      System.exit(1);
+    }
     /* Usually a start-up problem on the IBM i (Java, the folder, authority): its own messages are just above */
     for (int i = 0; i < 20 && remote != null && !remote.isClosed(); i++) {
       try { Thread.sleep(100); } catch (InterruptedException ignored) { break; }
@@ -228,7 +248,10 @@ public class SshMcpProxy {
       return mapper.writeValueAsString(request);
     } catch (Exception e) {
       logger.error("Could not prepare tool call", e);
-      sendToolError(line, "Could not upload the sources to the IBM i: " + e.getMessage());
+      sendToolError(line, ssh != null && !ssh.isConnected()
+          ? "The SSH connection to the IBM i was lost (no answer for about 60 s): start the mastercompiler server again. "
+            + e.getMessage()
+          : "Could not upload the sources to the IBM i: " + e.getMessage());
       return null;
     }
   }
@@ -271,6 +294,7 @@ public class SshMcpProxy {
    * Many files go as one tar (one upload and one command instead of a few round trips per file).
    */
   int sync(Set<String> localFiles) throws Exception {
+    logger.info("Comparing {} local files with the copy on the IBM i", localFiles.size());
     Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
     Map<String, File> changed = new LinkedHashMap<String, File>();
     for (String path : localFiles) {
@@ -289,18 +313,28 @@ public class SshMcpProxy {
     }
 
     List<String> uploaded = new ArrayList<String>();
+    long bytes = 0;
+    for (File file : changed.values()) bytes += file.length();
+    if (!changed.isEmpty()) {
+      logger.info("{} changed files ({}) to upload {}", changed.size(), SshTarget.mb(bytes),
+          changed.size() >= TAR_FROM ? "as one tar" : "one by one");
+    }
     if (changed.size() >= TAR_FROM) {
       TarWriter tar = new TarWriter();
       for (Map.Entry<String, File> file : changed.entrySet()) tar.add(file.getKey(), file.getValue());
       String archive = remoteDir + "/.mc-sync.tar";
       ssh.upload(tar.finish(), archive);
+      logger.info("Unpacking the tar on the IBM i");
       ssh.exec("cd " + SshTarget.quote(remoteDir) + " && " + env("MC_REMOTE_TAR", "/QOpenSys/usr/bin/tar")
           + " -xf .mc-sync.tar; status=$?; rm -f .mc-sync.tar; exit $status");
     } else {
       for (Map.Entry<String, File> file : changed.entrySet()) ssh.upload(file.getValue(), remoteDir + "/" + file.getKey());
     }
     for (String rel : changed.keySet()) uploaded.add(remoteDir + "/" + rel);
-    if (!uploaded.isEmpty()) ssh.setUtf8(uploaded);
+    if (!uploaded.isEmpty()) {
+      logger.info("Tagging {} uploaded files as UTF-8 (CCSID 1208)", uploaded.size());
+      ssh.setUtf8(uploaded);
+    }
     return uploaded.size();
   }
 
@@ -309,14 +343,22 @@ public class SshMcpProxy {
     File local = new File(VscodeSetup.jarPath());
     if (!local.isFile()) throw new IllegalStateException("Run MasterCompiler from its jar to use --ssh");
     String remote = home + "/mc/.mc/MasterCompiler-" + sha256(local).substring(0, 12) + ".jar";
-    if (ssh.stat(remote) == null) {
-      logger.warn("First start of this MasterCompiler version: uploading it (about 10 MB) to {}", remote);
-      ssh.upload(local, remote);
-      /* keep only the version in use */
-      String dir = remote.substring(0, remote.lastIndexOf('/'));
-      ssh.exec("for f in " + SshTarget.quote(dir) + "/MasterCompiler-*.jar; do [ \"$f\" = " + SshTarget.quote(remote)
-          + " ] || rm -f \"$f\"; done");
+    com.jcraft.jsch.SftpATTRS there = ssh.stat(remote);
+    if (there != null && there.getSize() == local.length()) {
+      logger.info("MasterCompiler {} already on the IBM i: {}", MasterCompiler.version(), remote);
+      return remote;
     }
+    if (there != null) {
+      logger.warn("The MasterCompiler jar on the IBM i is broken ({} of {} bytes, an earlier upload was cut): "
+          + "uploading it again", there.getSize(), local.length());
+    } else {
+      logger.warn("First start of this MasterCompiler version: uploading it ({}) to {}", SshTarget.mb(local.length()), remote);
+    }
+    ssh.upload(local, remote);
+    /* keep only the version in use; remove pieces of cut uploads */
+    String dir = remote.substring(0, remote.lastIndexOf('/'));
+    ssh.exec("for f in " + SshTarget.quote(dir) + "/MasterCompiler-*.jar " + SshTarget.quote(dir) + "/*.part; do [ \"$f\" = "
+        + SshTarget.quote(remote) + " ] || rm -f \"$f\"; done");
     return remote;
   }
 

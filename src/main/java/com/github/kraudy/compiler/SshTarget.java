@@ -71,7 +71,9 @@ public final class SshTarget implements AutoCloseable {
     session.setConfig("FingerprintHash", "SHA256");
     session.setConfig("PreferredAuthentications", "publickey,keyboard-interactive,password");
     session.setUserInfo(new AcceptNewHosts(password));
-    session.setServerAliveInterval(30_000);
+    /* A link that stops answering (VPN drop, stuck firewall) ends the session after ~60 s instead of hanging */
+    session.setServerAliveInterval(15_000);
+    session.setServerAliveCountMax(3);
     session.connect(30_000);
     logger.info("SSH connected to {}@{}:{}", user, host, port);
     return new SshTarget(session);
@@ -87,7 +89,7 @@ public final class SshTarget implements AutoCloseable {
     return keys;
   }
 
-  /* Run a PASE command, return its stdout; non-zero exit fails with its stderr */
+  /* Run a PASE command, return its stdout; non-zero exit fails with its stderr; a hung command fails too */
   public String exec(String command) throws Exception {
     ChannelExec channel = (ChannelExec) session.openChannel("exec");
     channel.setCommand(command);
@@ -96,7 +98,16 @@ public final class SshTarget implements AutoCloseable {
     channel.setOutputStream(out);
     channel.setErrStream(err);
     channel.connect(30_000);
-    while (!channel.isClosed()) Thread.sleep(50);
+    long limit = seconds("MC_REMOTE_TIMEOUT", 600) * 1000L;
+    long start = System.currentTimeMillis();
+    while (!channel.isClosed()) {
+      if (System.currentTimeMillis() - start > limit) {
+        channel.disconnect();
+        throw new IllegalStateException("Remote command did not finish in " + limit / 1000 + " s (MC_REMOTE_TIMEOUT): "
+            + command);
+      }
+      Thread.sleep(50);
+    }
     int status = channel.getExitStatus();
     channel.disconnect();
     if (status != 0) {
@@ -125,14 +136,109 @@ public final class SshTarget implements AutoCloseable {
 
   /* Upload, creating parent directories, and keep the local modification time (to skip it next time) */
   public synchronized void upload(File local, String remote) throws Exception {
-    mkdirs(remote.substring(0, remote.lastIndexOf('/')));
-    sftp().put(local.getPath(), remote, ChannelSftp.OVERWRITE);
+    watchedPut(new java.io.FileInputStream(local), local.length(), remote, "Upload of " + local.getName());
     sftp().setMtime(remote, (int) (local.lastModified() / 1000));
   }
 
   public synchronized void upload(byte[] data, String remote) throws Exception {
+    watchedPut(new java.io.ByteArrayInputStream(data), data.length, remote,
+        "Upload of " + remote.substring(remote.lastIndexOf('/') + 1));
+  }
+
+  /*
+   * Every upload: progress in the log (large files), aborted when no byte moves for MC_STALL_SECONDS
+   * (default 60), written to <name>.part, checked for its full size, then renamed. A cut or stuck
+   * transfer never leaves a truncated file under the real name, and its error says how far it got.
+   */
+  private void watchedPut(java.io.InputStream in, long size, String remote, String what) throws Exception {
     mkdirs(remote.substring(0, remote.lastIndexOf('/')));
-    sftp().put(new java.io.ByteArrayInputStream(data), remote, ChannelSftp.OVERWRITE);
+    String part = remote + ".part";
+    long stallMs = seconds("MC_STALL_SECONDS", 60) * 1000L;
+    Transfer transfer = new Transfer(what, size);
+    ChannelSftp channel = sftp();
+    java.util.concurrent.ScheduledFuture<?> watch = WATCHDOG.scheduleAtFixedRate(() -> {
+      if (System.currentTimeMillis() - transfer.lastMove > stallMs) {
+        transfer.stalled = true;
+        channel.disconnect();  // makes the blocked put() fail
+      }
+    }, 2, 2, java.util.concurrent.TimeUnit.SECONDS);
+    try {
+      channel.put(in, part, transfer, ChannelSftp.OVERWRITE);
+    } catch (Exception e) {
+      if (transfer.stalled) {
+        throw new java.io.IOException(what + " stalled: no data moved for " + stallMs / 1000 + " s after "
+            + mb(transfer.done) + " of " + mb(size) + ". The connection to the IBM i is stuck (network, VPN or "
+            + "firewall); start the server again. MC_STALL_SECONDS changes the limit.");
+      }
+      throw new java.io.IOException(what + " failed after " + mb(transfer.done) + " of " + mb(size) + ": " + e.getMessage(), e);
+    } finally {
+      watch.cancel(false);
+      in.close();
+    }
+    SftpATTRS arrived = sftp().stat(part);
+    if (arrived.getSize() != size) {
+      try { sftp().rm(part); } catch (SftpException ignored) { /* already gone */ }
+      throw new java.io.IOException(what + " is incomplete on the IBM i: " + arrived.getSize() + " of " + size
+          + " bytes arrived. Start the server again to retry.");
+    }
+    try { sftp().rm(remote); } catch (SftpException missing) { /* first upload */ }
+    sftp().rename(part, remote);
+    if (size >= LOG_FROM) logger.info("{}: done, {} in {} s", what, mb(size), (System.currentTimeMillis() - transfer.start) / 1000);
+  }
+
+  private static final long LOG_FROM = 1024 * 1024;  // progress lines for files of 1 MB and more
+  private static final java.util.concurrent.ScheduledExecutorService WATCHDOG =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "mc-ssh-watchdog");
+        t.setDaemon(true);
+        return t;
+      });
+
+  /* Bytes moved so far; a progress line every 5 s for large files */
+  private static final class Transfer implements com.jcraft.jsch.SftpProgressMonitor {
+    final String what;
+    final long size;
+    final long start = System.currentTimeMillis();
+    volatile long done;
+    volatile long lastMove = start;
+    volatile boolean stalled;
+    private long lastLog = start;
+
+    Transfer(String what, long size) {
+      this.what = what;
+      this.size = size;
+    }
+
+    @Override public void init(int op, String src, String dest, long max) {
+      if (size >= LOG_FROM) logger.info("{}: starting, {}", what, mb(size));
+    }
+
+    @Override public boolean count(long bytes) {
+      done += bytes;
+      long now = System.currentTimeMillis();
+      lastMove = now;
+      if (size >= LOG_FROM && now - lastLog >= 5000) {
+        lastLog = now;
+        long kbPerSecond = done / 1024 / Math.max(1, (now - start) / 1000);
+        logger.info("{}: {} of {} ({}%, {} KB/s)", what, mb(done), mb(size), done * 100 / Math.max(1, size), kbPerSecond);
+      }
+      return !stalled;
+    }
+
+    @Override public void end() { }
+  }
+
+  static String mb(long bytes) {
+    return bytes < 1048576 ? (bytes + 1023) / 1024 + " KB"
+        : String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1048576.0);
+  }
+
+  private static int seconds(String env, int fallback) {
+    try {
+      return Integer.parseInt(System.getenv(env).trim());
+    } catch (Exception e) {
+      return fallback;
+    }
   }
 
   public synchronized void mkdirs(String dir) throws Exception {
@@ -199,6 +305,10 @@ public final class SshTarget implements AutoCloseable {
       sftp.connect(30_000);
     }
     return sftp;
+  }
+
+  public boolean isConnected() {
+    return session.isConnected();
   }
 
   @Override
