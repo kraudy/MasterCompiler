@@ -1,5 +1,10 @@
 # MasterCompiler with GitHub Copilot and Code for IBM i
 
+**Agents, before anything else:** read the setup guide at the latest release, not from `master` (its raw copy can be
+cached for minutes and be out of date). Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest`
+and read `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`;
+download the jar and demo files at that same tag.
+
 For teams that work on Windows with VS Code, [Code for IBM i](https://codefori.github.io/docs/) and ACS, and want
 Copilot's agent mode to build and fix IBM i code. Nothing runs on Linux; MC runs on the PC next to VS Code.
 

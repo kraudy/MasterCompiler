@@ -91,12 +91,13 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler <tag>` with the tag from above (v0.3.4 or newer).
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.5 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
-Always run the download above, even when `MasterCompiler.jar` is already there: the URL serves
-the newest release, and replacing the file is how MC is updated (the `mcp.json` entry points at
-this path, so nothing else changes; restart the `mastercompiler` server afterwards).
+Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
+already there: the URL is fixed to that tag, so a new release only arrives through a new lookup.
+Replacing the file is how MC is updated (the `mcp.json` entry points at this path, so nothing
+else changes; restart the `mastercompiler` server afterwards).
 
 ## 3. Configure the repository
 
@@ -104,12 +105,21 @@ this path, so nothing else changes; restart the `mastercompiler` server afterwar
 with `--project ${workspaceFolder}`). If this chat runs in an empty window or another folder, the
 work continues in a new window, and that window's chat knows nothing of this one. Hand it over:
 
-1. Run the setup below on the repository folder with `--next "<the exact request>"`, e.g.
-   `--next 'call import_source with into: "repo" and members: MYLIB/QRPGLESRC/ORD*,MYLIB/QDDSSRC'`.
-   Setup saves it as `.github/prompts/mastercompiler-continue.prompt.md` (it creates the folder
-   if needed), and MC mentions the waiting request when its server starts.
-2. Open the folder: `code "<folder>"`.
-3. Tell the user exactly what to do there, as numbered steps:
+1. Write the exact request to a text file and pass it with `--next-file` (Windows PowerShell 5.1
+   drops inner double quotes from `--next "..."` arguments):
+   ```powershell
+   Set-Content -Encoding UTF8 "$env:TEMP\mc-next.txt" 'call import_source with into repo and members MYLIB/QRPGLESRC/ORD*,MYLIB/QDDSSRC'
+   ```
+   When the request is about one IBM i (where the members are) and the user has several Code for
+   IBM i connections, also pass `--connection "<that connection>"`: the server then always uses it
+   and the saved request names it.
+2. Run the setup below on the repository folder with these options, **preview first**:
+   `--setup-vscode --project "<folder>" --next-file "$env:TEMP\mc-next.txt" [--connection "<name>"] --print`.
+   Show the preview to the user and get their OK, then run the same command without `--print`.
+   It saves the request as `.github/prompts/mastercompiler-continue.prompt.md` (creating the
+   folder if needed); MC mentions the waiting request when its server starts.
+3. Open the folder: `code "<folder>"`.
+4. Tell the user exactly what to do there, as numbered steps:
    1. In the new window, open Copilot Chat and pick **Agent** mode.
    2. Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, and type the IBM i
       password in VS Code's prompt.
@@ -145,7 +155,8 @@ Continue in that window. Suggest `plan` first (compiles nothing), then `build`. 
 done, offer the `clean` tool to delete the five `MCD*` objects from their library: call it once
 to list them, show the list, and only after the user agrees call it again with `confirm: true`.
 
-Preview first, from the repository root; it writes nothing:
+**Always preview first and get the user's OK before writing** (also for the handover above, with
+the same `--next-file` / `--connection` options). From the repository root; it writes nothing:
 
 ```powershell
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --print

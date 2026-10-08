@@ -35,6 +35,7 @@ public class ArgParser {
     HELP          ("h", "help",          Kind.FLAG,  "Print this help"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     NEXT          (null, "next",         Kind.VALUE, "With --setup-vscode: the request to carry on in the repository's window (Copilot Chat: /mastercompiler-continue)"),
+    NEXT_FILE     (null, "next-file",    Kind.VALUE, "Like --next, read from a UTF-8 text file (no shell quoting problems)"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
@@ -255,6 +256,7 @@ public class ArgParser {
         push = value;
         break;
       case NEXT:          next = value; break;
+      case NEXT_FILE:     next = readNextFile(value); break;
       case IMPORT:
         importSelection = value;
         break;
@@ -299,7 +301,7 @@ public class ArgParser {
       throw new IllegalArgumentException("Use either --ssh or --host-servers");
     }
     if (next != null && !setupVscode) {
-      throw new IllegalArgumentException("--next goes with --setup-vscode");
+      throw new IllegalArgumentException("--next / --next-file go with --setup-vscode");
     }
     if (print && !setupVscode) {
       throw new IllegalArgumentException("--print goes with --setup-vscode");
@@ -416,7 +418,18 @@ public class ArgParser {
     return ssh;
   }
 
-  /** {@code --next}: the request the repository's window carries on with, or null. */
+  private static String readNextFile(String path) {
+    try {
+      String text = new String(java.nio.file.Files.readAllBytes(new File(path).toPath()), java.nio.charset.StandardCharsets.UTF_8).trim();
+      if (text.startsWith("\uFEFF")) text = text.substring(1).trim();  // Windows PowerShell 5.1 writes a BOM
+      if (text.isEmpty()) throw new IllegalArgumentException("--next-file is empty: " + path);
+      return text;
+    } catch (java.io.IOException e) {
+      throw new IllegalArgumentException("--next-file cannot be read: " + path);
+    }
+  }
+
+  /** {@code --next} / {@code --next-file}: the request the repository's window carries on with, or null. */
   public String getNext() {
     return next;
   }

@@ -137,7 +137,8 @@ public final class VscodeSetup {
           .append(print ? "  would save: " : "  saved: ").append(parser.getNext()).append('\n');
       if (!print) {
         prompt.getParentFile().mkdirs();
-        Files.write(prompt.toPath(), continuePrompt(parser.getNext()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(prompt.toPath(), continuePrompt(parser.getNext(), parser.getConnection())
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
       }
     }
 
@@ -163,7 +164,7 @@ public final class VscodeSetup {
   static final String CONTINUE_PROMPT = ".github/prompts/mastercompiler-continue.prompt.md";
 
   /* A VS Code prompt file: "/mastercompiler-continue" in Copilot Chat runs it in the repository's window */
-  static String continuePrompt(String request) {
+  static String continuePrompt(String request, String connection) {
     return "---\n"
         + "description: Continue the MasterCompiler setup started in another window\n"
         + "---\n"
@@ -171,6 +172,10 @@ public final class VscodeSetup {
         + "1. Check that the `mastercompiler` MCP server is running. If its tools are missing, tell me to start it:\n"
         + "   Command Palette > \"MCP: List Servers\" > mastercompiler > Start, and type the IBM i password only in\n"
         + "   VS Code's prompt (never in this chat or a terminal).\n"
+        + (connection != null
+            ? "   The IBM i for this request is the Code for IBM i connection \"" + connection + "\".\n"
+            : "   If the server asks which Code for IBM i connection to use, pick the system that holds what the\n"
+              + "   request below needs; ask me if you do not know which one.\n")
         + "2. Then do this request from the setup:\n\n"
         + "   " + request.replace("\n", "\n   ") + "\n\n"
         + "3. When it is done, delete this file (" + CONTINUE_PROMPT + ") and tell me what to do next\n"

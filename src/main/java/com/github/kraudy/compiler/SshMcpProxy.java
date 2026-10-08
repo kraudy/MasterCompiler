@@ -180,7 +180,14 @@ public class SshMcpProxy {
       logger.error("Lost the remote MasterCompiler", e);
     }
     if (closing) return;
-    logger.error("Remote MasterCompiler stopped");
+    /* Usually a start-up problem on the IBM i (Java, the folder, authority): its own messages are just above */
+    for (int i = 0; i < 20 && remote != null && !remote.isClosed(); i++) {
+      try { Thread.sleep(100); } catch (InterruptedException ignored) { break; }
+    }
+    int status = remote != null ? remote.getExitStatus() : -1;
+    logger.error("MasterCompiler stopped on the IBM i (exit status {}) in {}. The lines above, from the IBM i, say why; "
+        + "check that {} works there and that you can create {}.", status, remoteDir,
+        env("MC_REMOTE_JAVA", REMOTE_JAVA), remoteDir);
     System.exit(1);
   }
 
@@ -314,7 +321,9 @@ public class SshMcpProxy {
   }
 
   private String remoteCommand(String jar, Code4iConfig code4i) {
-    StringBuilder command = new StringBuilder("cd ").append(SshTarget.quote(remoteDir))
+    /* mkdir -p: an empty repository (import_source fills it) uploads nothing, so the folder may not exist yet */
+    StringBuilder command = new StringBuilder("mkdir -p ").append(SshTarget.quote(remoteDir))
+        .append(" && cd ").append(SshTarget.quote(remoteDir))
         .append(" && ").append(env("MC_REMOTE_JAVA", REMOTE_JAVA))
         .append(" -jar ").append(SshTarget.quote(jar))
         .append(" --mcp --project ").append(SshTarget.quote(remoteDir));

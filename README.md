@@ -4,6 +4,11 @@
 
 Copilot walks you through the rest. Details in [docs/Copilot.md](./docs/Copilot.md).
 
+**Agents, before anything else:** read the setup guide at the latest release, not from `master` (its raw copy can be
+cached for minutes and be out of date). Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest`
+and read `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`;
+download the jar and demo files at that same tag.
+
 <div align="center">
 <img src="./images/Master%20Compiler.jpg" alt="Master Compiler logo" style="display: block; margin: 0 auto; width: 40%; max-width: 800px; height: auto; object-fit: cover; aspect-ratio: 1 / 1;">
 </div>
