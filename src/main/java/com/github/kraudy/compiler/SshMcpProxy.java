@@ -264,13 +264,25 @@ public class SshMcpProxy {
       JsonNode result = response.path("result");
       if (result.path("isError").asBoolean(false)) return line;
       JsonNode report = mapper.readTree(result.path("content").path(0).path("text").asText("{}"));
+      if (!report.isObject()) return line;
+      /* Written now, plus files kept on the IBM i that this PC does not have (e.g. from a call that failed before) */
       int downloaded = 0;
-      for (JsonNode path : report.path("written")) {
-        ssh.download(remoteDir + "/" + path.asText(), new File(project, path.asText()));
-        downloaded++;
+      for (String list : new String[] { "written", "kept" }) {
+        for (JsonNode path : report.path(list)) {
+          File local = new File(project, path.asText());
+          if (list.equals("kept") && local.isFile()) continue;
+          ssh.download(remoteDir + "/" + path.asText(), local);
+          downloaded++;
+        }
       }
-      logger.info("Downloaded {} imported files into {}", downloaded, project);
-      return line;
+      if (downloaded > 0) logger.info("Downloaded {} imported files into {}", downloaded, project);
+      /* Paths in the report are the PC's: that is where the agent reads them */
+      ((ObjectNode) report).put("projectFolder", project.getAbsolutePath());
+      ((ObjectNode) report).put("downloadedToThisPC", downloaded);
+      ((ObjectNode) result.path("content").path(0)).put("text",
+          new com.fasterxml.jackson.databind.ObjectMapper().enable(com.fasterxml.jackson.databind.SerializationFeature.INDENT_OUTPUT)
+              .writeValueAsString(report));
+      return mapper.writeValueAsString(response);
     } catch (Exception e) {
       logger.error("Could not download the imported sources", e);
       try {

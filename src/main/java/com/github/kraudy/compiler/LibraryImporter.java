@@ -56,6 +56,8 @@ public class LibraryImporter {
   private final boolean verbose;
   private boolean keepExisting;        // import_source into the repository: never overwrite a file
   private boolean writeReportFile = true;
+  private boolean dryRun;                // import_source dryRun: name and check everything, write nothing
+  private List<String> searched = new ArrayList<String>();  // libraries looked in for objects built from the members
 
   public LibraryImporter(AS400 system, Connection connection, boolean verbose) {
     this.system = system;
@@ -103,6 +105,10 @@ public class LibraryImporter {
     this.keepExisting = keepExisting;
   }
 
+  public void setDryRun(boolean dryRun) {
+    this.dryRun = dryRun;
+  }
+
   public void setWriteReportFile(boolean writeReportFile) {
     this.writeReportFile = writeReportFile;
   }
@@ -127,7 +133,7 @@ public class LibraryImporter {
     for (Map.Entry<String, List<String>> lib : libraries.entrySet()) {
       String library = lib.getKey();
       Map<String, String> members = listMembers(library, lib.getValue());  // "SRCPF/MBR" -> source type
-      if (members.isEmpty()) throw new CompilerException("No source members selected in " + library + " " + lib.getValue());
+      if (members.isEmpty()) throw new CompilerException(missing(library, lib.getValue()));
       Map<String, Built> built = builtObjects(library);
       String base = perLibrary ? outDir + "/" + library : outDir;
 
@@ -215,8 +221,10 @@ public class LibraryImporter {
     entry.file = dir + entry.member + "." + type;
     if (SourceNaming.parseFileName(entry.file).isPresent()) {
       entry.how = "assumed";
-      entry.note = "No object in the library was built from this member; the scan treats it as a "
-          + SourceNaming.parseFileName(entry.file).get().objectType.name().toLowerCase() + " target";
+      entry.note = "No object in " + String.join(", ", searched) + " (the source library and the library list) "
+          + "names this member as its source, so the name is assumed from the member type: the scan treats it as a "
+          + SourceNaming.parseFileName(entry.file).get().objectType.name().toLowerCase() + " target. If the object is "
+          + "elsewhere, import it by object name (objects) to name the file after it";
     } else {
       entry.how = "other";
       entry.note = "Not a source type MC compiles; the scan skips it";
@@ -259,55 +267,72 @@ public class LibraryImporter {
   }
 
   /* "SRCPF/MBR" -> object built from it, for objects in the library whose source is in the library */
+  /*
+   * Objects whose source is in this library are looked for in the library itself and in the job's
+   * library list (programs are often compiled into another library than their sources)
+   */
   private Map<String, Built> builtObjects(String library) throws SQLException {
     Map<String, Built> built = new HashMap<String, Built>();
     Map<String, String> sqlObjects = new HashMap<String, String>();
+    java.util.LinkedHashSet<String> libs = new java.util.LinkedHashSet<String>();
+    libs.add(library);
+    libs.addAll(userLibraryList());
+    searched = new ArrayList<String>(libs);
 
     try (Statement stmt = connection.createStatement()) {
-      try (ResultSet rs = stmt.executeQuery(
-          "SELECT OBJNAME, OBJTYPE, COALESCE(OBJATTRIBUTE, '') AS ATTR, COALESCE(SOURCE_LIBRARY, '') AS SRCLIB, " +
-          "COALESCE(SOURCE_FILE, '') AS SRCPF, COALESCE(SOURCE_MEMBER, '') AS MBR, COALESCE(SQL_OBJECT_TYPE, '') AS SQLTYPE " +
-          "FROM TABLE(QSYS2.OBJECT_STATISTICS('" + library + "', '*ALL'))")) {
-        while (rs.next()) {
-          String name = rs.getString("OBJNAME").trim();
-          String sqlType = rs.getString("SQLTYPE").trim();
-          if (!sqlType.isEmpty()) sqlObjects.put(name, sqlType.toLowerCase());
-          if (!library.equals(rs.getString("SRCLIB").trim()) || rs.getString("MBR").trim().isEmpty()) continue;
-          String type = objectType(rs.getString("OBJTYPE").trim(), rs.getString("ATTR").trim());
-          if (type != null) {
-            built.putIfAbsent(rs.getString("SRCPF").trim() + "/" + rs.getString("MBR").trim(),
-                new Built(name, type, "object_statistics"));
+      for (String objLib : searched) {
+        boolean own = objLib.equals(library);
+        try (ResultSet rs = stmt.executeQuery(
+            "SELECT OBJNAME, OBJTYPE, COALESCE(OBJATTRIBUTE, '') AS ATTR, COALESCE(SOURCE_LIBRARY, '') AS SRCLIB, " +
+            "COALESCE(SOURCE_FILE, '') AS SRCPF, COALESCE(SOURCE_MEMBER, '') AS MBR, COALESCE(SQL_OBJECT_TYPE, '') AS SQLTYPE " +
+            "FROM TABLE(QSYS2.OBJECT_STATISTICS('" + objLib + "', '" + (own ? "*ALL" : "*PGM *MODULE *FILE *CMD *MNU *QMQRY") + "'))")) {
+          while (rs.next()) {
+            String name = rs.getString("OBJNAME").trim();
+            String sqlType = rs.getString("SQLTYPE").trim();
+            if (own && !sqlType.isEmpty()) sqlObjects.put(name, sqlType.toLowerCase());
+            if (!library.equals(rs.getString("SRCLIB").trim()) || rs.getString("MBR").trim().isEmpty()) continue;
+            String type = objectType(rs.getString("OBJTYPE").trim(), rs.getString("ATTR").trim());
+            if (type != null) {
+              built.putIfAbsent(rs.getString("SRCPF").trim() + "/" + rs.getString("MBR").trim(),
+                  new Built(name, type, "object_statistics"));
+            }
           }
+        } catch (SQLException e) {
+          logger.info("Objects of {} not read: {}", objLib, e.getMessage());
         }
-      }
 
-      /* ILE: the program's object description has no source; its bound modules do.
-         A module named like its *PGM is a CRTBND* program, any other bound module a *MODULE. */
-      try (ResultSet rs = stmt.executeQuery(
-          "SELECT B.PROGRAM_NAME, B.OBJECT_TYPE, B.BOUND_MODULE, B.SOURCE_FILE, B.SOURCE_FILE_MEMBER " +
-          "FROM TABLE(QSYS2.OBJECT_STATISTICS('" + library + "', '*PGM *SRVPGM')) O " +
-          "INNER JOIN QSYS2.BOUND_MODULE_INFO B " +
-            "ON B.PROGRAM_LIBRARY = '" + library + "' AND B.PROGRAM_NAME = O.OBJNAME AND B.OBJECT_TYPE = O.OBJTYPE " +
-          "WHERE B.SOURCE_FILE_LIBRARY = '" + library + "' AND B.SOURCE_FILE_MEMBER IS NOT NULL")) {
-        while (rs.next()) {
-          String program = rs.getString("PROGRAM_NAME").trim();
-          String module = rs.getString("BOUND_MODULE").trim();
-          boolean bndProgram = "*PGM".equals(rs.getString("OBJECT_TYPE").trim()) && program.equals(module);
-          built.putIfAbsent(rs.getString("SOURCE_FILE").trim() + "/" + rs.getString("SOURCE_FILE_MEMBER").trim(),
-              new Built(bndProgram ? program : module, bndProgram ? "pgm" : "module", "bound_module"));
+        /* ILE: the program's object description has no source; its bound modules do.
+           A module named like its *PGM is a CRTBND* program (or the *SRVPGM's own module), any other a *MODULE. */
+        try (ResultSet rs = stmt.executeQuery(
+            "SELECT B.PROGRAM_NAME, B.OBJECT_TYPE, B.BOUND_MODULE, B.SOURCE_FILE, B.SOURCE_FILE_MEMBER " +
+            "FROM TABLE(QSYS2.OBJECT_STATISTICS('" + objLib + "', '*PGM *SRVPGM')) O " +
+            "INNER JOIN QSYS2.BOUND_MODULE_INFO B " +
+              "ON B.PROGRAM_LIBRARY = '" + objLib + "' AND B.PROGRAM_NAME = O.OBJNAME AND B.OBJECT_TYPE = O.OBJTYPE " +
+            "WHERE B.SOURCE_FILE_LIBRARY = '" + library + "' AND B.SOURCE_FILE_MEMBER IS NOT NULL")) {
+          while (rs.next()) {
+            String program = rs.getString("PROGRAM_NAME").trim();
+            String module = rs.getString("BOUND_MODULE").trim();
+            boolean bndProgram = "*PGM".equals(rs.getString("OBJECT_TYPE").trim()) && program.equals(module);
+            boolean ownModule = "*SRVPGM".equals(rs.getString("OBJECT_TYPE").trim()) && program.equals(module);
+            built.putIfAbsent(rs.getString("SOURCE_FILE").trim() + "/" + rs.getString("SOURCE_FILE_MEMBER").trim(),
+                new Built(bndProgram || ownModule ? program : module, bndProgram ? "pgm" : ownModule ? "srvpgm" : "module",
+                    "bound_module"));
+          }
+        } catch (SQLException e) {
+          logger.info("Bound modules of {} not read: {}", objLib, e.getMessage());
         }
-      }
 
-      try (ResultSet rs = stmt.executeQuery(
-          "SELECT PROGRAM_NAME, EXPORT_SOURCE_FILE, EXPORT_SOURCE_FILE_MEMBER FROM QSYS2.PROGRAM_INFO " +
-          "WHERE PROGRAM_LIBRARY = '" + library + "' AND OBJECT_TYPE = '*SRVPGM' " +
-          "AND EXPORT_SOURCE_LIBRARY = '" + library + "' AND EXPORT_SOURCE_FILE_MEMBER IS NOT NULL")) {
-        while (rs.next()) {
-          built.putIfAbsent(rs.getString("EXPORT_SOURCE_FILE").trim() + "/" + rs.getString("EXPORT_SOURCE_FILE_MEMBER").trim(),
-              new Built(rs.getString("PROGRAM_NAME").trim(), "srvpgm", "program_info"));
+        try (ResultSet rs = stmt.executeQuery(
+            "SELECT PROGRAM_NAME, EXPORT_SOURCE_FILE, EXPORT_SOURCE_FILE_MEMBER FROM QSYS2.PROGRAM_INFO " +
+            "WHERE PROGRAM_LIBRARY = '" + objLib + "' AND OBJECT_TYPE = '*SRVPGM' " +
+            "AND EXPORT_SOURCE_LIBRARY = '" + library + "' AND EXPORT_SOURCE_FILE_MEMBER IS NOT NULL")) {
+          while (rs.next()) {
+            built.putIfAbsent(rs.getString("EXPORT_SOURCE_FILE").trim() + "/" + rs.getString("EXPORT_SOURCE_FILE_MEMBER").trim(),
+                new Built(rs.getString("PROGRAM_NAME").trim(), "srvpgm", "program_info"));
+          }
+        } catch (SQLException e) {
+          logger.info("Could not read service program binder sources: {}", e.getMessage());
         }
-      } catch (SQLException e) {
-        logger.info("Could not read service program binder sources: {}", e.getMessage());
       }
     }
 
@@ -466,7 +491,35 @@ public class LibraryImporter {
   }
 
   /* On the IBM i, write through the IFS so the file is tagged UTF-8 (CCSID 1208) */
+  /* "member ORD1 not found in MYLIB/QRPGLESRC", "no member matching ORD* in ...", "no source file ..." */
+  static String missing(String library, List<String> selectors) {
+    List<String> parts = new ArrayList<String>();
+    for (String sel : selectors) {
+      String[] fm = sel.split("/");
+      if (sel.equals("*")) parts.add("no source members in library " + library);
+      else if (fm.length == 1) parts.add("source file " + library + "/" + fm[0] + " not found, or it has no members");
+      else if (fm[1].endsWith("*")) parts.add("no member matching " + fm[1] + " in " + library + "/" + fm[0]);
+      else parts.add("member " + fm[1] + " not found in " + library + "/" + fm[0]);
+    }
+    return String.join("; ", parts);
+  }
+
+  /* The job's current library and user library list */
+  private List<String> userLibraryList() {
+    List<String> libs = new ArrayList<String>();
+    try (Statement stmt = connection.createStatement();
+         ResultSet rs = stmt.executeQuery(
+           "SELECT TRIM(SYSTEM_SCHEMA_NAME) FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE IN ('CURRENT', 'USER') " +
+           "AND SYSTEM_SCHEMA_NAME NOT IN ('QTEMP', 'QGPL')")) {
+      while (rs.next()) libs.add(rs.getString(1));
+    } catch (SQLException e) {
+      logger.info("Library list not read: {}", e.getMessage());
+    }
+    return libs;
+  }
+
   private void write(String path, List<String> lines) throws Exception {
+    if (dryRun) return;
     byte[] content = (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8);
     if (runningOnIbmi()) {
       IFSFile target = new IFSFile(system, path);

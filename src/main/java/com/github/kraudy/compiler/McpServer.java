@@ -202,6 +202,9 @@ public class McpServer {
     ObjectNode into = impProps.putObject("into");
     into.put("type", "string");
     into.putArray("enum").add("reference").add("repo");
+    ObjectNode dry = impProps.putObject("dryRun");
+    dry.put("type", "boolean");
+    dry.put("description", "true: check what exists and list the files it would write (wouldWrite, notImported); write nothing");
     into.put("description", "reference (default): read-only copies under .mc/sources/<LIB>/<SRCPF>/ (git-ignored, "
         + "never built). repo: into the project as <SRCPF>/<OBJECT>.<type>.<srctype>, so the next build compiles "
         + "it into the current library; only when the user wants to change that object. Existing files are kept.");
@@ -421,55 +424,85 @@ public class McpServer {
     String members = args.path("members").asText("").trim();
     if (objects.isEmpty() && members.isEmpty()) return toolResult("Give 'objects' or 'members'", true);
     boolean intoRepo = "repo".equals(args.path("into").asText("reference"));
+    boolean dryRun = args.path("dryRun").asBoolean(false);
     connectWithLibraryList();
 
     List<SourceLocator.SourceRef> sources = new java.util.ArrayList<SourceLocator.SourceRef>();
     java.util.Set<String> seen = new java.util.HashSet<String>();
     ObjectNode result = mapper.createObjectNode();
-    ArrayNode notFound = result.putArray("notImported");
+    File project = projectDir();
+    result.put("projectFolder", project.getAbsolutePath());  // the SSH proxy puts the PC's folder here
+    result.put("into", intoRepo ? "repo" : "reference");
+    if (dryRun) result.put("dryRun", true);
+    ArrayNode notImported = result.putArray("notImported");
+    int copybooksFound = 0;
     if (!objects.isEmpty()) {
       for (SourceLocator.Located located : new SourceLocator(connection).locate(objects, true)) {
-        if (located.sources.isEmpty()) notFound.add(located.request + ": " + located.note);
+        if (located.sources.isEmpty()) notImported.add(located.request + ": " + located.note);
+        copybooksFound += located.copybooks.size();
         List<SourceLocator.SourceRef> refs = new java.util.ArrayList<SourceLocator.SourceRef>(located.sources);
         refs.addAll(located.copybooks);
         for (SourceLocator.SourceRef ref : refs) {
           if ("missing".equals(ref.status) || "stream_file".equals(ref.status)) {
-            notFound.add((ref.streamFile != null ? ref.streamFile : ref.key()) + ": " + ref.note);
+            notImported.add((ref.streamFile != null ? ref.streamFile : ref.key()) + ": " + ref.note);
           } else if (seen.add(ref.key())) {
             sources.add(ref);
           }
         }
       }
     }
-    File project = projectDir();
+
     String outDir = (intoRepo ? project.getPath() : new File(project, ".mc/sources").getPath()).replace(File.separatorChar, '/');
     LibraryImporter importer = new LibraryImporter(system, connection, parser.isVerbose());
     importer.setKeepExisting(intoRepo);
     importer.setWriteReportFile(false);
-    if (!intoRepo) importer.writeFile(new File(project, ".mc/.gitignore").getPath(), "# MasterCompiler working files\n*");
+    importer.setDryRun(dryRun);
+    if (!intoRepo && !dryRun) importer.writeFile(new File(project, ".mc/.gitignore").getPath(), "# MasterCompiler working files\n*");
 
     List<LibraryImporter.ImportedMember> files = new java.util.ArrayList<LibraryImporter.ImportedMember>(
         importer.importSources(sources, outDir, !intoRepo).files);
-    /* Members: the library importer names them from the objects built from them (reference copies per library) */
+    /* Members: the library importer names them from the objects built from them (reference copies per library).
+       One selection that matches nothing is reported, the others are still imported. */
     for (String item : members.split(",")) {
       String selection = item.trim().toUpperCase();
       if (selection.isEmpty()) continue;
       String library = selection.contains("/") ? selection.substring(0, selection.indexOf('/')) : selection;
-      for (LibraryImporter.ImportedMember file : importer.run(selection, intoRepo ? outDir : outDir + "/" + library).files) {
-        if (!intoRepo) file.file = library + "/" + file.file;
-        files.add(file);
+      try {
+        for (LibraryImporter.ImportedMember file : importer.run(selection, intoRepo ? outDir : outDir + "/" + library).files) {
+          if (!intoRepo) file.file = library + "/" + file.file;
+          files.add(file);
+        }
+      } catch (CompilerException e) {
+        notImported.add(selection + ": " + e.getMessage());
       }
     }
 
+    /* Project-relative paths: written now, already there (kept), and each file's own path */
     String prefix = intoRepo ? "" : ".mc/sources/";
-    result.put("into", intoRepo ? "repo" : "reference");
-    ArrayNode written = result.putArray("written");  // project-relative: the SSH proxy downloads these
-    if (!intoRepo) written.add(".mc/.gitignore");
+    ArrayNode written = result.putArray(dryRun ? "wouldWrite" : "written");
+    ArrayNode kept = result.putArray("kept");
+    if (!intoRepo && !dryRun) written.add(".mc/.gitignore");
+    ArrayNode fileList = mapper.createArrayNode();
     for (LibraryImporter.ImportedMember file : files) {
-      if (!"error".equals(file.how) && file.kept == null) written.add(prefix + file.file);
+      if ("copybook".equals(file.how)) copybooksFound++;
+      ObjectNode entry = pretty.valueToTree(file);
+      if (!"error".equals(file.how)) {
+        entry.put("path", prefix + file.file);
+        (file.kept != null ? kept : written).add(prefix + file.file);
+      } else {
+        notImported.add(file.library + "/" + file.sourceFile + "/" + file.member + ": " + file.note);
+      }
+      fileList.add(entry);
     }
-    result.set("files", pretty.valueToTree(files));
-    if (intoRepo) result.put("next", "The imported sources are build targets now; plan shows what a build would compile.");
+    result.put("copybooks", copybooksFound);
+    if (copybooksFound == 0) {
+      result.put("copybookNote", "No /COPY, /INCLUDE or EXEC SQL INCLUDE member was found in these sources (or none is in this selection)");
+    }
+    result.set("files", fileList);
+    result.put("next", dryRun ? "Nothing written. Call again without dryRun to import."
+        : notImported.size() > 0 ? "Some sources were not imported: see notImported. The rest was imported."
+        : intoRepo ? "The imported sources are build targets now; plan shows what a build would compile."
+        : "Read the copies under .mc/sources/.");
     return toolResult(pretty.writeValueAsString(result), false);
   }
 

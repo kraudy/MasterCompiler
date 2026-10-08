@@ -22,9 +22,11 @@ guide at `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/ski
 before going on. Download everything else (jar, demo files) at that same tag: they then match.
 
 Goal: the `mastercompiler` MCP server shows up in Copilot's agent mode, so you can call
-`build`, `plan`, `impact`, `find_source`, `import_source` and `joblog`. MC runs on the developer's PC, uploads the
-repository's sources to the IBM i (`--push`), compiles there and returns errors with file
-and line. It reuses the Code for IBM i connection (host, user, current library, library list),
+`build`, `plan`, `impact`, `find_source`, `import_source` and `joblog`. MC runs in two parts:
+on the developer's PC (the MCP server VS Code starts) and, over SSH, on the IBM i. The PC part
+uploads the repository's sources to `<home>/mc/<repository>` on the IBM i and downloads what
+`import_source` writes back into the local repository; the IBM i part compiles, reads members
+and returns errors with file and line. The local repository is the one to read and edit. It reuses the Code for IBM i connection (host, user, current library, library list),
 so the only thing the user types is their IBM i password, once, in a VS Code prompt.
 
 **The password is entered only in VS Code's MCP prompt.** When the user starts the

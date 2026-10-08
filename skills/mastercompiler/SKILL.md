@@ -206,7 +206,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
 | `joblog` | none | The job's messages since the previous `joblog` call |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
-| `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there |
+| `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
 
 ### Sources the project does not have
 
@@ -228,9 +228,10 @@ Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.OBJECT_STATISTICS`, `QSYS2.PROG
 `QSYS2.SYSPARTITIONSTAT` (source members).
 
 In VS Code with Copilot (Windows included), `java -jar MC.jar --setup-vscode --project .` writes
-`.vscode/mcp.json` for you: MC runs on the PC with `--code4i` (the Code for IBM i connection:
-host, user, library list) and `--project ${workspaceFolder}`, and VS Code prompts for the
-password. See the `mastercompiler-vscode` skill.
+`.vscode/mcp.json` for you: MC starts on the PC with `--code4i` (the Code for IBM i connection:
+host, user, library list) and `--project ${workspaceFolder}`, uploads itself and the sources over
+SSH and runs the tools on the IBM i; files `import_source` writes there are copied back to the PC.
+VS Code prompts for the password. See the `mastercompiler-vscode` skill.
 
 Or run it **on the IBM i over SSH**, so it uses the SSH user's own job and no credentials
 file (the login banner goes to stderr, so stdio stays clean):

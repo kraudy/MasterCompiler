@@ -28,4 +28,15 @@ public class SourceLocatorTest {
     assertArrayEquals(new String[] { null, "QRPGLESRC", "DATEPR" }, copies.get(2), "no file: QRPGLESRC");
     assertArrayEquals(new String[] { null, "QSRC", "SQLCA_EXT" }, copies.get(3), "SQL INCLUDE: the source's own file");
   }
+
+  @Test
+  void test_Missing_Member_Messages() {
+    assertEquals("member ORD1 not found in MYLIB/QRPGLESRC",
+        LibraryImporter.missing("MYLIB", Arrays.asList("QRPGLESRC/ORD1")));
+    assertEquals("no member matching ORD* in MYLIB/QRPGLESRC",
+        LibraryImporter.missing("MYLIB", Arrays.asList("QRPGLESRC/ORD*")));
+    assertEquals("source file MYLIB/QDDSSRC not found, or it has no members",
+        LibraryImporter.missing("MYLIB", Arrays.asList("QDDSSRC")));
+    assertEquals("no source members in library MYLIB", LibraryImporter.missing("MYLIB", Arrays.asList("*")));
+  }
 }

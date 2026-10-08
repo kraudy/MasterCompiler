@@ -6,7 +6,8 @@ and read `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/ski
 download the jar and demo files at that same tag.
 
 For teams that work on Windows with VS Code, [Code for IBM i](https://codefori.github.io/docs/) and ACS, and want
-Copilot's agent mode to build and fix IBM i code. Nothing runs on Linux; MC runs on the PC next to VS Code.
+Copilot's agent mode to build and fix IBM i code. Nothing runs on Linux: MC's MCP server runs on the PC next to VS Code
+and runs the work on the IBM i over SSH; sources go up, imported members come back into your local repository.
 
 ```
 Copilot (agent mode) --MCP--> MasterCompiler on the PC --SSH--> MasterCompiler on the IBM i
