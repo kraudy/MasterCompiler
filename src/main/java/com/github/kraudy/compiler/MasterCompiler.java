@@ -682,14 +682,20 @@ public class MasterCompiler{
     int exitCode = 0;
     try {
       /* Invalid arguments: one line saying what is wrong, then the usage (no stack trace) */
+      if (ArgParser.wantsHelp(args)) {
+        System.out.println(ArgParser.getUsage());
+        return 0;
+      }
       ArgParser parser;
       try {
         if (args.length == 0) throw new IllegalArgumentException("Params are required");
         parser = new ArgParser(args);
         parser.validate();
       } catch (IllegalArgumentException e) {
-        logger.error(e.getMessage());
-        logger.info(ArgParser.getUsage());
+        /* plain text: no logger timestamps on the usage lines */
+        System.err.println("Error: " + e.getMessage());
+        System.err.println();
+        System.err.println(ArgParser.getUsage());
         return 2;
       }
 

@@ -70,12 +70,25 @@ public final class VscodeSetup {
     for (Code4iConfig c : connections) {
       out.append("  ").append(c.name).append(": ").append(c.username).append('@').append(c.host).append('\n')
           .append("    objects into   ").append(c.currentLibrary != null ? c.currentLibrary : "(the job's current library)")
-          .append("  <- builds replace objects here: use a development library\n")
-          .append("    library list   ").append(c.libraryList.isEmpty() ? "(the job's own)" : String.join(" ", c.libraryList)).append('\n')
-          .append("    sources to     ").append(c.defaultPushDir(project)).append('\n');
+          .append("  <- builds replace objects here: use a development library\n");
+      if (Code4iConfig.isSystemLibrary(c.currentLibrary)) {
+        out.append("    WARNING: ").append(c.currentLibrary).append(" is an IBM-supplied or shared library. Set your own "
+            + "development library as the current library of this connection in Code for IBM i before building.\n");
+      } else if (c.currentLibrary == null) {
+        out.append("    WARNING: no current library set in Code for IBM i: objects would go to the job's default "
+            + "(often QGPL). Set your development library there before building.\n");
+      }
+      out.append("    library list   ").append(c.libraryList.isEmpty() ? "(the job's own)" : String.join(" ", c.libraryList)).append('\n')
+          .append("    sources to     ").append(c.defaultPushDir(project));
+      if (!c.homeKnown) {
+        out.append(ssh ? "  (home directory not set in Code for IBM i: MC uses the SSH user's $HOME, shown here as assumed)"
+            : "  (home directory not set in Code for IBM i: assumed; set it there if this is wrong)");
+      }
+      out.append('\n');
     }
     if (connections.size() > 1) out.append("  Several connections: you pick one each time the server starts.\n");
 
+    out.append("  Java for the server: ").append(java().describe()).append('\n');
     out.append(ssh
         ? "  Over SSH, like Code for IBM i: MC runs on the IBM i (SSH key or password). --host-servers to use the ACS ports instead.\n"
         : "  Through the host servers (ports 449, 8470-8476, like ACS).\n");
@@ -118,7 +131,7 @@ public final class VscodeSetup {
             + (connections.size() > 1 ? "; pick the connection," : ",") + " then enter your IBM i password.\n"
             + "  3. Ask Copilot to \"plan\" first: it lists what would compile and where.\n"
             + "  If no MCP servers show up, your organization may have disabled MCP for Copilot: ask your admin.\n");
-    logger.info(out.toString());
+    System.out.println(out.toString());  // plain text, no logger prefix
     return 0;
   }
 
@@ -215,11 +228,105 @@ public final class VscodeSetup {
     return "    " + text.replace("\n", "\n    ");
   }
 
-  /* The java running MC, so VS Code starts the same one even when it is not on PATH */
-  private static String javaExecutable() {
-    File bin = new File(System.getProperty("java.home"), "bin");
+  /* A Java installation: its executable, major version and 32 / 64 bit */
+  static final class JavaChoice {
+    final String executable;
+    final int major;
+    final boolean is64;
+
+    JavaChoice(String executable, int major, boolean is64) {
+      this.executable = executable;
+      this.major = major;
+      this.is64 = is64;
+    }
+
+    String describe() {
+      return executable + " (Java " + major + ", " + (is64 ? "64" : "32") + "-bit)";
+    }
+  }
+
+  private static JavaChoice chosenJava;
+
+  /*
+   * The Java VS Code starts the server with: the best one installed, not just the one running setup
+   * (often an old 32-bit Java 8 first on PATH). 64-bit first, then the newest. Looks at this Java,
+   * JAVA_HOME, the Red Hat Java extension's bundled JRE and the usual install folders.
+   */
+  static JavaChoice java() {
+    if (chosenJava != null) return chosenJava;
+    String bits = System.getProperty("sun.arch.data.model", "");
+    JavaChoice best = new JavaChoice(executable(new File(System.getProperty("java.home"))),
+        major(System.getProperty("java.specification.version")),
+        bits.equals("64") || System.getProperty("os.arch", "").contains("64"));
+
+    List<File> homes = new ArrayList<File>();
+    if (System.getenv("JAVA_HOME") != null) homes.add(new File(System.getenv("JAVA_HOME")));
+    for (File ext : children(new File(System.getProperty("user.home"), ".vscode/extensions"), "redhat.java-")) {
+      homes.addAll(children(new File(ext, "jre"), ""));
+    }
+    for (String env : new String[] { "ProgramFiles", "ProgramFiles(x86)" }) {
+      if (System.getenv(env) == null) continue;
+      for (String vendor : new String[] { "Java", "Eclipse Adoptium", "Microsoft", "Zulu", "Amazon Corretto" }) {
+        homes.addAll(children(new File(System.getenv(env), vendor), ""));
+      }
+    }
+    for (File home : homes) {
+      JavaChoice candidate = fromRelease(home);
+      if (candidate != null && (candidate.is64 && !best.is64 || candidate.is64 == best.is64 && candidate.major > best.major)) {
+        best = candidate;
+      }
+    }
+    chosenJava = best;
+    return best;
+  }
+
+  /* JAVA_VERSION and OS_ARCH from the installation's release file (Java 8 and newer have one) */
+  private static JavaChoice fromRelease(File home) {
+    File release = new File(home, "release");
+    File exe = new File(executable(home));
+    if (!release.isFile() || !exe.isFile()) return null;
+    try {
+      String version = null;
+      String arch = "";
+      for (String line : Files.readAllLines(release.toPath())) {
+        String value = line.contains("=") ? line.substring(line.indexOf('=') + 1).replace("\"", "").trim() : "";
+        if (line.startsWith("JAVA_VERSION=")) version = value;
+        if (line.startsWith("OS_ARCH=")) arch = value;
+      }
+      if (version == null || major(version) < 8) return null;
+      return new JavaChoice(exe.getAbsolutePath(), major(version), arch.contains("64"));
+    } catch (Exception unreadable) {
+      return null;
+    }
+  }
+
+  /* "1.8.0_291" -> 8, "21.0.2" -> 21 */
+  static int major(String version) {
+    try {
+      String[] parts = version.split("[._+-]");
+      int first = Integer.parseInt(parts[0]);
+      return first == 1 && parts.length > 1 ? Integer.parseInt(parts[1]) : first;
+    } catch (Exception e) {
+      return 0;
+    }
+  }
+
+  private static String executable(File home) {
+    File bin = new File(home, "bin");
     File exe = new File(bin, "java.exe");
     return (exe.isFile() ? exe : new File(bin, "java")).getAbsolutePath();
+  }
+
+  private static List<File> children(File dir, String prefix) {
+    List<File> kids = new ArrayList<File>();
+    File[] all = dir.listFiles();
+    if (all == null) return kids;
+    for (File kid : all) if (kid.isDirectory() && kid.getName().startsWith(prefix)) kids.add(kid);
+    return kids;
+  }
+
+  private static String javaExecutable() {
+    return java().executable;
   }
 
   static String jarPath() {

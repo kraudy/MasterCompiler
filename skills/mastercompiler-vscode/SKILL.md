@@ -38,10 +38,15 @@ asking first.
 ## 1. Java
 
 ```powershell
-java -version
+cmd /c "java -version 2>&1"
 ```
 
-MC needs Java 8 or newer. When `java` is not on PATH, look for one that is already installed
+(`java -version` prints to stderr, which Windows PowerShell 5.1 shows as a red
+`NativeCommandError` even when it worked; going through `cmd` avoids that.)
+
+MC needs Java 8 or newer; a 64-bit Java is preferred. Setup picks the best Java it finds
+(64-bit first, then the newest, including the one bundled with the Red Hat Java extension) and
+shows it in the preview as "Java for the server". When `java` is not on PATH, look for one that is already installed
 before asking the user to install anything:
 
 - VS Code's Red Hat Java extension bundles one:
@@ -81,6 +86,19 @@ the newest release, and replacing the file is how MC is updated (the `mcp.json` 
 this path, so nothing else changes; restart the `mastercompiler` server afterwards).
 
 ## 3. Configure the repository
+
+**MC's tools work only in the VS Code window that has the repository open** (the server starts
+with `--project ${workspaceFolder}`). If this chat runs in an empty window or another folder:
+create or pick the folder, run the setup below there, then open it with `code <folder>` and tell
+the user to continue in that window (open Copilot Chat in Agent mode there and say "continue the
+MasterCompiler setup"). Do not try to call MC's tools from the original window.
+
+**Starting a repository from source members** (the user has members in source files, no
+repository yet): create an empty folder, run the setup below in it, open it (`code <folder>`),
+start the server (step 4), then call the `import_source` tool with `members`
+(`LIB/QRPGLESRC/ORD*,LIB/QDDSSRC`) or `objects` and `into: "repo"`. It writes the members with
+MC's names and they become the build. Do not use the command-line `--import` for this: it needs
+the password in the terminal.
 
 **No repository yet?** If the user has none open (or just wants to try MC first), offer MC's
 small demo: four sources that build five objects, all named `MCD*` (a table, a module and its

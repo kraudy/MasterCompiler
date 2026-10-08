@@ -32,6 +32,7 @@ public class ArgParser {
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
     INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code)"),
     VERSION       (null, "version",      Kind.FLAG,  "Print the MasterCompiler version"),
+    HELP          ("h", "help",          Kind.FLAG,  "Print this help"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
@@ -47,7 +48,7 @@ public class ArgParser {
     SINCE         (null, "since",        Kind.VALUE, "Only build targets whose sources changed since this git ref, plus dependents"),
     PUSH          (null, "push",         Kind.VALUE, "Upload the local git repo's sources to this IFS directory and build from there"),
     KEEP_GOING    ("k", "keep-going", Kind.FLAG,  "After a failed target, keep building everything that does not depend on it"),
-    MCP           (null, "mcp",          Kind.FLAG,  "Run as an MCP server on stdio (tools: build, plan, impact, clean, joblog)"),
+    MCP           (null, "mcp",          Kind.FLAG,  "Run as an MCP server on stdio (tools: build, plan, impact, clean, find_source, import_source, joblog)"),
     NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration"),
     JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 
@@ -116,6 +117,7 @@ public class ArgParser {
   private boolean hostServers;
   private boolean installSkills;
   private boolean version;
+  private boolean help;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -217,6 +219,7 @@ public class ArgParser {
       case HOST_SERVERS:  hostServers = true; break;
       case INSTALL_SKILLS: installSkills = true; break;
       case VERSION:       version = true; break;
+      case HELP:          help = true; break;
       case KEEP_GOING:    keepGoing = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
@@ -405,6 +408,16 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  public boolean isHelp() {
+    return help;
+  }
+
+  /* -h / --help anywhere: help wins over everything else, including invalid options */
+  public static boolean wantsHelp(String[] args) {
+    for (String arg : args) if (arg.equals("-h") || arg.equals("--help")) return true;
+    return false;
   }
 
   public boolean isVersion() {

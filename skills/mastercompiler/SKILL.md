@@ -99,6 +99,11 @@ after a dash (`ART200-Work_with_article.pgm.sqlrpgle` is `ART200`).
 
 ## Import an existing library
 
+In VS Code with MC's MCP server running, use the `import_source` tool (`members`, `into: "repo"`)
+instead: the server already has the password from VS Code's prompt. The command line below needs
+the credentials in the environment (or MC running on the IBM i); an agent never asks for or types
+the password in a terminal or the chat.
+
 ```bash
 java -jar MC.jar --import MYLIB -o /home/USER/mylib-repo            # whole library
 java -jar MC.jar --import "MYLIB/QRPGLESRC,MYLIB/QDDSSRC/ART*,OTHER" -o repo

@@ -27,6 +27,7 @@ public final class Code4iConfig {
   public final String currentLibrary;
   public final List<String> libraryList;
   public final String homeDirectory;
+  public final boolean homeKnown;       // false: not set in Code for IBM i ("." is its default), /home/USER assumed
   public final int port;                // SSH port Code for IBM i uses (--ssh)
   public final String privateKeyPath;   // SSH key, when the connection has one
 
@@ -39,7 +40,8 @@ public final class Code4iConfig {
     this.privateKeyPath = privateKeyPath;
     this.currentLibrary = currentLibrary;
     this.libraryList = libraryList;
-    this.homeDirectory = homeDirectory;
+    this.homeKnown = homeDirectory != null && homeDirectory.startsWith("/");
+    this.homeDirectory = homeKnown ? homeDirectory : "/home/" + username.toUpperCase();
   }
 
   /* The named connection, or the only one when no name is given */
@@ -97,7 +99,6 @@ public final class Code4iConfig {
       }
     }
     String username = connection.path("username").asText();
-    if (homeDirectory == null) homeDirectory = "/home/" + username.toUpperCase();
 
     String key = text(connection, "privateKeyPath");
     if (key == null) key = text(connection, "privateKey");
@@ -152,6 +153,11 @@ public final class Code4iConfig {
   }
 
   /* Where --push uploads the project when none is given: <home>/mc/<project folder> */
+  /* IBM-supplied and shared libraries (QGPL, QSYS, ...): builds must not put objects there */
+  public static boolean isSystemLibrary(String library) {
+    return library != null && library.toUpperCase().startsWith("Q");
+  }
+
   public String defaultPushDir(File project) {
     String home = homeDirectory.endsWith("/") ? homeDirectory.substring(0, homeDirectory.length() - 1) : homeDirectory;
     return home + "/mc/" + project.getName();

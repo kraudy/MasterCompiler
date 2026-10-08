@@ -52,7 +52,7 @@ public class SshMcpProxy {
   private PrintStream protocolOut;
   private volatile SshTarget ssh;
   private File project;
-  private String remoteDir;
+  private volatile String remoteDir;  // set once connected (the home directory may come from the IBM i)
   private volatile ChannelExec remote;
   private final CompletableFuture<OutputStream> remoteReady = new CompletableFuture<OutputStream>();
   private final ExecutorService calls = Executors.newSingleThreadExecutor(r -> {
@@ -76,10 +76,7 @@ public class SshMcpProxy {
     String host = code4i != null ? code4i.host : required("IBMI_HOSTNAME");
     String user = code4i != null ? code4i.username : required("IBMI_USERNAME");
     int port = code4i != null ? code4i.port : Integer.parseInt(env("IBMI_SSH_PORT", "22"));
-    String home = code4i != null ? trimSlash(code4i.homeDirectory) : "/home/" + user.toUpperCase();
-
     project = new File(parser.getProjectRoot()).getCanonicalFile();
-    remoteDir = parser.getPush() != null ? trimSlash(parser.getPush()) : home + "/mc/" + project.getName();
 
     /*
      * initialize and tools/list are answered here right away; connecting, the first jar upload and the
@@ -87,7 +84,7 @@ public class SshMcpProxy {
      */
     Thread setup = new Thread(() -> {
       try {
-        remoteReady.complete(startRemote(code4i, host, port, user, home));
+        remoteReady.complete(startRemote(code4i, host, port, user));
       } catch (Throwable e) {
         logger.error("Could not start MasterCompiler on " + host, e);
         remoteReady.completeExceptionally(e);
@@ -127,9 +124,13 @@ public class SshMcpProxy {
   }
 
   /* SSH in, upload MC when this version is new, sync the sources and start MC there; returns its stdin */
-  private OutputStream startRemote(Code4iConfig code4i, String host, int port, String user, String home) throws Exception {
+  private OutputStream startRemote(Code4iConfig code4i, String host, int port, String user) throws Exception {
     ssh = SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
         code4i != null ? code4i.privateKeyPath : null);
+    /* Home: Code for IBM i's when it has one, else the SSH user's own */
+    String home = code4i != null && code4i.homeKnown ? code4i.homeDirectory : ssh.exec("echo $HOME").trim();
+    home = home.startsWith("/") ? trimSlash(home) : "/home/" + user.toUpperCase();
+    remoteDir = parser.getPush() != null ? trimSlash(parser.getPush()) : home + "/mc/" + project.getName();
     long start = System.currentTimeMillis();
     String jar = ensureRemoteJar(home);
     long jarDone = System.currentTimeMillis();
