@@ -63,8 +63,12 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler v0.3.0` or newer. An error (`Unknown option: --version`) means an
-old jar that cannot do the setup below: download it again.
+It must print `MasterCompiler v0.3.2` or newer (`find_source` / `import_source` came in v0.3.2).
+An error (`Unknown option: --version`) means a very old jar.
+
+Always run the download above, even when `MasterCompiler.jar` is already there: the URL serves
+the newest release, and replacing the file is how MC is updated (the `mcp.json` entry points at
+this path, so nothing else changes; restart the `mastercompiler` server afterwards).
 
 ## 3. Configure the repository
 
