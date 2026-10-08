@@ -60,7 +60,8 @@ public class SshMcpProxy {
     t.setDaemon(true);
     return t;
   });
-  private volatile boolean closing;  // VS Code closed the session: the remote end stopping is expected
+  private volatile boolean closing;
+  private final Set<String> pendingImports = java.util.concurrent.ConcurrentHashMap.newKeySet();  // import_source call ids  // VS Code closed the session: the remote end stopping is expected
 
   public SshMcpProxy(ArgParser parser) {
     this.parser = parser;
@@ -173,7 +174,7 @@ public class SshMcpProxy {
   private void relayResponses(InputStream fromRemote) {
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(fromRemote, StandardCharsets.UTF_8))) {
       String line;
-      while ((line = reader.readLine()) != null) send(line);
+      while ((line = reader.readLine()) != null) send(pendingImports.isEmpty() ? line : afterImport(line));
     } catch (Exception e) {
       logger.error("Lost the remote MasterCompiler", e);
     }
@@ -188,6 +189,11 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
+      if (tool.equals("import_source")) {
+        sync(projectFiles());  // "repo" keeps files already there: the IBM i copy must be current
+        pendingImports.add(request.path("id").toString());
+        return line;
+      }
       if (!tool.equals("build") && !tool.equals("plan") && !tool.equals("impact")) return line;
 
       ObjectNode args = request.path("params").has("arguments") && request.path("params").get("arguments").isObject()
@@ -216,6 +222,39 @@ public class SshMcpProxy {
       logger.error("Could not prepare tool call", e);
       sendToolError(line, "Could not upload the sources to the IBM i: " + e.getMessage());
       return null;
+    }
+  }
+
+  /* import_source wrote the sources on the IBM i: bring them into the local project before answering */
+  String afterImport(String line) {
+    try {
+      JsonNode response = mapper.readTree(line);
+      if (!pendingImports.remove(response.path("id").toString())) return line;
+      JsonNode result = response.path("result");
+      if (result.path("isError").asBoolean(false)) return line;
+      JsonNode report = mapper.readTree(result.path("content").path(0).path("text").asText("{}"));
+      int downloaded = 0;
+      for (JsonNode path : report.path("written")) {
+        ssh.download(remoteDir + "/" + path.asText(), new File(project, path.asText()));
+        downloaded++;
+      }
+      logger.info("Downloaded {} imported files into {}", downloaded, project);
+      return line;
+    } catch (Exception e) {
+      logger.error("Could not download the imported sources", e);
+      try {
+        JsonNode id = mapper.readTree(line).get("id");
+        ObjectNode error = mapper.createObjectNode();
+        error.put("jsonrpc", "2.0");
+        error.set("id", id);
+        ObjectNode result = error.putObject("result");
+        result.putArray("content").addObject().put("type", "text")
+            .put("text", "Imported on the IBM i but the download to this PC failed: " + e.getMessage());
+        result.put("isError", true);
+        return mapper.writeValueAsString(error);
+      } catch (Exception ignored) {
+        return line;
+      }
     }
   }
 

@@ -5,7 +5,7 @@ description: >-
   VS Code, reusing the developer's Code for IBM i connection, on Windows, macOS or
   Linux. Use when the user wants Copilot (or another agent) to build IBM i code,
   asks to connect or configure MasterCompiler / MC / the IBM i build tool, or MC's
-  MCP tools (build, plan, impact, joblog) are missing. Triggers: set up MC,
+  MCP tools (build, plan, impact, find_source, import_source, joblog) are missing. Triggers: set up MC,
   MasterCompiler MCP, mcp.json, Code for IBM i, Code4i, Copilot IBM i build.
 ---
 
@@ -15,7 +15,7 @@ You may be reading this because the user pointed you at https://github.com/kraud
 and asked to install or try it: this is the guide to follow with them, step by step.
 
 Goal: the `mastercompiler` MCP server shows up in Copilot's agent mode, so you can call
-`build`, `plan`, `impact` and `joblog`. MC runs on the developer's PC, uploads the
+`build`, `plan`, `impact`, `find_source`, `import_source` and `joblog`. MC runs on the developer's PC, uploads the
 repository's sources to the IBM i (`--push`), compiles there and returns errors with file
 and line. It reuses the Code for IBM i connection (host, user, current library, library list),
 so the only thing the user types is their IBM i password, once, in a VS Code prompt.
@@ -136,6 +136,10 @@ Tell the user:
 
 Then check it works: call `plan` without arguments. A list of targets means MC reached the
 IBM i and understood the project.
+
+For SQL (table columns, data, the catalog), MC has no tool: check that the **Db2 for IBM i**
+extension (`halcyontechltd.vscode-db2i`) is installed and suggest it if not. Its "Run SQL
+statement" tool uses the same Code for IBM i connection.
 
 ## Manual configuration (when setup cannot run)
 

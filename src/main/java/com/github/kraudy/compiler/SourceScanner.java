@@ -157,6 +157,7 @@ public class SourceScanner {
   private static boolean shouldSkipPath(String path) {
     String lower = path.replace('\\', '/').toLowerCase(Locale.ROOT);
     if (lower.contains("/.git/") || lower.endsWith("/.git")) return true;
+    if (lower.contains("/.mc/")) return true;  // import_source's reference copies are read, never built
     if (lower.contains("/target/") || lower.contains("/node_modules/")) return true;
     if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return true;
     if (lower.endsWith(".md") || lower.endsWith(".txt")) return true;

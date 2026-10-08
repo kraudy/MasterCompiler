@@ -500,6 +500,11 @@ public class MasterCompiler{
       resolveLibrary(key);
       report.add(key.asString(), BuildReport.NOT_BUILT);
     }
+    for (TargetKey key : globalSpec.targets.keySet()) {
+      for (String object : key.getExternals()) {
+        report.external.computeIfAbsent(object, k -> new ArrayList<String>()).add(key.asString());
+      }
+    }
 
     if (jsonReport == null) return;
     try {

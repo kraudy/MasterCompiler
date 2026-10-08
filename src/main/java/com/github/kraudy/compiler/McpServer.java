@@ -166,6 +166,39 @@ public class McpServer {
         + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members.",
         clean));
 
+    ObjectNode find = mapper.createObjectNode();
+    find.put("type", "object");
+    ObjectNode findProps = find.putObject("properties");
+    objectsProperty(findProps);
+    find.putArray("required").add("objects");
+    tools.add(tool("find_source",
+        "Where the IBM i says objects were compiled from: source file members (ILE programs: per bound module), "
+        + "stream files, binder source, and the /COPY members they include. Use it for programs, service programs "
+        + "and files the project uses but does not build (the build report's 'external' list), e.g. to read the "
+        + "parameters of a called program. Flags members changed after the compile (changed_since_compile) and "
+        + "missing ones. Reads only.",
+        find));
+
+    ObjectNode imp = mapper.createObjectNode();
+    imp.put("type", "object");
+    ObjectNode impProps = imp.putObject("properties");
+    objectsProperty(impProps);
+    ObjectNode members = impProps.putObject("members");
+    members.put("type", "string");
+    members.put("description", "Instead of (or besides) objects: source members, comma-separated: LIB/SRCPF/MBR, "
+        + "LIB/SRCPF/PREFIX* or LIB/SRCPF");
+    ObjectNode into = impProps.putObject("into");
+    into.put("type", "string");
+    into.putArray("enum").add("reference").add("repo");
+    into.put("description", "reference (default): read-only copies under .mc/sources/<LIB>/<SRCPF>/ (git-ignored, "
+        + "never built). repo: into the project as <SRCPF>/<OBJECT>.<type>.<srctype>, so the next build compiles "
+        + "it into the current library; only when the user wants to change that object. Existing files are kept.");
+    tools.add(tool("import_source",
+        "Copy sources from the IBM i into the project folder, named with MC's conventions (copybooks as "
+        + "*.include.*). Takes the objects (it finds their sources and /COPY members like find_source) or source "
+        + "members. SQL tables, views and indexes without a member get generated DDL. Returns the files written.",
+        imp));
+
     ObjectNode joblog = mapper.createObjectNode();
     joblog.put("type", "object");
     joblog.putObject("properties");
@@ -173,6 +206,14 @@ public class McpServer {
         "Joblog messages of the server's IBM i job since the previous joblog call (or since connecting).",
         joblog));
     return result;
+  }
+
+  private void objectsProperty(ObjectNode props) {
+    ObjectNode objects = props.putObject("objects");
+    objects.put("type", "array");
+    objects.putObject("items").put("type", "string");
+    objects.put("description", "Objects: NAME (looked up on the library list) or LIB/NAME, optionally followed "
+        + "by the type, e.g. \"CUSTSRV *SRVPGM\" as the build report's external list names them");
   }
 
   private ObjectNode selectionSchema() {
@@ -199,8 +240,9 @@ public class McpServer {
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
     boolean destructive = name.equals("build") || name.equals("clean");
+    boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
-    annotations.put("readOnlyHint", !destructive);
+    annotations.put("readOnlyHint", !writes);
     annotations.put("destructiveHint", destructive);
     annotations.put("openWorldHint", false);
     return tool;
@@ -216,6 +258,8 @@ public class McpServer {
         case "impact": return impact(args);
         case "clean":  return clean(args);
         case "joblog": return joblog();
+        case "find_source":   return findSource(args);
+        case "import_source": return importSource(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
     } catch (Exception e) {
@@ -333,6 +377,97 @@ public class McpServer {
     } catch (Exception e) {
       logger.info("EVFEVENT member {} not removed: {}", name, e.getMessage());
     }
+  }
+
+  /* Connected, with the developer's library list (unqualified names resolve as in their compiles) */
+  private void connectWithLibraryList() throws Exception {
+    connect();
+    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
+    for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
+      executor.executeCommand(hook);
+    }
+  }
+
+  private List<String> objectsArg(JsonNode args) {
+    List<String> objects = new java.util.ArrayList<String>();
+    for (JsonNode object : args.path("objects")) {
+      if (!object.asText("").trim().isEmpty()) objects.add(object.asText().trim());
+    }
+    return objects;
+  }
+
+  private ObjectNode findSource(JsonNode args) throws Exception {
+    List<String> objects = objectsArg(args);
+    if (objects.isEmpty()) return toolResult("Give at least one object in 'objects'", true);
+    connectWithLibraryList();
+    List<SourceLocator.Located> found = new SourceLocator(connection).locate(objects, true);
+    return toolResult(pretty.writeValueAsString(found), false);
+  }
+
+  private ObjectNode importSource(JsonNode args) throws Exception {
+    List<String> objects = objectsArg(args);
+    String members = args.path("members").asText("").trim();
+    if (objects.isEmpty() && members.isEmpty()) return toolResult("Give 'objects' or 'members'", true);
+    boolean intoRepo = "repo".equals(args.path("into").asText("reference"));
+    connectWithLibraryList();
+
+    List<SourceLocator.SourceRef> sources = new java.util.ArrayList<SourceLocator.SourceRef>();
+    java.util.Set<String> seen = new java.util.HashSet<String>();
+    ObjectNode result = mapper.createObjectNode();
+    ArrayNode notFound = result.putArray("notImported");
+    if (!objects.isEmpty()) {
+      for (SourceLocator.Located located : new SourceLocator(connection).locate(objects, true)) {
+        if (located.sources.isEmpty()) notFound.add(located.request + ": " + located.note);
+        List<SourceLocator.SourceRef> refs = new java.util.ArrayList<SourceLocator.SourceRef>(located.sources);
+        refs.addAll(located.copybooks);
+        for (SourceLocator.SourceRef ref : refs) {
+          if ("missing".equals(ref.status) || "stream_file".equals(ref.status)) {
+            notFound.add((ref.streamFile != null ? ref.streamFile : ref.key()) + ": " + ref.note);
+          } else if (seen.add(ref.key())) {
+            sources.add(ref);
+          }
+        }
+      }
+    }
+    File project = projectDir();
+    String outDir = (intoRepo ? project.getPath() : new File(project, ".mc/sources").getPath()).replace(File.separatorChar, '/');
+    LibraryImporter importer = new LibraryImporter(system, connection, parser.isVerbose());
+    importer.setKeepExisting(intoRepo);
+    importer.setWriteReportFile(false);
+    if (!intoRepo) importer.writeFile(new File(project, ".mc/.gitignore").getPath(), "# MasterCompiler working files\n*");
+
+    List<LibraryImporter.ImportedMember> files = new java.util.ArrayList<LibraryImporter.ImportedMember>(
+        importer.importSources(sources, outDir, !intoRepo).files);
+    /* Members: the library importer names them from the objects built from them (reference copies per library) */
+    for (String item : members.split(",")) {
+      String selection = item.trim().toUpperCase();
+      if (selection.isEmpty()) continue;
+      String library = selection.contains("/") ? selection.substring(0, selection.indexOf('/')) : selection;
+      for (LibraryImporter.ImportedMember file : importer.run(selection, intoRepo ? outDir : outDir + "/" + library).files) {
+        if (!intoRepo) file.file = library + "/" + file.file;
+        files.add(file);
+      }
+    }
+
+    String prefix = intoRepo ? "" : ".mc/sources/";
+    result.put("into", intoRepo ? "repo" : "reference");
+    ArrayNode written = result.putArray("written");  // project-relative: the SSH proxy downloads these
+    if (!intoRepo) written.add(".mc/.gitignore");
+    for (LibraryImporter.ImportedMember file : files) {
+      if (!"error".equals(file.how) && file.kept == null) written.add(prefix + file.file);
+    }
+    result.set("files", pretty.valueToTree(files));
+    if (intoRepo) result.put("next", "The imported sources are build targets now; plan shows what a build would compile.");
+    return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* The project folder: --project, else the scanned folder, the spec's folder or the TOBi root */
+  private File projectDir() {
+    if (parser.getProjectRoot() != null) return new File(parser.getProjectRoot());
+    if (parser.hasTobi()) return new File(parser.getTobiRoot());
+    if (parser.hasScan()) return new File(parser.getScanRoot());
+    File spec = new File(parser.getYamlFile()).getAbsoluteFile();
+    return spec.getParentFile();
   }
 
   private String currentLibrary() throws Exception {

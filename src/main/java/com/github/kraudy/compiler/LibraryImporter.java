@@ -54,6 +54,8 @@ public class LibraryImporter {
   private final AS400 system;
   private final Connection connection;
   private final boolean verbose;
+  private boolean keepExisting;        // import_source into the repository: never overwrite a file
+  private boolean writeReportFile = true;
 
   public LibraryImporter(AS400 system, Connection connection, boolean verbose) {
     this.system = system;
@@ -71,6 +73,7 @@ public class LibraryImporter {
     public String object;   // object built from it, when known (e.g. HOLA *PGM)
     public String how;      // object_statistics, bound_module, program_info, sql_object, member_type, dds_content, copybook, assumed, other
     public String note;
+    public Boolean kept;    // the file was already there and was left as it is
   }
 
   public static class ImportReport {
@@ -85,7 +88,7 @@ public class LibraryImporter {
   }
 
   /* Object a member was compiled into */
-  private static final class Built {
+  static final class Built {
     final String name;
     final String objectType;   // MC object type, lower case (pgm, module, pf, ...)
     final String how;
@@ -94,6 +97,14 @@ public class LibraryImporter {
       this.objectType = objectType;
       this.how = how;
     }
+  }
+
+  public void setKeepExisting(boolean keepExisting) {
+    this.keepExisting = keepExisting;
+  }
+
+  public void setWriteReportFile(boolean writeReportFile) {
+    this.writeReportFile = writeReportFile;
   }
 
   public ImportReport run(String selection, String outDir) throws Exception {
@@ -145,7 +156,8 @@ public class LibraryImporter {
         if (object == null && "DDS".equals(sourceType)) object = ddsFromContent(fm[1], source.getValue());
         name(entry, object, copied.contains(source.getKey()));
 
-        write(base + "/" + entry.file, source.getValue());
+        if (keepExisting && exists(base + "/" + entry.file)) entry.kept = true;
+        else write(base + "/" + entry.file, source.getValue());
         if (perLibrary) entry.file = library + "/" + entry.file;
         report.files.add(entry);
         report.members++;
@@ -156,7 +168,7 @@ public class LibraryImporter {
       }
     }
 
-    writeReport(report, outDir + "/mc-import.json");
+    if (writeReportFile) writeReport(report, outDir + "/mc-import.json");
     logger.info("Imported {} members from {} into {}: {} from objects, {} copybooks, {} assumed, {} errors",
         report.members, report.selection, outDir, report.fromObjects, report.copybooks, report.assumed, report.errors);
     return report;
@@ -319,7 +331,7 @@ public class LibraryImporter {
     return new Built(member, type, "dds_content");
   }
 
-  private static String objectType(String objType, String attribute) {
+  static String objectType(String objType, String attribute) {
     switch (objType) {
       case "*PGM":    return "pgm";
       case "*MODULE": return "module";
@@ -332,8 +344,12 @@ public class LibraryImporter {
     }
   }
 
-  /* Source lines in arrival order, trailing blanks removed */
   private List<String> readMember(String library, String file, String member) throws SQLException {
+    return readMember(connection, library, file, member);
+  }
+
+  /* Source lines in arrival order, trailing blanks removed */
+  static List<String> readMember(Connection connection, String library, String file, String member) throws SQLException {
     List<String> lines = new ArrayList<String>();
     try (Statement stmt = connection.createStatement()) {
       /* Delimited names: members may contain periods (EXPAT.H) */
@@ -353,6 +369,77 @@ public class LibraryImporter {
       }
     }
     return lines;
+  }
+
+  /*
+   * import_source: members picked one by one (found by SourceLocator), written as <outDir>/<LIB>/<SRCPF>/<name>
+   * (reference copies) or <outDir>/<SRCPF>/<name> (into the repository). With keepExisting a file already
+   * there is left as it is. SQL objects without a member get their DDL from QSYS2.GENERATE_SQL.
+   */
+  public ImportReport importSources(List<SourceLocator.SourceRef> sources, String outDir, boolean perLibrary)
+      throws Exception {
+    ImportReport report = new ImportReport();
+    report.output = outDir;
+    for (SourceLocator.SourceRef ref : sources) {
+      ImportedMember entry = member(ref.library, ref.sourceFile, ref.member,
+          ref.sourceType == null ? "" : ref.sourceType);
+      List<String> lines;
+      try {
+        lines = ref.ddlType != null ? generateSql(ref.library, ref.ddlName, ref.ddlType)
+            : readMember(ref.library, ref.sourceFile, ref.member);
+      } catch (SQLException e) {
+        entry.how = "error";
+        entry.note = e.getMessage();
+        report.files.add(entry);
+        report.errors++;
+        continue;
+      }
+      if (ref.ddlType != null) {
+        entry.sourceFile = "QSQLSRC";  // where the generated DDL is filed
+        entry.member = ref.member;
+      }
+      name(entry, ref.built, ref.built == null);
+      if (ref.ddlType != null) entry.note = "DDL generated by QSYS2.GENERATE_SQL; the object has no source member";
+      String path = (perLibrary ? ref.library + "/" : "") + entry.file;
+      entry.file = path;
+      if (keepExisting && exists(outDir + "/" + path)) {
+        entry.kept = true;
+      } else {
+        write(outDir + "/" + path, lines);
+      }
+      report.files.add(entry);
+      report.members++;
+      if ("copybook".equals(entry.how)) report.copybooks++;
+    }
+    return report;
+  }
+
+  /* CREATE OR REPLACE DDL of a table, view or index */
+  private List<String> generateSql(String library, String name, String type) throws SQLException {
+    List<String> lines = new ArrayList<String>();
+    try (java.sql.CallableStatement call = connection.prepareCall(
+        "CALL QSYS2.GENERATE_SQL(DATABASE_OBJECT_NAME => ?, DATABASE_OBJECT_LIBRARY_NAME => ?, DATABASE_OBJECT_TYPE => ?, " +
+        "CREATE_OR_REPLACE_OPTION => '1', HEADER_OPTION => '0')")) {
+      call.setString(1, name);
+      call.setString(2, library);
+      call.setString(3, type);
+      boolean hasResult = call.execute();
+      while (!hasResult && call.getUpdateCount() != -1) hasResult = call.getMoreResults();
+      if (!hasResult) throw new SQLException("GENERATE_SQL returned no source for " + library + "/" + name);
+      try (ResultSet rs = call.getResultSet()) {
+        while (rs.next()) lines.add(rtrim(rs.getString("SRCDTA")));
+      }
+    }
+    return lines;
+  }
+
+  private boolean exists(String path) throws Exception {
+    return runningOnIbmi() ? new IFSFile(system, path).exists() : new File(path).exists();
+  }
+
+  /* Write a file (e.g. .mc/.gitignore) the way imported sources are written */
+  void writeFile(String path, String content) throws Exception {
+    write(path, Arrays.asList(content));
   }
 
   /* "SRCPF/MBR" of every member named by a /COPY or /INCLUDE (FILE,MBR, LIB/FILE,MBR or MBR) */

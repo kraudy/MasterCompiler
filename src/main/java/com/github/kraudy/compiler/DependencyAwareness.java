@@ -1314,6 +1314,7 @@ public class DependencyAwareness {
         String name = names.group(1).toUpperCase();
         TargetKey srv = keyLookup.get(name + "." + ObjectType.SRVPGM.name());
         if (srv == null || !srv.isServiceProgram()) {
+          target.addExternal("*SRVPGM", name);
           if (verbose) logs.add("Referenced BNDSRVPGM not a build target, ignored: " + name + " (in " + target.asString() + ")");
           continue;
         }
@@ -1363,6 +1364,7 @@ public class DependencyAwareness {
     for (String bndDirName : bndDirNames) {
       TargetKey bndDirDep = keyLookup.getOrDefault(bndDirName + "." + ObjectType.BNDDIR.name(), null);
       if (bndDirDep == null || !bndDirDep.isBndDir()) {
+        target.addExternal("*BNDDIR", bndDirName);
         if (verbose) logs.add("Referenced BNDDIR not a build target, ignored: " + bndDirName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1386,6 +1388,7 @@ public class DependencyAwareness {
     for (String fileName : extNameFiles) {
       TargetKey fileKey = keyLookup.getOrDefault(fileName + "." + ParamCmd.FILE.name(), null);
       if (fileKey == null || !fileKey.isFile()) {
+        target.addExternal("*FILE", fileName);
         if (verbose) logs.add("Referenced EXTNAME file not a build target, ignored: " + fileName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1409,6 +1412,7 @@ public class DependencyAwareness {
       TargetKey dtaKey = keyLookup.getOrDefault(name + "." + ObjectType.DTAARA.name(), null);
 
       if (dtaKey == null || !dtaKey.isDtaara()) {
+        target.addExternal("*DTAARA", name);
         if (verbose) logs.add("Referenced DTAARA not a build target, ignored: " + name + " (in " + target.asString() + ")");
         continue;
       }
@@ -1443,6 +1447,7 @@ public class DependencyAwareness {
     for (String pgmName : calledPgms) {
       TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
       if (pgmKey == null || !pgmKey.isProgram()) {
+        target.addExternal("*PGM", pgmName);
         if (verbose) logs.add("Referenced CALL CL program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1496,6 +1501,7 @@ public class DependencyAwareness {
     for (String pgmName : extPgmNames) {
       TargetKey pgmKey = keyLookup.getOrDefault(pgmName + "." + ObjectType.PGM.name(), null);
       if (pgmKey == null || !pgmKey.isProgram()) { 
+        target.addExternal("*PGM", pgmName);
         if (verbose) logs.add("Referenced EXTPGM program not a build target, ignored: " + pgmName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1526,6 +1532,7 @@ public class DependencyAwareness {
     for (String basePfName : basePfNames) {
       TargetKey basePfKey = keyLookup.getOrDefault(basePfName + "." + ParamCmd.FILE.name(), null);
       if (basePfKey == null || !basePfKey.isFile()) {
+        target.addExternal("*FILE", basePfName);
         if (verbose) logs.add("Base PFILE not a build target: " + basePfName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1555,6 +1562,7 @@ public class DependencyAwareness {
     for (String refFileName : refFileNames) {
       TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
       if (refFileKey == null || !refFileKey.isFile()) {
+        target.addExternal("*FILE", refFileName);
         if (verbose) logs.add("Referenced REF file not a build target: " + refFileName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1585,6 +1593,7 @@ public class DependencyAwareness {
     for (String refFileName : reffldFilesNames) {
       TargetKey refFileKey = keyLookup.getOrDefault(refFileName + "." + ParamCmd.FILE.name(), null);
       if (refFileKey == null || !refFileKey.isFile()) {
+        target.addExternal("*FILE", refFileName);
         if (verbose) logs.add("Referenced REFFLD file not a build target: " + refFileName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1690,6 +1699,7 @@ public class DependencyAwareness {
       TargetKey tableKey = keyLookup.getOrDefault(tableName + "." + ParamCmd.FILE.name(), null);
       // Or if SQL tables: tableName + ".TABLE.SQL" or ".PF.DDS"
       if (tableKey == null || !tableKey.isFile()) {
+        target.addExternal("*FILE", tableName);
         if (verbose) logs.add("Referenced SQL table not a build target, ignored: " + tableName + " (in " + target.asString() + ")");
         continue;
       }
@@ -1709,6 +1719,7 @@ public class DependencyAwareness {
       }
       TargetKey fileKey = keyLookup.getOrDefault(depFileName + "." + ParamCmd.FILE.name(), null);
       if (fileKey == null || !fileKey.isFile()) {
+        target.addExternal("*FILE", depFileName);
         if (verbose) logs.add("Referenced FILE not a build target, ignored: " + depFileName + " (in " + target.asString() + ")");
         continue;
       }

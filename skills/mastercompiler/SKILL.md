@@ -200,6 +200,27 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
 | `joblog` | none | The job's messages since the previous `joblog` call |
+| `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
+| `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there |
+
+### Sources the project does not have
+
+The build report's `external` lists what the sources use that the project does not build
+(`"CUSTSRV *SRVPGM": [targets using it]`): called programs, bound service programs, files,
+data areas. When you need one of them (a called program's parameters, a file's record format,
+a copybook's data structure), call `find_source` with those names, then `import_source`,
+and read the copies under `.mc/sources/`. Import with `into: repo` only when the user wants to
+change that object: it then becomes part of the build and is compiled into their library.
+
+### Db2 queries
+
+For data and catalog questions (columns of a table, which objects use a file, rows in a
+table) use the **Db2 for IBM i** VS Code extension: its "Run SQL statement" tool (`#result`)
+and `@db2i` chat participant use the same Code for IBM i connection. MC has no SQL tool.
+Run only `SELECT` unless the user explicitly asks for a change; that tool executes any
+statement. If it is not installed, suggest the "Db2 for IBM i" extension (`halcyontechltd.vscode-db2i`).
+Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.OBJECT_STATISTICS`, `QSYS2.PROGRAM_INFO`,
+`QSYS2.SYSPARTITIONSTAT` (source members).
 
 In VS Code with Copilot (Windows included), `java -jar MC.jar --setup-vscode --project .` writes
 `.vscode/mcp.json` for you: MC runs on the PC with `--code4i` (the Code for IBM i connection:
@@ -243,5 +264,7 @@ pushing sources before each build:
   scratch library.
 - DDS targets compile from source members; MC migrates the stream file to a member
   first, so their errors name the member (`LIB/QDSPFSRC(NAME)`).
-- Objects of types without `REPLACE` (PF, LF, BNDDIR, DTAARA, DTAQ, MSGF, SQL tables)
-  are deleted and re-created when they already exist, which drops PF/table data.
+- Objects of types without `REPLACE` (PF, LF, DTAARA, DTAQ, MSGF) are deleted and re-created
+  when they already exist, which drops PF data; the report's `warning` says so. SQL tables are
+  never dropped (use `CREATE OR REPLACE TABLE`, which keeps the rows; a plain `CREATE TABLE`
+  fails when it exists), and an existing binding directory is kept (its `ADDBNDDIRE` hooks still run).

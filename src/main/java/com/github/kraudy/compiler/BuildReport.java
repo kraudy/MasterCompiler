@@ -30,6 +30,9 @@ public class BuildReport {
   public int blocked;
   public String error;  // failure outside a target (global hooks, connection, ...)
   public List<TargetResult> targets = new ArrayList<TargetResult>();
+  /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
+     find_source / import_source fetch their sources when an agent needs to read them */
+  public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
 
   public static class TargetResult {
     public String target;

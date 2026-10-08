@@ -431,6 +431,17 @@ public class TargetKey {
     return !this.childs.isEmpty();
   }
 
+  /* Objects the source uses that the project does not build ("*PGM CUSTSRV"), from the dependency scan */
+  private final java.util.Set<String> externals = new java.util.TreeSet<String>();
+
+  public synchronized void addExternal(String objectType, String name) {
+    externals.add(name.toUpperCase() + " " + objectType);
+  }
+
+  public synchronized java.util.Set<String> getExternals() {
+    return new java.util.TreeSet<String>(externals);
+  }
+
   /* synchronized: dependency scanning runs in parallel and many targets add to the same object's lists */
   public synchronized void addChild(TargetKey child) {
     if (child == null) return; /* Prevents nulls */

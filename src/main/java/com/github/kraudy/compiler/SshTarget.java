@@ -29,6 +29,7 @@ import com.jcraft.jsch.UserInfo;
  * Host keys follow OpenSSH's accept-new: an unknown host is trusted and recorded in ~/.ssh/known_hosts,
  * a changed key is refused.
  */
+/* The SFTP methods are synchronized: the proxy's call thread syncs while its response thread downloads */
 public final class SshTarget implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(SshTarget.class);
 
@@ -113,7 +114,7 @@ public final class SshTarget implements AutoCloseable {
   }
 
   /* Size and modification time of a remote file, or null when it does not exist */
-  public SftpATTRS stat(String remote) throws Exception {
+  public synchronized SftpATTRS stat(String remote) throws Exception {
     try {
       return sftp().stat(remote);
     } catch (SftpException e) {
@@ -123,18 +124,18 @@ public final class SshTarget implements AutoCloseable {
   }
 
   /* Upload, creating parent directories, and keep the local modification time (to skip it next time) */
-  public void upload(File local, String remote) throws Exception {
+  public synchronized void upload(File local, String remote) throws Exception {
     mkdirs(remote.substring(0, remote.lastIndexOf('/')));
     sftp().put(local.getPath(), remote, ChannelSftp.OVERWRITE);
     sftp().setMtime(remote, (int) (local.lastModified() / 1000));
   }
 
-  public void upload(byte[] data, String remote) throws Exception {
+  public synchronized void upload(byte[] data, String remote) throws Exception {
     mkdirs(remote.substring(0, remote.lastIndexOf('/')));
     sftp().put(new java.io.ByteArrayInputStream(data), remote, ChannelSftp.OVERWRITE);
   }
 
-  public void mkdirs(String dir) throws Exception {
+  public synchronized void mkdirs(String dir) throws Exception {
     if (dir.isEmpty() || knownDirs.contains(dir)) return;
     if (stat(dir) == null) {
       mkdirs(dir.substring(0, Math.max(0, dir.lastIndexOf('/'))));
@@ -143,11 +144,19 @@ public final class SshTarget implements AutoCloseable {
     knownDirs.add(dir);
   }
 
+  /* Download, keeping the remote modification time (so the next sync does not upload it back) */
+  public synchronized void download(String remote, File local) throws Exception {
+    if (local.getParentFile() != null) local.getParentFile().mkdirs();
+    sftp().get(remote, local.getPath());
+    SftpATTRS attrs = sftp().stat(remote);
+    local.setLastModified(attrs.getMTime() * 1000L);
+  }
+
   /*
    * Every file under a remote directory as relative path -> {size, mtime}: one listing per directory
    * instead of one round trip per file (that matters at 150+ ms per round trip). Empty when it does not exist.
    */
-  public Map<String, long[]> listTree(String dir) throws Exception {
+  public synchronized Map<String, long[]> listTree(String dir) throws Exception {
     Map<String, long[]> files = new HashMap<String, long[]>();
     if (stat(dir) == null) return files;
     listInto(dir, "", files);

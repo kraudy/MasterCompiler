@@ -78,6 +78,11 @@ If your network allows the host servers (ports 449, 8470–8476, the ones ACS us
 | `impact` | What depends on an object. |
 | `clean` | Delete the project's objects from your library (when you ask, e.g. after the demo). It first lists what it would delete; nothing is deleted until you confirm. |
 | `joblog` | The build job's recent messages. |
+| `find_source` | Where programs, service programs and files the project only uses were compiled from, with their copybooks. |
+| `import_source` | Copy those sources into `.mc/sources/` to read them (or into the project, to change them). |
+
+For SQL queries (table columns, data, catalog), Copilot uses the **Db2 for IBM i** extension's "Run SQL
+statement" tool over the same Code for IBM i connection.
 
 The server runs with `--project ${workspaceFolder}`: a `build.yaml` is used when present, a TOBi / Bob project
 (`Rules.mk`) is converted, anything else is scanned.
