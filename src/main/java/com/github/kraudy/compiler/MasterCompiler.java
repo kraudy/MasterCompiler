@@ -480,12 +480,16 @@ public class MasterCompiler{
     }
   }
 
-  /* MCP mode: stderr shows as warnings in VS Code, so keep it to warnings and errors unless -v */
+  /*
+   * MCP mode: stderr shows as warnings in VS Code, so keep it to warnings and errors unless -v,
+   * except the commands MC runs (compiles included), one copy-pasteable line each
+   */
   static void quietLogs(boolean verbose) {
     if (verbose) return;
     ch.qos.logback.classic.LoggerContext context = (ch.qos.logback.classic.LoggerContext) LoggerFactory.getILoggerFactory();
     context.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).setLevel(ch.qos.logback.classic.Level.WARN);
     context.getLogger("com.github.kraudy.compiler").setLevel(ch.qos.logback.classic.Level.WARN);
+    context.getLogger(CommandExecutor.class).setLevel(ch.qos.logback.classic.Level.INFO);
   }
 
   /* Targets never reached are listed as not built, then the report is written (--json) */
