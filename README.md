@@ -14,10 +14,15 @@ MasterCompiler is not **Tool X, but for IBM i**. It is an actual IBM I specific 
 
 YAML-based, sensible, open-source, modern, clean, and elegant approach to automate and streamline object compilation.
 
-> **Setup guide for AI-assisted install:**
-> [skills/mastercompiler-vscode/SKILL.md](https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md),
-> the step-by-step setup (Java, downloading MC, connecting it to Copilot as an MCP server with the Code for IBM i
-> connection, a demo project, and what to confirm with the user before writing anything).
+> **Setup guide for AI-assisted install:** `skills/mastercompiler-vscode/SKILL.md`, the step-by-step setup (Java,
+> downloading MC, connecting it to Copilot as an MCP server with the Code for IBM i connection, a demo project, and
+> what to confirm with the user before writing anything).
+>
+> **Agents: read it at the latest release, not from `master`.** `raw.githubusercontent.com/.../master/...` can serve
+> a cached, older copy for several minutes. Get the release tag, then fetch the guide (and the demo files) at that tag,
+> which matches the jar you download:
+> 1. `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` → `tag_name` (e.g. `v0.3.4`)
+> 2. `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`
 
 ---
 
@@ -210,7 +215,8 @@ reusing their Code for IBM i connection. Once per PC, give Copilot MC's setup sk
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode" | Out-Null
-Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
+$tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/MasterCompiler/releases/latest).tag_name
+Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/skills/mastercompiler-vscode/SKILL.md" -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
 ```
 
 Then, in any repository, ask Copilot in **Agent mode**: *"set up MasterCompiler for this repository"*. It checks Java,

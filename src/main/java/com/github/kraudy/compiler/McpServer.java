@@ -123,8 +123,20 @@ public class McpServer {
         "Builds IBM i objects from the MasterCompiler spec " + specName() + ". " +
         "Call plan to see what would compile, build to compile (errors come back with file, line, " +
         "column, message id and severity; severity 20 and up stop a compile), impact to see what " +
-        "depends on an object, and joblog for the IBM i job's recent messages.");
+        "depends on an object, and joblog for the IBM i job's recent messages." + pendingRequest());
     return result;
+  }
+
+  /* A request saved by --setup-vscode --next in another window: tell the agent it is waiting */
+  private String pendingRequest() {
+    try {
+      File prompt = new File(projectDir(), VscodeSetup.CONTINUE_PROMPT);
+      if (!prompt.isFile()) return "";
+      return " A request from the MasterCompiler setup is waiting in " + VscodeSetup.CONTINUE_PROMPT
+          + " (the user runs it with /mastercompiler-continue): offer to carry it on, and delete that file once done.";
+    } catch (Exception e) {
+      return "";
+    }
   }
 
   private ObjectNode toolsList() {

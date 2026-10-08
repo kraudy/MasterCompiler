@@ -25,7 +25,8 @@ skill there once per PC (PowerShell, no Java needed):
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode" | Out-Null
-Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kraudy/MasterCompiler/master/skills/mastercompiler-vscode/SKILL.md -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
+$tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/MasterCompiler/releases/latest).tag_name   # latest release: master's raw copy can be cached
+Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/skills/mastercompiler-vscode/SKILL.md" -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
 ```
 
 (With MC already downloaded, `java -jar MasterCompiler.jar --install-skills` installs all of MC's skills there.)

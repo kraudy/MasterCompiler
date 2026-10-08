@@ -14,6 +14,13 @@ description: >-
 You may be reading this because the user pointed you at https://github.com/kraudy/MasterCompiler
 and asked to install or try it: this is the guide to follow with them, step by step.
 
+**Read the newest guide, not a cached one.** If you fetched this file from `master`
+(`raw.githubusercontent.com/kraudy/MasterCompiler/master/...`), that URL can serve an older copy
+for several minutes. Get the latest release tag from
+`https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` (`tag_name`) and re-read this
+guide at `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`
+before going on. Download everything else (jar, demo files) at that same tag: they then match.
+
 Goal: the `mastercompiler` MCP server shows up in Copilot's agent mode, so you can call
 `build`, `plan`, `impact`, `find_source`, `import_source` and `joblog`. MC runs on the developer's PC, uploads the
 repository's sources to the IBM i (`--push`), compiles there and returns errors with file
@@ -45,8 +52,10 @@ cmd /c "java -version 2>&1"
 `NativeCommandError` even when it worked; going through `cmd` avoids that.)
 
 MC needs Java 8 or newer; a 64-bit Java is preferred. Setup picks the best Java it finds
-(64-bit first, then the newest, including the one bundled with the Red Hat Java extension) and
-shows it in the preview as "Java for the server". When `java` is not on PATH, look for one that is already installed
+(64-bit first, then one in a stable folder, then the newest) and shows it in the preview as "Java
+for the server". The Red Hat Java extension's bundled Java is used only when there is no other
+64-bit one: its folder name changes when the extension updates, which breaks `mcp.json` until
+setup runs again (the preview warns). Offer a portable 64-bit JDK in that case. When `java` is not on PATH, look for one that is already installed
 before asking the user to install anything:
 
 - VS Code's Red Hat Java extension bundles one:
@@ -67,8 +76,12 @@ Keep it outside the repository, e.g. in the user's tools folder:
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
 New-Item -ItemType Directory -Force "$env:USERPROFILE\tools" | Out-Null
-Invoke-WebRequest -UseBasicParsing -Uri https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar -OutFile "$env:USERPROFILE\tools\MasterCompiler.jar"
+$tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/MasterCompiler/releases/latest).tag_name
+Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/kraudy/MasterCompiler/releases/download/$tag/MasterCompiler.jar" -OutFile "$env:USERPROFILE\tools\MasterCompiler.jar"
 ```
+
+The jar comes from the release tag (not a cached "latest" link), so `--version` must print
+exactly that tag.
 
 macOS / Linux: `curl -L -o ~/tools/MasterCompiler.jar <same URL>`.
 
@@ -78,7 +91,7 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler v0.3.3` or newer.
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.4 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
 Always run the download above, even when `MasterCompiler.jar` is already there: the URL serves
@@ -88,17 +101,28 @@ this path, so nothing else changes; restart the `mastercompiler` server afterwar
 ## 3. Configure the repository
 
 **MC's tools work only in the VS Code window that has the repository open** (the server starts
-with `--project ${workspaceFolder}`). If this chat runs in an empty window or another folder:
-create or pick the folder, run the setup below there, then open it with `code <folder>` and tell
-the user to continue in that window (open Copilot Chat in Agent mode there and say "continue the
-MasterCompiler setup"). Do not try to call MC's tools from the original window.
+with `--project ${workspaceFolder}`). If this chat runs in an empty window or another folder, the
+work continues in a new window, and that window's chat knows nothing of this one. Hand it over:
+
+1. Run the setup below on the repository folder with `--next "<the exact request>"`, e.g.
+   `--next 'call import_source with into: "repo" and members: MYLIB/QRPGLESRC/ORD*,MYLIB/QDDSSRC'`.
+   Setup saves it as `.github/prompts/mastercompiler-continue.prompt.md` (it creates the folder
+   if needed), and MC mentions the waiting request when its server starts.
+2. Open the folder: `code "<folder>"`.
+3. Tell the user exactly what to do there, as numbered steps:
+   1. In the new window, open Copilot Chat and pick **Agent** mode.
+   2. Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, and type the IBM i
+      password in VS Code's prompt.
+   3. In the chat, type `/mastercompiler-continue` and press Enter.
+
+   Also give them the full request as a ready-to-paste chat message, in case the prompt file does
+   not show up. Do not try to call MC's tools from this window.
 
 **Starting a repository from source members** (the user has members in source files, no
-repository yet): create an empty folder, run the setup below in it, open it (`code <folder>`),
-start the server (step 4), then call the `import_source` tool with `members`
-(`LIB/QRPGLESRC/ORD*,LIB/QDDSSRC`) or `objects` and `into: "repo"`. It writes the members with
-MC's names and they become the build. Do not use the command-line `--import` for this: it needs
-the password in the terminal.
+repository yet): create an empty folder and do the handover above with the `import_source` request
+(`members` like `LIB/QRPGLESRC/ORD*,LIB/QDDSSRC`, or `objects`, and `into: "repo"`). It writes the
+members with MC's names and they become the build. Do not use the command-line `--import` for
+this: it needs the password in the terminal.
 
 **No repository yet?** If the user has none open (or just wants to try MC first), offer MC's
 small demo: four sources that build five objects, all named `MCD*` (a table, a module and its
@@ -108,10 +132,11 @@ afterwards.
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/MasterCompiler/releases/latest).tag_name
 $demo = "$env:USERPROFILE\mc-demo"
 New-Item -ItemType Directory -Force $demo | Out-Null
 foreach ($f in 'MCDITEM.table.sql','MCDCALC.srvpgm.rpgle','mcdcalc_p.include.rpgle','MCDHELLO.pgm.sqlrpgle','mc-base.yaml','README.md') {
-  Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/MasterCompiler/master/examples/demo/$f" -OutFile "$demo\$f"
+  Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/examples/demo/$f" -OutFile "$demo\$f"
 }
 code $demo
 ```

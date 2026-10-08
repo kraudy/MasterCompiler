@@ -34,6 +34,7 @@ public class ArgParser {
     VERSION       (null, "version",      Kind.FLAG,  "Print the MasterCompiler version"),
     HELP          ("h", "help",          Kind.FLAG,  "Print this help"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
+    NEXT          (null, "next",         Kind.VALUE, "With --setup-vscode: the request to carry on in the repository's window (Copilot Chat: /mastercompiler-continue)"),
     FROM_TOBI     (null, "from-tobi",    Kind.VALUE, "TOBi / Bob project root: convert its Rules.mk files into an MC spec (and build it)"),
     IMPORT        (null, "import",       Kind.VALUE, "Export source members to -o <dir> as an MC repo + build.yaml: LIB, LIB/SRCPF, LIB/SRCPF/MBR (MBR*), comma-separated"),
     BASE          (null, "base",         Kind.VALUE, "Base overlay YAML for non-inferable params (default: <scan>/mc-base.yaml)"),
@@ -118,6 +119,7 @@ public class ArgParser {
   private boolean installSkills;
   private boolean version;
   private boolean help;
+  private String next;
 
   public ArgParser(String[] args) {
     parse(args);
@@ -252,6 +254,7 @@ public class ArgParser {
       case PUSH:
         push = value;
         break;
+      case NEXT:          next = value; break;
       case IMPORT:
         importSelection = value;
         break;
@@ -295,12 +298,15 @@ public class ArgParser {
     if (hostServers && ssh) {
       throw new IllegalArgumentException("Use either --ssh or --host-servers");
     }
+    if (next != null && !setupVscode) {
+      throw new IllegalArgumentException("--next goes with --setup-vscode");
+    }
     if (print && !setupVscode) {
       throw new IllegalArgumentException("--print goes with --setup-vscode");
     }
     if (setupVscode) {
       if (yamlFile != null || scanRoot != null || tobiRoot != null || mcp || importSelection != null) {
-        throw new IllegalArgumentException("--setup-vscode takes only --project, --connection, --host-servers, --print, -v");
+        throw new IllegalArgumentException("--setup-vscode takes only --project, --connection, --host-servers, --next, --print, -v");
       }
       return;
     }
@@ -408,6 +414,11 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  /** {@code --next}: the request the repository's window carries on with, or null. */
+  public String getNext() {
+    return next;
   }
 
   public boolean isHelp() {

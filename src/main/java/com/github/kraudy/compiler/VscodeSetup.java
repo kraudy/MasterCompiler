@@ -47,6 +47,8 @@ public final class VscodeSetup {
   public static int run(ArgParser parser) throws Exception {
     File project = new File(parser.getProjectRoot() != null ? parser.getProjectRoot() : ".").getCanonicalFile();
     boolean print = parser.isPrint();
+    if (!print) project.mkdirs();  // a new repository (e.g. one import_source will fill)
+    boolean empty = !hasSources(project);
     /* SSH by default: the port Code for IBM i already uses; --host-servers for the ACS ports */
     boolean ssh = !parser.isHostServers();
 
@@ -89,6 +91,11 @@ public final class VscodeSetup {
     if (connections.size() > 1) out.append("  Several connections: you pick one each time the server starts.\n");
 
     out.append("  Java for the server: ").append(java().describe()).append('\n');
+    if (java().inExtension()) {
+      out.append("    WARNING: this Java is inside a VS Code extension folder whose name changes when the extension "
+          + "updates; mcp.json then points at a missing Java. Run setup again after such an update, or install a "
+          + "64-bit JDK (no admin rights needed: unzip one, e.g. Eclipse Temurin) and run setup again.\n");
+    }
     out.append(ssh
         ? "  Over SSH, like Code for IBM i: MC runs on the IBM i (SSH key or password). --host-servers to use the ACS ports instead.\n"
         : "  Through the host servers (ports 449, 8470-8476, like ACS).\n");
@@ -123,16 +130,62 @@ public final class VscodeSetup {
     }
     if (!print) installSkills(skillsDir);
 
+    /* .github/prompts/mastercompiler-continue.prompt.md: the request the new window carries on with */
+    File prompt = new File(project, CONTINUE_PROMPT);
+    if (parser.getNext() != null) {
+      out.append("\n").append(CONTINUE_PROMPT).append('\n')
+          .append(print ? "  would save: " : "  saved: ").append(parser.getNext()).append('\n');
+      if (!print) {
+        prompt.getParentFile().mkdirs();
+        Files.write(prompt.toPath(), continuePrompt(parser.getNext()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      }
+    }
+
+    String third = parser.getNext() != null || prompt.isFile()
+        ? "  3. In Copilot Chat (Agent mode) type /mastercompiler-continue and press Enter: it carries on with\n"
+          + "     the request saved by setup.\n"
+        : empty
+        ? "  3. The folder has no sources yet: ask Copilot to import them, e.g. \"import_source into the repo with\n"
+          + "     members MYLIB/QRPGLESRC/ORD*\" (or objects by name). Then \"plan\" shows what would compile.\n"
+        : "  3. Ask Copilot to \"plan\" first: it lists what would compile and where.\n";
     out.append(print
         ? "\nRun again without --print to write these files.\n"
         : "\nNext:\n"
-            + "  1. Open this folder in VS Code and switch Copilot Chat to Agent mode.\n"
+            + "  1. Open this folder in VS Code (code \"" + project + "\") and, in that window, open Copilot Chat in Agent mode.\n"
             + "  2. Command Palette: \"MCP: List Servers\" > " + SERVER + " > Start"
-            + (connections.size() > 1 ? "; pick the connection," : ",") + " then enter your IBM i password.\n"
-            + "  3. Ask Copilot to \"plan\" first: it lists what would compile and where.\n"
+            + (connections.size() > 1 ? "; pick the connection," : ",") + " then type your IBM i password in VS Code's prompt.\n"
+            + third
             + "  If no MCP servers show up, your organization may have disabled MCP for Copilot: ask your admin.\n");
     System.out.println(out.toString());  // plain text, no logger prefix
     return 0;
+  }
+
+  static final String CONTINUE_PROMPT = ".github/prompts/mastercompiler-continue.prompt.md";
+
+  /* A VS Code prompt file: "/mastercompiler-continue" in Copilot Chat runs it in the repository's window */
+  static String continuePrompt(String request) {
+    return "---\n"
+        + "description: Continue the MasterCompiler setup started in another window\n"
+        + "---\n"
+        + "Continue the MasterCompiler setup in this repository (use Agent mode).\n\n"
+        + "1. Check that the `mastercompiler` MCP server is running. If its tools are missing, tell me to start it:\n"
+        + "   Command Palette > \"MCP: List Servers\" > mastercompiler > Start, and type the IBM i password only in\n"
+        + "   VS Code's prompt (never in this chat or a terminal).\n"
+        + "2. Then do this request from the setup:\n\n"
+        + "   " + request.replace("\n", "\n   ") + "\n\n"
+        + "3. When it is done, delete this file (" + CONTINUE_PROMPT + ") and tell me what to do next\n"
+        + "   (usually: call plan to see what would compile).\n";
+  }
+
+  /* Any file outside dot folders (.git, .vscode, .github, .mc) */
+  private static boolean hasSources(File dir) {
+    File[] kids = dir.listFiles();
+    if (kids == null) return false;
+    for (File kid : kids) {
+      if (kid.getName().startsWith(".")) continue;
+      if (kid.isFile() || hasSources(kid)) return true;
+    }
+    return false;
   }
 
   /* The server (and its inputs) added to an mcp.json content; inputs already there are kept */
@@ -243,6 +296,18 @@ public final class VscodeSetup {
     String describe() {
       return executable + " (Java " + major + ", " + (is64 ? "64" : "32") + "-bit)";
     }
+
+    /* Inside a VS Code extension's versioned folder: gone after the extension updates */
+    boolean inExtension() {
+      return executable.replace('\\', '/').contains("/.vscode/extensions/");
+    }
+
+    /* 64-bit first, then a stable location (not an extension folder), then the newest */
+    boolean betterThan(JavaChoice other) {
+      if (is64 != other.is64) return is64;
+      if (inExtension() != other.inExtension()) return !inExtension();
+      return major > other.major;
+    }
   }
 
   private static JavaChoice chosenJava;
@@ -255,9 +320,10 @@ public final class VscodeSetup {
   static JavaChoice java() {
     if (chosenJava != null) return chosenJava;
     String bits = System.getProperty("sun.arch.data.model", "");
-    JavaChoice best = new JavaChoice(executable(new File(System.getProperty("java.home"))),
-        major(System.getProperty("java.specification.version")),
-        bits.equals("64") || System.getProperty("os.arch", "").contains("64"));
+    String running = executable(new File(System.getProperty("java.home")));
+    Boolean runningIs64 = is64(new File(running));
+    JavaChoice best = new JavaChoice(running, major(System.getProperty("java.specification.version")),
+        runningIs64 != null ? runningIs64 : bits.equals("64") || System.getProperty("os.arch", "").contains("64"));
 
     List<File> homes = new ArrayList<File>();
     if (System.getenv("JAVA_HOME") != null) homes.add(new File(System.getenv("JAVA_HOME")));
@@ -272,9 +338,7 @@ public final class VscodeSetup {
     }
     for (File home : homes) {
       JavaChoice candidate = fromRelease(home);
-      if (candidate != null && (candidate.is64 && !best.is64 || candidate.is64 == best.is64 && candidate.major > best.major)) {
-        best = candidate;
-      }
+      if (candidate != null && candidate.betterThan(best)) best = candidate;
     }
     chosenJava = best;
     return best;
@@ -294,8 +358,35 @@ public final class VscodeSetup {
         if (line.startsWith("OS_ARCH=")) arch = value;
       }
       if (version == null || major(version) < 8) return null;
-      return new JavaChoice(exe.getAbsolutePath(), major(version), arch.contains("64"));
+      Boolean is64 = is64(exe);  // the executable itself: some release files have no OS_ARCH
+      return new JavaChoice(exe.getAbsolutePath(), major(version), is64 != null ? is64 : arch.contains("64"));
     } catch (Exception unreadable) {
+      return null;
+    }
+  }
+
+  /* 64-bit executable? From its header: PE (Windows), ELF (Linux, AIX/PASE), Mach-O (macOS); null when unknown */
+  static Boolean is64(File exe) {
+    try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(exe, "r")) {
+      byte[] head = new byte[4];
+      file.readFully(head);
+      if (head[0] == 'M' && head[1] == 'Z') {
+        file.seek(0x3c);
+        int pe = Integer.reverseBytes(file.readInt());
+        file.seek(pe + 4);
+        int machine = Short.reverseBytes(file.readShort()) & 0xffff;
+        return machine == 0x8664 || machine == 0xaa64 || machine == 0x0200;  // x64, ARM64, IA-64
+      }
+      if (head[0] == 0x7f && head[1] == 'E' && head[2] == 'L' && head[3] == 'F') {
+        file.seek(4);
+        return file.readByte() == 2;  // ELFCLASS64
+      }
+      int magic = ((head[0] & 0xff) << 24) | ((head[1] & 0xff) << 16) | ((head[2] & 0xff) << 8) | (head[3] & 0xff);
+      if (magic == 0xcffaedfe || magic == 0xfeedfacf) return true;
+      if (magic == 0xcefaedfe || magic == 0xfeedface) return false;
+      if (magic == 0xcafebabe) return true;  // universal binary: has a 64-bit slice on current macOS
+      return null;
+    } catch (Exception e) {
       return null;
     }
   }
