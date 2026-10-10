@@ -280,10 +280,47 @@ a copybook's data structure), call `find_source` with those names, then `import_
 and read the copies under `.mc/sources/`. Import with `into: "repo"` only when the user wants to
 change that object: it then becomes part of the build and is compiled into their library.
 
+### Test data
+
+Test data belongs in the test that needs it, not in MC: an RPGUnit test (SQLRPGLE) inserts its rows
+in `setUp` and deletes them in `tearDown`, so every run starts from the same data and leaves nothing
+behind. The rows live in the developer's current library (where MC builds), never in a production
+or `protectedLibs` library:
+
+```rpgle
+**free
+ctl-opt nomain;
+/include qinclude,TESTCASE           // RPGUnit's prototypes (assert, aEqual, iEqual, ...)
+
+dcl-proc setUp export;
+  exec sql set option commit = *none, naming = *sys;
+  exec sql delete from TABLE1 where COL1 = 'T01';     // unqualified: the current library first
+  exec sql insert into TABLE1 (COL1, COL2, COL3)
+           values ('T01', 'test row', 12.50);
+end-proc;
+
+dcl-proc tearDown export;
+  exec sql delete from TABLE1 where COL1 = 'T01';
+end-proc;
+
+dcl-proc test_reads_the_row export;
+  dcl-s total packed(9:2);
+  exec sql select COL3 into :total from TABLE1 where COL1 = 'T01';
+  iEqual(0 : sqlcode);
+  assert(total = 12.50 : 'COL3 of the test row');
+end-proc;
+```
+
+- Keep test keys apart from real ones (a prefix such as `T`), and delete by those keys only, never a
+  whole table.
+- Insert every column the program reads, with literal values written in the test. To copy a real
+  row's shape, read it with the `sql` tool and type its values in, replacing personal data.
+- Build the test with the project like any other source, then compile and run it with the commands
+  of the RPGUnit installed on that IBM i (`RUCALLTST` runs a test service program).
+
 ### Quick checks
 
-Test data belongs in the tests themselves (e.g. an RPGUnit test inserting its rows with SQL), not in
-MC. Loop for logic changes: edit → `build` (changed files) → `call_program` with the parameters →
+Loop for logic changes: edit → `build` (changed files) → `call_program` with the parameters →
 read the returned parameters and messages. A fixed-length message (a data structure) is one `char`
 parameter of its full length: build the string with the fields at their positions.
 

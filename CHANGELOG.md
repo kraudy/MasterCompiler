@@ -6,7 +6,8 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
 ## v0.3.9
 
 Removed
-- The `seed` tool and `seeds.yaml`: test data belongs in the tests (e.g. an RPGUnit test inserting its rows with SQL).
+- The `seed` tool and `seeds.yaml`: test data belongs in the tests; the skill shows an RPGUnit test inserting its rows
+  with SQL in setUp and removing them in tearDown.
 
 Read-only connections
 - `connections:` in the spec: `build` (tools refuse to run on another connection) and `readOnly` systems with the
