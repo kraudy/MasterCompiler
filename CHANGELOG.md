@@ -3,6 +3,14 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.10
+
+- `copy_rows`, data from one system to another without `seeds.yaml`: rows of a table on a read-only connection
+  inserted into the current library with their exact values; `set` replaces columns there (masked columns must be
+  replaced), `deleteWhere` clears the target rows first, more than `maxRows` fails, preview then `confirm`,
+  confirmed copies logged in `.mc/copies.log`.
+- `maskColumns` also apply to `copy_rows`: those columns must be replaced in `set`.
+
 ## v0.3.9
 
 Removed

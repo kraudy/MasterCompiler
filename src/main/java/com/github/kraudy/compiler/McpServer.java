@@ -313,6 +313,29 @@ public class McpServer {
         + "changed?\". Reads only.",
         compareSchema));
 
+    ObjectNode copySchema = mapper.createObjectNode();
+    copySchema.put("type", "object");
+    ObjectNode copyProps = copySchema.putObject("properties");
+    copyProps.putObject("connection").put("type", "string")
+        .put("description", "The read-only connection to read from (connections.readOnly in the spec; default: the only one)");
+    copyProps.putObject("from").put("type", "string").put("description", "Table there: LIB/TABLE (one of its libraries) or TABLE");
+    copyProps.putObject("where").put("type", "string").put("description", "Which rows (SQL condition, run there)");
+    copyProps.putObject("set").put("type", "object")
+        .put("description", "Columns replaced there by SQL expressions, e.g. {\"COL2\": \"'TEST'\"} (quote strings); masked columns must be");
+    copyProps.putObject("to").put("type", "string").put("description", "Table in the current library (default: the same name as from)");
+    copyProps.putObject("deleteWhere").put("type", "string")
+        .put("description", "Optional: delete these rows from the target first, so copying again gives the same rows");
+    copyProps.putObject("confirm").put("type", "boolean")
+        .put("description", "false (default): show what would be copied. true: copy, after the user agreed");
+    copySchema.putArray("required").add("from");
+    tools.add(tool("copy_rows",
+        "Copy rows from a table on a read-only connection into a table of the current library on the build system, "
+        + "with their exact values (no retyping, no rounding). 'set' replaces columns on the other system, so replaced "
+        + "values (e.g. personal data) never leave it; columns the connection masks must be replaced. Never writes to a "
+        + "protectedLibs library or outside the current library. First call without confirm and show the user the rows "
+        + "and statements; call again with confirm: true only if they agree. Confirmed copies are logged in .mc/copies.log.",
+        copySchema));
+
     ObjectNode statusSchema = mapper.createObjectNode();
     statusSchema.put("type", "object");
     statusSchema.putObject("properties");
@@ -386,6 +409,10 @@ public class McpServer {
     info.put("type", "object");
     info.putObject("properties").putObject("object").put("type", "string");
     tools.add(tool("object_info", "An object's create, change and source timestamps (for compare)", info));
+    ObjectNode export = mapper.createObjectNode();
+    export.put("type", "object");
+    export.putObject("properties").putObject("from").put("type", "string");
+    tools.add(tool("export_rows", "Rows of a table, typed, for copy_rows on the build system", export));
     ObjectNode status = mapper.createObjectNode();
     status.put("type", "object");
     status.putObject("properties");
@@ -428,7 +455,7 @@ public class McpServer {
     tool.put("description", description);
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
-    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program");
+    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
     annotations.put("readOnlyHint", !writes);
@@ -450,6 +477,7 @@ public class McpServer {
     try {
       switch (name) {
         case "compare":       return compare(args);
+        case "copy_rows":     return copyRows(args);
         case "build":  return build(args, false);
         case "plan":   return build(args, true);
         case "impact": return impact(args);
@@ -494,6 +522,17 @@ public class McpServer {
           connect();
           return toolResult(pretty.writeValueAsString(new SqlTools().objectInfo(connection,
               args.path("object").asText(""), args.path("type").asText(null))), false);
+        case "export_rows": {
+          connect();
+          java.util.Map<String, String> set = new java.util.LinkedHashMap<String, String>();
+          java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = args.path("set").fields();
+          while (fields.hasNext()) {
+            java.util.Map.Entry<String, JsonNode> f = fields.next();
+            set.put(f.getKey(), f.getValue().asText());
+          }
+          return toolResult(mapper.writeValueAsString(new SqlTools(maxRows, mask).exportRows(connection,
+              args.path("from").asText(""), args.path("where").asText(null), set, args.path("maxRows").asInt(0), readLibs)), false);
+        }
         default: return toolResult(name + " does not run on a read-only connection (it reads only " + readLibs + ")", true);
       }
     } catch (Exception e) {
@@ -719,6 +758,25 @@ public class McpServer {
     ArrayNode prot = result.putArray("protectedLibs");
     for (String lib : protectedLibs()) prot.add(lib);
     return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* copy_rows: the rows the router read on the other system, inserted into the current library */
+  private ObjectNode copyRows(JsonNode args) throws Exception {
+    if (!args.has("fetched")) {
+      return toolResult("copy_rows runs from MasterCompiler on the PC (the mastercompiler MCP server in VS Code), which "
+          + "reads the other system; it needs connections.readOnly in the spec", true);
+    }
+    connectWithLibraryList();
+    String from = args.path("from").asText("").trim();
+    String to = args.path("to").asText("").trim();
+    if (to.isEmpty()) to = from.substring(from.replace('.', '/').lastIndexOf('/') + 1);
+    String target = RowCopier.target(to, currentLibrary(), protectedLibs());
+    boolean confirm = args.path("confirm").asBoolean(false);
+    try (Connection writer = confirm ? RowCopier.writeConnection(system, SqlTools.libraryList(connection)) : null) {
+      ObjectNode result = RowCopier.copy(args.get("fetched"), args.path("fromConnection").asText(), target,
+          args.path("deleteWhere").asText(null), connection, writer);
+      return toolResult(pretty.writeValueAsString(result), false);
+    }
   }
 
   private List<String> protectedLibs() {

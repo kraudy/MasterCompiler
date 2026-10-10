@@ -240,6 +240,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `joblog` | none | The job's messages since the previous `joblog` call |
 | `sql` | `statement`, `maxRows`, `maxColumns`, `connection` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
 | `find_object` | `name`, `type`, `connection` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
+| `copy_rows` | `connection`, `from`, `where`, `set`, `to`, `deleteWhere`, `confirm` | Copies rows from a table on a read-only connection into a table of the current library (see below). Without `confirm`: the rows, the first three and the statements; show them to the user, then call with `confirm: true` |
 | `compare` | `object`, `type`, `connection` | The object on the build system and on a read-only connection side by side (library, create / change timestamps, per module the source member, the source change timestamp its compile recorded, the module's create timestamp), `differences` and `sameRecordedSource` |
 | `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`; over SSH also the host and the start-up stage. Call it first when something looks off |
 | `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
@@ -250,7 +251,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 ### Other IBM i systems (read-only connections)
 
 The spec can name the system builds go to and other systems the tools may only read, e.g. to check
-what runs in production:
+what runs in production or to bring rows from it into the development library:
 
 ```yaml
 connections:
@@ -258,8 +259,8 @@ connections:
   readOnly:
     - name: SYS2               # a Code for IBM i connection
       libraries: [LIB1, LIB2]  # the only libraries read there (also its library list)
-      maxRows: 500             # most rows one query reads there (default 1000)
-      maskColumns: [COL3]      # sql shows their values masked (personal data)
+      maxRows: 500             # most rows one query or copy reads there (default 1000)
+      maskColumns: [COL3]      # sql shows them masked; copy_rows must replace them in set
 ```
 
 - `sql`, `find_object` and `find_source` take `connection: SYS2` to read that system instead. Only
@@ -268,6 +269,14 @@ connections:
   hides those values in `sql` results (best effort: a column inside an expression is not masked).
 - `compare` with `object` shows the object on both systems: whether the other system runs the
   source you changed (same source member and recorded source change timestamp per module).
+- `copy_rows` reads rows there (`from`, `where`) and inserts them into a table of the current library on
+  the build system (`to`, default the same name) with their exact values: numbers, dates and timestamps
+  are not retyped or rounded. `set` replaces columns on the other system (SQL expressions, quote
+  strings), so replaced values never leave it; `maskColumns` must be replaced. `deleteWhere` clears
+  those rows in the target first, so copying again gives the same rows. Never into a `protectedLibs`
+  library or outside the current library. More rows than `maxRows` fail instead of copying part.
+  Preview first, then `confirm: true`; confirmed copies are logged in `.mc/copies.log`. When the
+  other system holds personal data, the user's company rules may require replacing it.
 - MC opens a read-only connection on first use. Its password comes from its own VS Code password
   prompt (`--setup-vscode` adds one per read-only connection in the spec); never ask for it in chat.
 
@@ -313,8 +322,10 @@ end-proc;
 
 - Keep test keys apart from real ones (a prefix such as `T`), and delete by those keys only, never a
   whole table.
-- Insert every column the program reads, with literal values written in the test. To copy a real
-  row's shape, read it with the `sql` tool and type its values in, replacing personal data.
+- Insert every column the program reads, with literal values written in the test. To start from
+  real rows, read them with the `sql` tool (also on a read-only connection) and write their values
+  into the test, replacing personal data. To have real rows in the development library for a manual
+  check, `copy_rows` brings them from a read-only connection.
 - Build the test with the project like any other source, then compile and run it with the commands
   of the RPGUnit installed on that IBM i (`RUCALLTST` runs a test service program).
 

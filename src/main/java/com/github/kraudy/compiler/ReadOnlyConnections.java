@@ -28,14 +28,15 @@ import com.jcraft.jsch.ChannelExec;
  *     readOnly:
  *       - name: SYS2               # a Code for IBM i connection
  *         libraries: [LIB1, LIB2]  # the only libraries read there (its library list)
- *         maxRows: 500             # most rows one query reads (default 1000)
- *         maskColumns: [COL3]      # shown masked by sql
+ *         maxRows: 500             # most rows one query or copy reads (default 1000)
+ *         maskColumns: [COL3]      # shown masked by sql; copy_rows must replace them (set)
  *
  * MC on the PC (the MCP server VS Code starts) routes here: sql, find_object and find_source with
- * connection: SYS2 run there; compare reads the object there. Each read-only connection is a second
+ * connection: SYS2 run there; compare reads the object there; copy_rows reads rows there and hands them to the
+ * build system's MC, which inserts them into the current library. Each read-only connection is a second
  * MC started with --read-only (over SSH on that system, or in this process over the host servers), opened on
  * first use, with a read-only JDBC connection; it has no tool that writes. Its password, when SSH has no key,
- * comes from IBMI_PASSWORD_<NAME> (a VS Code password prompt).
+ * comes from IBMI_PASSWORD_<NAME> (a VS Code password prompt). Confirmed copies are logged in .mc/copies.log.
  */
 final class ReadOnlyConnections {
   private static final Logger logger = LoggerFactory.getLogger(ReadOnlyConnections.class);
@@ -122,7 +123,7 @@ final class ReadOnlyConnections {
 
     /*
      * A tool result when the call is for a read-only connection (or refused), null when the build system's MC
-     * answers it. For that MC the call is made ready: 'connection' removed, compare given what the
+     * answers it. For that MC the call is made ready: 'connection' removed, compare and copy_rows given what the
      * other system holds.
      */
     ObjectNode handle(String tool, ObjectNode args) {
@@ -133,6 +134,7 @@ final class ReadOnlyConnections {
         return error("connections in the spec: " + e.getMessage());
       }
       args.remove("otherInfo");      // only this router fills them
+      args.remove("fetched");
       args.remove("otherConnection");
       if (config.build != null && connected != null && !config.build.equalsIgnoreCase(connected) && !tool.equals("status")) {
         return error("The spec builds on the connection " + config.build + " (connections.build), but this server is "
@@ -143,6 +145,7 @@ final class ReadOnlyConnections {
       boolean other = !target.isEmpty() && !target.equalsIgnoreCase(config.build) && !target.equalsIgnoreCase(connected);
       try {
         if (tool.equals("compare")) return compare(config, target, args);
+        if (tool.equals("copy_rows")) return copyRows(config, target, args);
         if (!other) return null;
         ReadOnly ro = config.readOnly.get(target.toUpperCase(Locale.ROOT));
         if (ro == null) return error(unknown(config, target));
@@ -172,6 +175,44 @@ final class ReadOnlyConnections {
       if (config.build != null) args.put("buildConnection", config.build);
       else if (connected != null) args.put("buildConnection", connected);
       return null;
+    }
+
+    /* copy_rows: the rows read now on the read-only connection, for the build system's MC to insert */
+    private ObjectNode copyRows(ReadOnlyConnections config, String target, ObjectNode args) throws Exception {
+      if (target.isEmpty() && config.readOnly.size() == 1) target = config.readOnly.values().iterator().next().name;
+      ReadOnly ro = config.readOnly.get(target.toUpperCase(Locale.ROOT));
+      if (ro == null) return error(target.isEmpty() ? "copy_rows needs the read-only 'connection' to read from" : unknown(config, target));
+      if (args.path("from").asText("").trim().isEmpty()) return error("Give 'from': the table to read on " + ro.name);
+      ObjectNode request = mapper.createObjectNode();
+      request.put("from", args.path("from").asText());
+      if (args.hasNonNull("where")) request.put("where", args.path("where").asText());
+      request.set("set", args.path("set").isObject() ? args.get("set") : mapper.createObjectNode());
+      JsonNode result = backend(ro).call("export_rows", request);
+      if (result.path("isError").asBoolean(false)) return (ObjectNode) result;
+      JsonNode rows = mapper.readTree(result.path("content").path(0).path("text").asText("{}"));
+      args.set("fetched", rows);
+      args.put("fromConnection", ro.name);
+      if (args.path("confirm").asBoolean(false)) logCopy(ro, rows, args);
+      return null;
+    }
+
+    /* .mc/copies.log: one line per confirmed copy_rows */
+    private void logCopy(ReadOnly ro, JsonNode rows, JsonNode args) {
+      try {
+        File log = new File(project, ".mc/copies.log");
+        log.getParentFile().mkdirs();
+        ObjectNode line = mapper.createObjectNode();
+        line.put("time", java.time.OffsetDateTime.now().toString());
+        line.put("fromConnection", ro.name);
+        line.put("read", rows.path("statement").asText());
+        line.put("rows", rows.path("rows").size());
+        line.put("to", args.path("to").asText(args.path("from").asText()));
+        if (rows.has("replaced")) line.set("replaced", rows.get("replaced"));
+        java.nio.file.Files.write(log.toPath(), (mapper.writeValueAsString(line) + "\n").getBytes(StandardCharsets.UTF_8),
+            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+      } catch (Exception e) {
+        logger.warn("Could not write .mc/copies.log: {}", e.getMessage());
+      }
     }
 
     private Backend backend(ReadOnly ro) throws Exception {
