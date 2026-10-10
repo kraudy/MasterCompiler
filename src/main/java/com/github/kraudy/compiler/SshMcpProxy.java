@@ -217,6 +217,10 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
+      if (tool.equals("seed") || tool.equals("call_program") || tool.equals("find_export")) {
+        sync(projectFiles(), true);  // they read seeds.yaml or the sources in the IBM i copy
+        return line;
+      }
       if (tool.equals("import_source")) {
         sync(projectFiles(), true);  // "repo" keeps files already there: the IBM i copy must be current
         pendingImports.add(request.path("id").toString());

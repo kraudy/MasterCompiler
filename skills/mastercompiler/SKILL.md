@@ -232,6 +232,8 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `joblog` | none | The job's messages since the previous `joblog` call |
 | `sql` | `statement`, `maxRows`, `maxColumns` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
 | `find_object` | `name`, `type` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
+| `seed` | `names`, `confirm` | Runs the project's `seeds.yaml` (see below). Without `confirm`: the SQL it would run; show it to the user, then call with `confirm: true` |
+| `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
 | `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
@@ -244,6 +246,30 @@ data areas. When you need one of them (a called program's parameters, a file's r
 a copybook's data structure), call `find_source` with those names, then `import_source`,
 and read the copies under `.mc/sources/`. Import with `into: repo` only when the user wants to
 change that object: it then becomes part of the build and is compiled into their library.
+
+### Test data and quick checks
+
+`seeds.yaml` in the project root holds the test rows a program needs, so they can be put back any
+time (replacing a hand-kept list of SQL):
+
+```yaml
+seedLibs: [TESTLIB]               # besides the current library, the only libraries seeds write to
+seeds:
+  - name: seed1
+    to: TABLE1                    # unqualified: the current library, never the library list
+    from: APPLIB/TABLE1           # copy rows from anywhere (read only) ...
+    where: "COL1 = 'A01'"
+    set: { COL2: "'X'" }       # ... replacing these columns (SQL expressions: quote strings)
+    deleteWhere: "COL1 = 'A01'"  # cleared first, so replaying gives the same rows
+  - name: seed2
+    to: TABLE2
+    values: { COL1: 1, COL2: "'test'" }   # one literal row
+```
+
+A target in a `protectedLibs` library is always refused. Loop for logic changes: edit → `build`
+(changed files) → `seed` if the data changed → `call_program` with the parameters → read the
+returned parameters and messages. A fixed-length message (a data structure) is one `char`
+parameter of its full length: build the string with the fields at their positions.
 
 ### Db2 queries and objects
 

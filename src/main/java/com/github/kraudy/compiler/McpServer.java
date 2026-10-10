@@ -246,6 +246,41 @@ public class McpServer {
         + "and project sources that export it. Use it on binder errors (CPD5D02, CPD5D03).",
         findExp));
 
+    ObjectNode seedSchema = mapper.createObjectNode();
+    seedSchema.put("type", "object");
+    ObjectNode seedProps = seedSchema.putObject("properties");
+    ObjectNode seedNames = seedProps.putObject("names");
+    seedNames.put("type", "array");
+    seedNames.putObject("items").put("type", "string");
+    seedNames.put("description", "Seeds to run (default: all in seeds.yaml)");
+    seedProps.putObject("confirm").put("type", "boolean")
+        .put("description", "false (default): only show the SQL. true: run it, after the user agreed");
+    tools.add(tool("seed",
+        "Test data from the project's seeds.yaml: copy rows (from / where / set) or insert a row (values) into tables of the "
+        + "current library or seedLibs; never into a protectedLibs library. First call without confirm and show the "
+        + "statements to the user; call again with confirm: true only if they agree. Seeds with deleteWhere replay cleanly.",
+        seedSchema));
+
+    ObjectNode callSchema = mapper.createObjectNode();
+    callSchema.put("type", "object");
+    ObjectNode callProps = callSchema.putObject("properties");
+    callProps.putObject("program").put("type", "string").put("description", "Program the project builds, in the current library");
+    ObjectNode callParams = callProps.putObject("parameters");
+    callParams.put("type", "array");
+    callParams.putObject("items").put("type", "object");
+    callParams.put("description", "In order: {type: char, length, value} | {type: packed|zoned, digits, decimals, value} | "
+        + "{type: int, bytes: 2|4|8, value}. No value: output only. A data structure (e.g. a fixed-length message) is one char "
+        + "parameter of its full length");
+    callProps.putObject("confirm").put("type", "boolean")
+        .put("description", "false (default): show what would run and which files the program can change. true: run it, after the user agreed");
+    callSchema.putArray("required").add("program");
+    tools.add(tool("call_program",
+        "Run a program this project builds (in the current library) with typed parameters and return the parameters as the "
+        + "program left them, its success and messages, to check logic right after a build. Refused when the program can "
+        + "write to a file in a protectedLibs library (or when it writes files and the spec sets no protectedLibs). First "
+        + "call without confirm and show the user what it would do; call again with confirm: true only if they agree.",
+        callSchema));
+
     tools.add(tool("import_source",
         "Copy sources from the IBM i into the project folder, named with MC's conventions (copybooks as "
         + "*.include.*). Takes the objects (it finds their sources and /COPY members like find_source) or source "
@@ -296,7 +331,7 @@ public class McpServer {
     tool.put("description", description);
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
-    boolean destructive = name.equals("build") || name.equals("clean");
+    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("seed") || name.equals("call_program");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
     annotations.put("readOnlyHint", !writes);
@@ -319,6 +354,8 @@ public class McpServer {
         case "sql":           return sql(args);
         case "find_object":   return findObject(args);
         case "find_export":   return findExport(args);
+        case "seed":          return seed(args);
+        case "call_program":  return callProgram(args);
         case "import_source": return importSource(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -499,6 +536,89 @@ public class McpServer {
     if (name.isEmpty()) return toolResult("Give the object 'name'", true);
     connectWithLibraryList();
     return toolResult(pretty.writeValueAsString(new SqlTools().findObject(connection, name, args.path("type").asText(null))), false);
+  }
+
+  private ObjectNode seed(JsonNode args) throws Exception {
+    File seedsFile = new File(projectDir(), "seeds.yaml");
+    if (!seedsFile.isFile()) {
+      return toolResult("No seeds.yaml in the project. Create one (see the mastercompiler skill: seedLibs, seeds with to, from / where / set "
+          + "or values, deleteWhere) and call seed again.", true);
+    }
+    SeedRunner.SeedFile seeds = SeedRunner.load(seedsFile);
+    connectWithLibraryList();
+    List<String> names = new java.util.ArrayList<String>();
+    for (JsonNode n : args.path("names")) names.add(n.asText());
+    List<String> libl = SqlTools.libraryList(connection);
+    boolean confirm = args.path("confirm").asBoolean(false);
+    try (Connection writer = confirm ? SeedRunner.writeConnection(system, libl) : null) {
+      ObjectNode result = SeedRunner.run(connection, writer, seeds, names, currentLibrary(), protectedLibs(), confirm);
+      return toolResult(pretty.writeValueAsString(result), false);
+    }
+  }
+
+  private List<String> protectedLibs() {
+    try {
+      return loadSpec().protectedLibs;
+    } catch (Exception noSpec) {
+      return new java.util.ArrayList<String>();
+    }
+  }
+
+  private ObjectNode callProgram(JsonNode args) throws Exception {
+    String requested = args.path("program").asText("").trim().toUpperCase();
+    if (requested.isEmpty()) return toolResult("Give the 'program'", true);
+    connectWithLibraryList();
+    String curlib = currentLibrary();
+    String library = requested.contains("/") ? requested.substring(0, requested.indexOf('/')) : curlib;
+    String program = requested.substring(requested.indexOf('/') + 1);
+    if (!library.equalsIgnoreCase(curlib)) {
+      return toolResult("call_program runs only programs in the current library (" + curlib + "), not " + library + ".", true);
+    }
+
+    /* A program the project builds, so its source can be checked */
+    BuildSpec spec = loadSpec();
+    TargetKey target = null;
+    for (TargetKey key : spec.targets.keySet()) {
+      if (key.getObjectName().equalsIgnoreCase(program) && key.getObjectTypeEnum() == CompilationPattern.ObjectType.PGM) target = key;
+    }
+    if (target == null || !target.containsStreamFile()) {
+      return toolResult(program + " is not a program this project builds from a source file: call_program only runs those "
+          + "(their source is checked for writes to protected libraries first).", true);
+    }
+    File source = new File(target.getStreamFile());
+    if (!source.isAbsolute()) source = new File(spec.getBaseDirectory() != null ? spec.getBaseDirectory() : projectDir().getPath(), target.getStreamFile());
+
+    ObjectNode result = mapper.createObjectNode();
+    result.put("program", curlib + "/" + program);
+    ArrayNode writes = result.putArray("writes");
+    List<String> forbidden = new java.util.ArrayList<String>();
+    for (java.util.Map.Entry<String, java.util.TreeSet<String>> file : FileWrites.parse(
+        java.nio.file.Files.readAllLines(source.toPath(), java.nio.charset.StandardCharsets.UTF_8)).entrySet()) {
+      String name = file.getKey();
+      String lib = name.contains("/") ? name.substring(0, name.indexOf('/'))
+          : new SqlTools().findObject(connection, name, "*FILE").path("resolvesTo").asText("");
+      if (lib.contains("/")) lib = lib.substring(0, lib.indexOf('/'));
+      String line = name.substring(name.indexOf('/') + 1) + " " + String.join("/", file.getValue()) + " -> " + (lib.isEmpty() ? "?" : lib);
+      writes.add(line);
+      final String l = lib;
+      if (spec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(l))) forbidden.add(line);
+    }
+    if (!forbidden.isEmpty()) {
+      return toolResult("Refused: " + program + " can write to a protected library: " + String.join("; ", forbidden), true);
+    }
+    if (writes.size() > 0 && spec.protectedLibs.isEmpty()) {
+      return toolResult("Refused: " + program + " can change files (" + writes + ") and the spec sets no protectedLibs, so "
+          + "nothing keeps it from production data. Add protectedLibs: [<production libraries>] to the spec first.", true);
+    }
+    result.set("parameters", args.path("parameters"));
+    if (!args.path("confirm").asBoolean(false)) {
+      result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
+      return toolResult(pretty.writeValueAsString(result), false);
+    }
+    ObjectNode ran = ProgramCaller.call(system, curlib, program, args.path("parameters").isArray()
+        ? args.path("parameters") : mapper.createArrayNode(), SqlTools.libraryList(connection), curlib);
+    ran.set("writes", writes);
+    return toolResult(pretty.writeValueAsString(ran), !ran.path("success").asBoolean(false));
   }
 
   private ObjectNode findExport(JsonNode args) throws Exception {
