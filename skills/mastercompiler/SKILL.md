@@ -72,6 +72,8 @@ targets:             # compiled in this order: dependencies first
 ### Hooks, protected libraries, binding directories
 
 ```yaml
+curlib: DEVLIB                 # library settings for the build job (CHGLIBL / CHGCURLIB before any hook);
+libl: [DEVLIB, APPLIB]         # also allowed alone in mc-base.yaml for scanned projects
 protectedLibs: [PRODLIB]       # a program that can write to a file resolving here fails before compiling
 before:
   - ChgLibl: { LibL: "DEVLIB APPLIB" }       # also applied by plan, find_source, sql, ...
@@ -84,6 +86,12 @@ targets:
     recreate: true               # delete and create it: only the spec's ADDBNDDIRE entries remain
 ```
 
+- A **binding directory target** (`curlib.NAME.bnddir.bnddir`) is created once and then kept between
+  builds; its `ADDBNDDIRE` hooks run on every build (an entry already there is not an error).
+  Entries for project modules and service programs are qualified with the current library's name;
+  other names keep what you wrote (unqualified is `*LIBL`). `recreate: true` deletes and creates it,
+  so a wrong entry does not stick. Reports show, per target, which library each binding directory
+  it uses resolves to (`bindingDirectories`), so an older copy earlier on the library list is visible.
 - Commands MC knows are validated (params and values); other names (shop commands) are sent
   as written, so a misspelled command name only fails when it runs.
 - Each RPG / COBOL target lists in `writes` the database files it can change (F-specs U/O/A,
@@ -232,11 +240,12 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `joblog` | none | The job's messages since the previous `joblog` call |
 | `sql` | `statement`, `maxRows`, `maxColumns` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
 | `find_object` | `name`, `type` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
+| `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`; over SSH also the host and the start-up stage. Call it first when something looks off |
 | `seed` | `names`, `confirm` | Runs the project's `seeds.yaml` (see below). Without `confirm`: the SQL it would run; show it to the user, then call with `confirm: true` |
 | `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
-| `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
+| `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun`, `refresh` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
 
 ### Sources the project does not have
 
@@ -244,7 +253,7 @@ The build report's `external` lists what the sources use that the project does n
 (`"CUSTSRV *SRVPGM": [targets using it]`): called programs, bound service programs, files,
 data areas. When you need one of them (a called program's parameters, a file's record format,
 a copybook's data structure), call `find_source` with those names, then `import_source`,
-and read the copies under `.mc/sources/`. Import with `into: repo` only when the user wants to
+and read the copies under `.mc/sources/`. Import with `into: "repo"` only when the user wants to
 change that object: it then becomes part of the build and is compiled into their library.
 
 ### Test data and quick checks

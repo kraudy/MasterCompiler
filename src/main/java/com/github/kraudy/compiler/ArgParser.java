@@ -121,6 +121,7 @@ public class ArgParser {
   private boolean version;
   private boolean help;
   private String next;
+  private String nextFile;  // --next-file: removed once setup saved the request
 
   public ArgParser(String[] args) {
     parse(args);
@@ -256,7 +257,7 @@ public class ArgParser {
         push = value;
         break;
       case NEXT:          next = value; break;
-      case NEXT_FILE:     next = readNextFile(value); break;
+      case NEXT_FILE:     next = readNextFile(value); nextFile = value; break;
       case IMPORT:
         importSelection = value;
         break;
@@ -432,6 +433,10 @@ public class ArgParser {
   /** {@code --next} / {@code --next-file}: the request the repository's window carries on with, or null. */
   public String getNext() {
     return next;
+  }
+
+  public String getNextFile() {
+    return nextFile;
   }
 
   public boolean isHelp() {

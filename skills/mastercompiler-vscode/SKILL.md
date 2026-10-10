@@ -110,7 +110,7 @@ work continues in a new window, and that window's chat knows nothing of this one
 1. Write the exact request to a text file and pass it with `--next-file` (Windows PowerShell 5.1
    drops inner double quotes from `--next "..."` arguments):
    ```powershell
-   Set-Content -Encoding UTF8 "$env:TEMP\mc-next.txt" 'call import_source with into repo and members MYLIB/QRPGLESRC/ORD*,MYLIB/QDDSSRC'
+   Set-Content -Encoding UTF8 "$env:TEMP\mc-next.txt" 'call import_source with into: "repo" and members MYLIB/QRPGLESRC/ORD*,MYLIB/QDDSSRC'
    ```
    When the request is about one IBM i (where the members are) and the user has several Code for
    IBM i connections, also pass `--connection "<that connection>"`: the server then always uses it

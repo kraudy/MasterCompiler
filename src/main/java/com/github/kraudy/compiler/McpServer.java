@@ -250,6 +250,15 @@ public class McpServer {
         + "and project sources that export it. Use it on binder errors (CPD5D02, CPD5D03).",
         findExp));
 
+    ObjectNode statusSchema = mapper.createObjectNode();
+    statusSchema.put("type", "object");
+    statusSchema.putObject("properties");
+    tools.add(tool("status",
+        "MasterCompiler's version, the IBM i user, current library and library list the tools use (after the spec's "
+        + "library settings), the project folder and spec, protectedLibs; over SSH also the host and the start-up stage. "
+        + "Call it first when something looks off.",
+        statusSchema));
+
     ObjectNode seedSchema = mapper.createObjectNode();
     seedSchema.put("type", "object");
     ObjectNode seedProps = seedSchema.putObject("properties");
@@ -359,6 +368,7 @@ public class McpServer {
         case "find_object":   return findObject(args);
         case "find_export":   return findExport(args);
         case "seed":          return seed(args);
+        case "status":        return status();
         case "call_program":  return callProgram(args);
         case "import_source": return importSource(args);
         default:       return toolResult("Unknown tool: " + name, true);
@@ -540,6 +550,21 @@ public class McpServer {
     if (name.isEmpty()) return toolResult("Give the object 'name'", true);
     connectWithLibraryList();
     return toolResult(pretty.writeValueAsString(new SqlTools().findObject(connection, name, args.path("type").asText(null))), false);
+  }
+
+  private ObjectNode status() throws Exception {
+    ObjectNode result = mapper.createObjectNode();
+    result.put("version", MasterCompiler.version());
+    result.put("projectFolder", projectDir().getAbsolutePath());
+    result.put("spec", specName());
+    connectWithLibraryList();
+    result.put("user", system.getUserId());
+    result.put("system", system.getSystemName());
+    result.put("currentLibrary", currentLibrary());
+    result.put("libraryList", String.join(" ", SqlTools.libraryList(connection)));
+    ArrayNode prot = result.putArray("protectedLibs");
+    for (String lib : protectedLibs()) prot.add(lib);
+    return toolResult(pretty.writeValueAsString(result), false);
   }
 
   private ObjectNode seed(JsonNode args) throws Exception {

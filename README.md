@@ -2,7 +2,7 @@
 
 > set up MasterCompiler from https://github.com/kraudy/MasterCompiler
 
-Copilot walks you through the rest. Details in [docs/Copilot.md](./docs/Copilot.md).
+Copilot walks you through the rest. Details in [docs/Copilot.md](./docs/Copilot.md). What changed in each release: [CHANGELOG.md](./CHANGELOG.md).
 
 **Agents, before anything else:** read the setup guide at the latest release, not from `master` (its raw copy can be
 cached for minutes and be out of date). Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest`

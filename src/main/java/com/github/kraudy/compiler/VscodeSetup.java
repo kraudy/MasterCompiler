@@ -122,6 +122,20 @@ public final class VscodeSetup {
       }
     }
 
+    /* .gitignore: MC's working folder (.mc/: reference copies, sync files) never goes into git */
+    File gitignore = new File(project, ".gitignore");
+    String ignored = gitignore.isFile() ? new String(Files.readAllBytes(gitignore.toPath()), java.nio.charset.StandardCharsets.UTF_8) : "";
+    if (!ignored.contains(".mc/")) {
+      out.append("\n.gitignore\n  ").append(print ? "would add" : "added").append(" .mc/ (MasterCompiler's working files)\n");
+      if (!print) {
+        Files.write(gitignore.toPath(), ((ignored.isEmpty() || ignored.endsWith("\n") ? ignored : ignored + "\n")
+            + "# MasterCompiler working files\n.mc/\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      }
+    }
+    if (!new File(project, ".git").exists()) {
+      out.append("  Not a git repository yet: \"git init\" there lets MC build only what changed (since) and keeps history.\n");
+    }
+
     /* .github/skills */
     File skillsDir = new File(project, ".github/skills");
     out.append("\n.github/skills\n");
@@ -139,6 +153,7 @@ public final class VscodeSetup {
         prompt.getParentFile().mkdirs();
         Files.write(prompt.toPath(), continuePrompt(parser.getNext(), parser.getConnection())
             .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (parser.getNextFile() != null) new File(parser.getNextFile()).delete();  // a handover note, now saved
       }
     }
 

@@ -52,7 +52,8 @@ public class SshMcpProxy {
   private PrintStream protocolOut;
   private volatile SshTarget ssh;
   private File project;
-  private volatile String remoteDir;  // set once connected (the home directory may come from the IBM i)
+  private volatile String remoteDir;
+  private volatile String host;  // set once connected (the home directory may come from the IBM i)
   private volatile ChannelExec remote;
   private final CompletableFuture<OutputStream> remoteReady = new CompletableFuture<OutputStream>();
   private final ExecutorService calls = Executors.newSingleThreadExecutor(r -> {
@@ -73,7 +74,7 @@ public class SshMcpProxy {
     MasterCompiler.quietLogs(parser.isVerbose());
 
     Code4iConfig code4i = MasterCompiler.code4i(parser);
-    String host = code4i != null ? code4i.host : required("IBMI_HOSTNAME");
+    host = code4i != null ? code4i.host : required("IBMI_HOSTNAME");
     String user = code4i != null ? code4i.username : required("IBMI_USERNAME");
     int port = code4i != null ? code4i.port : Integer.parseInt(env("IBMI_SSH_PORT", "22"));
     project = new File(parser.getProjectRoot()).getCanonicalFile();
@@ -109,6 +110,16 @@ public class SshMcpProxy {
         JsonNode id = request.get("id");
         if (id == null) continue;  // notifications: the remote server ignores them as well
         JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
+        /* status before MC runs on the IBM i: answered here, with the stage it is at */
+        if (result == null && "tools/call".equals(request.path("method").asText(""))
+            && "status".equals(request.path("params").path("name").asText("")) && !remoteReady.isDone()) {
+          sendResult(id, statusHere());
+          continue;
+        }
+        if ("tools/call".equals(request.path("method").asText(""))
+            && "status".equals(request.path("params").path("name").asText(""))) {
+          pendingStatus.add(id.toString());
+        }
         if (result != null) {
           sendResult(id, result);
           continue;
@@ -190,7 +201,10 @@ public class SshMcpProxy {
   private void relayResponses(InputStream fromRemote) {
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(fromRemote, StandardCharsets.UTF_8))) {
       String line;
-      while ((line = reader.readLine()) != null) send(pendingImports.isEmpty() ? line : afterImport(line));
+      while ((line = reader.readLine()) != null) {
+        if (!pendingStatus.isEmpty()) line = afterStatus(line);
+        send(pendingImports.isEmpty() ? line : afterImport(line));
+      }
     } catch (Exception e) {
       logger.error("Lost the remote MasterCompiler", e);
     }
@@ -256,6 +270,41 @@ public class SshMcpProxy {
             + e.getMessage()
           : "Could not upload the sources to the IBM i: " + e.getMessage());
       return null;
+    }
+  }
+
+  private final Set<String> pendingStatus = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  /* The PC side of status: version, host, folders, start-up stage */
+  private ObjectNode statusFields(ObjectNode into) {
+    into.put("pcVersion", MasterCompiler.version());
+    into.put("connection", "SSH " + host);
+    into.put("startup", stage);
+    into.put("localProjectFolder", project != null ? project.getAbsolutePath() : null);
+    into.put("ibmiProjectFolder", remoteDir);
+    return into;
+  }
+
+  private ObjectNode statusHere() {
+    ObjectNode result = mapper.createObjectNode();
+    ObjectNode text = statusFields(mapper.createObjectNode());
+    text.put("note", "MasterCompiler is not running on the IBM i yet: the user, current library and library list come once it is");
+    result.putArray("content").addObject().put("type", "text").put("text", text.toPrettyString());
+    result.put("isError", false);
+    return result;
+  }
+
+  String afterStatus(String line) {
+    try {
+      JsonNode response = mapper.readTree(line);
+      if (!pendingStatus.remove(response.path("id").toString())) return line;
+      ObjectNode content = (ObjectNode) response.path("result").path("content").path(0);
+      JsonNode report = mapper.readTree(content.path("text").asText("{}"));
+      if (!report.isObject()) return line;
+      content.put("text", statusFields((ObjectNode) report).toPrettyString());
+      return mapper.writeValueAsString(response);
+    } catch (Exception e) {
+      return line;
     }
   }
 
