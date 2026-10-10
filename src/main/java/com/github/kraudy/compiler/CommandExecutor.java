@@ -56,12 +56,24 @@ public class CommandExecutor {
 
     try {
       executeCommand(commandString, commandTime, isLibraryListCommand(command));
+      hooksRun.add((dryRun && !isLibraryListCommand(command) ? "planned: " : "ok: ") + CommandStringParser.toPasteable(commandString));
     } catch (CompilerException e) {
+      /* ignore: [CPF2105, ...] on the hook, like MONMSG */
+      String text = e.getFullContext() + " " + (e.getCause() != null ? e.getCause().toString() : "");
+      for (String id : command.getIgnore()) {
+        if (text.contains(id)) {
+          logger.info("Ignored {} from: {}", id, CommandStringParser.toPasteable(commandString));
+          hooksRun.add("ignored " + id + ": " + CommandStringParser.toPasteable(commandString));
+          return;
+        }
+      }
+      hooksRun.add("failed: " + CommandStringParser.toPasteable(commandString));
 
       if(verbose) logger.error("No error messages found : " + commandString);
       throw new CompilerException("System command failed", e, command);
 
     } catch (Exception e) {
+      hooksRun.add("failed: " + CommandStringParser.toPasteable(commandString));
       throw new CompilerException("Unexpected exception in target compilation command", e, command);
     }
 
@@ -110,6 +122,13 @@ public class CommandExecutor {
     /* Set build time */
     key.setLastBuild(commandTime);
     key.setObjectExists(true);
+  }
+
+  /* Every hook command (and DLTOBJ) in order, with how it ended: ok, planned (dry run), ignored CPFxxxx, failed */
+  private final List<String> hooksRun = new ArrayList<String>();
+
+  public List<String> getHooksRun() {
+    return hooksRun;
   }
 
   /* CHGLIBL / CHGCURLIB only change this job: a dry run runs them too, so it sees the spec's library list */

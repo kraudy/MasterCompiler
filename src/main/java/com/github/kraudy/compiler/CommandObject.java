@@ -23,6 +23,28 @@ public class CommandObject {
   private SysCmd systemCommand;       // System command
   private ParamMap ParamCmdSequence;  // System command's Param:Value 
   private String commandString;       // System coammnd's formed string
+  private String raw;                 // any other CL command, as written in the spec (Cmd: "CPYOBJS ...")
+  private final java.util.List<String> ignore = new java.util.ArrayList<String>();  // message ids treated like MONMSG
+
+  /* A CL command MC does not model (shop commands, CPYOBJS, ...): run exactly as written */
+  public static CommandObject raw(String command) {
+    CommandObject cmd = new CommandObject((SysCmd) null);
+    cmd.raw = command.trim();
+    return cmd;
+  }
+
+  public boolean isRaw() {
+    return raw != null;
+  }
+
+  public java.util.List<String> getIgnore() {
+    return ignore;
+  }
+
+  public CommandObject ignore(java.util.Collection<String> messageIds) {
+    for (String id : messageIds) ignore.add(id.trim().toUpperCase());
+    return this;
+  }
 
   public CommandObject(SysCmd command) {
     this.systemCommand = command;
@@ -53,16 +75,19 @@ public class CommandObject {
   }
 
   public String getCommandString(){
+    if (raw != null) return raw;
     Utilities.ResolveConflicts(this);
     return this.ParamCmdSequence.getCommandString(this.systemCommand);
   }
 
   public String getCommandStringWithoutSummary(){
+    if (raw != null) return raw;
     Utilities.ResolveConflicts(this);
     return this.ParamCmdSequence.getCommandStringWithoutSummary(this.systemCommand);
   }
 
   public void getChangesSummary() {
+    if (raw != null) return;
     List<ParamCmd> compilationPattern = CompilationPattern.getCommandPattern(this.systemCommand);
 
     this.ParamCmdSequence.getChangesSummary(compilationPattern, getSystemCommandName());
@@ -88,11 +113,11 @@ public class CommandObject {
   }
 
   public String getSystemCommandName() {
-    return this.systemCommand.name();
+    return raw != null ? raw.split("\\s+")[0].toUpperCase() : this.systemCommand.name();
   }
 
   public String asString() {
-    return this.systemCommand.name();
+    return getSystemCommandName();
   }
 
   public boolean containsKey(ParamCmd param) {

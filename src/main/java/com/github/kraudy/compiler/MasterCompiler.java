@@ -287,6 +287,9 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.before);
         }
 
+        /* Files the program can change, resolved like at run time; one in a protected library fails the target */
+        checkWrites(key);
+
         /* Only whether it exists: compile params come from the spec and MC's defaults, never from the
            existing object (that would carry over whatever someone compiled by hand: TGTRLS, TEXT, ...) */
         odes.objectExists(key);
@@ -361,11 +364,84 @@ public class MasterCompiler{
     }
   }
 
+  private final Map<TargetKey, List<String>> targetWrites = new java.util.HashMap<TargetKey, List<String>>();
+  private final Map<String, String> fileLibrary = new java.util.HashMap<String, String>();  // FILE -> library on the library list
+
+  private static final List<String> WRITE_CHECKED = Arrays.asList("RPGLE", "SQLRPGLE", "RPG", "SQLRPG", "CBLLE", "SQLCBLLE");
+
+  /* RPG / COBOL sources: report the files they can change; fail when one resolves into a protectedLibs library */
+  private void checkWrites(TargetKey key) throws Exception {
+    if (!key.containsStreamFile()) return;
+    String stmf = key.getStreamFile();
+    String ext = stmf.substring(stmf.lastIndexOf('.') + 1).toUpperCase();
+    if (!WRITE_CHECKED.contains(ext)) return;
+    java.io.File source = new java.io.File(stmf);
+    if (!source.isAbsolute()) {
+      java.io.File local = new java.io.File(globalSpec.getBaseDirectory() != null ? globalSpec.getBaseDirectory() : ".", stmf);
+      source = local.isFile() || compileBaseDir == null ? local : new java.io.File(compileBaseDir, stmf);
+    }
+    if (!source.isFile()) return;
+
+    List<String> writes = new ArrayList<String>();
+    List<String> forbidden = new ArrayList<String>();
+    for (Map.Entry<String, java.util.TreeSet<String>> file : FileWrites.parse(
+        java.nio.file.Files.readAllLines(source.toPath(), java.nio.charset.StandardCharsets.UTF_8)).entrySet()) {
+      String name = file.getKey();
+      String library = name.contains("/") ? name.substring(0, name.indexOf('/')) : libraryOf(name);
+      String object = name.contains("/") ? name.substring(name.indexOf('/') + 1) : name;
+      String line = object + " " + String.join("/", file.getValue()) + " -> " + (library != null ? library : "(not found on the library list)");
+      writes.add(line);
+      final String lib = library;
+      if (lib != null && globalSpec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(lib))) forbidden.add(line);
+    }
+    if (!writes.isEmpty()) targetWrites.put(key, writes);
+    if (!forbidden.isEmpty()) {
+      throw new CompilerException("Writes to a protected library (protectedLibs " + globalSpec.protectedLibs + "): "
+          + String.join("; ", forbidden) + ". Point those files at a development library (library list, EXTFILE, "
+          + "qualified SQL names) before building.");
+    }
+  }
+
+  /* Where FILE resolves: a project target (its library), else the first library-list library holding it */
+  private String libraryOf(String file) {
+    if (fileLibrary.containsKey(file)) return fileLibrary.get(file);
+    String library = null;
+    for (TargetKey target : globalSpec.targets.keySet()) {
+      if (target.getObjectName().equalsIgnoreCase(file) && target.isFile()) {
+        try {
+          library = target.isCurLib() ? getCurLIb() : target.getLibrary();
+        } catch (Exception ignored) { /* falls back to the library list */ }
+        break;
+      }
+    }
+    if (library == null) {
+      try (java.sql.PreparedStatement stmt = connection.prepareStatement(
+          "SELECT TRIM(O.OBJLIB), COALESCE(L.ORDINAL_POSITION, 99999) FROM TABLE(QSYS2.OBJECT_STATISTICS('*LIBL', '*FILE', OBJECT_NAME => ?)) O " +
+          "LEFT JOIN QSYS2.LIBRARY_LIST_INFO L ON L.SYSTEM_SCHEMA_NAME = O.OBJLIB")) {
+        stmt.setString(1, file);
+        int best = Integer.MAX_VALUE;
+        try (ResultSet rs = stmt.executeQuery()) {
+          while (rs.next()) {
+            if (rs.getInt(2) < best) {
+              best = rs.getInt(2);
+              library = rs.getString(1);
+            }
+          }
+        }
+      } catch (SQLException e) {
+        logger.info("Could not resolve file {}: {}", file, e.getMessage());
+      }
+    }
+    fileLibrary.put(file, library);
+    return library;
+  }
+
   /* Adds the target to the report with its joblog and, when compiled, its EVFEVENT errors */
   private void reportTarget(TargetKey key, String status, String command, String error, Timestamp since) {
     BuildReport.TargetResult result = report.add(key.asString(), status);
     result.command = command;
     result.error = error;
+    result.writes = targetWrites.get(key);
     if (key.objectExists() && CommandExecutor.RECREATED.contains(key.getObjectTypeEnum())) {
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *" + key.getObjectTypeEnum().name()
           + " and create it again" + (key.getObjectTypeEnum() == CompilationPattern.ObjectType.PF ? ": its data is lost" : "");
@@ -501,6 +577,7 @@ public class MasterCompiler{
   private void finishReport() {
     if (compilationError) report.success = false;
     if (!globalSpec.warnings.isEmpty()) report.warnings = new ArrayList<String>(globalSpec.warnings);
+    if (commandExec != null && !commandExec.getHooksRun().isEmpty()) report.hooks = new ArrayList<String>(commandExec.getHooksRun());
     report.dryRun = dryRun;
 
     Set<String> reported = new HashSet<String>();

@@ -207,6 +207,8 @@ public class SpecGenerator {
       if (verbose) logger.info("Merged {} default param(s) from base", base.defaults.size());
     }
 
+    for (String lib : base.protectedLibs) scanned.protectedLibs.add(lib.trim().toUpperCase());
+
     /* Global hooks after scan-injected CHGCURDIR */
     if (base.before != null && !base.before.isEmpty()) {
       scanned.before.addAll(base.before);

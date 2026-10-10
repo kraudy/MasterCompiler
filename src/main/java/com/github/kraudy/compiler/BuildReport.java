@@ -31,6 +31,7 @@ public class BuildReport {
   public String error;  // failure outside a target (global hooks, connection, ...)
   public List<String> warnings;  // from reading the sources, e.g. two files building the same object
   public List<String> summary;   // compact(): one line per target, before the details
+  public List<String> hooks;     // hook commands that ran (or would run, in a plan), in order, with their outcome
   public List<TargetResult> targets = new ArrayList<TargetResult>();
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
@@ -42,6 +43,7 @@ public class BuildReport {
     public String command;
     public String error;
     public String warning;  // destructive step, e.g. an existing PF deleted and created again
+    public List<String> writes;  // database files the program can change and where they resolve: "CUSTMAST update -> APPLIB"
     public List<CompileError> errors;
     public List<JoblogMessage> joblog;
 

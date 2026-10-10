@@ -23,11 +23,11 @@ public class BuildSpec {
 
   public String getBaseDirectory() { return baseDirectory; }
 
-  /* Set once the dependency graph is built, so a build does not scan the sources a second time */
   /* Problems found while reading the sources (e.g. two files building the same object), shown in the build report */
   @com.fasterxml.jackson.annotation.JsonIgnore
   public final java.util.List<String> warnings = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
 
+  /* Set once the dependency graph is built, so a build does not scan the sources a second time */
   private boolean dependenciesDetected;
   public boolean isDependenciesDetected() { return dependenciesDetected; }
   public void setDependenciesDetected(boolean detected) { this.dependenciesDetected = detected; }
@@ -61,6 +61,11 @@ public class BuildSpec {
     if (this.targetsList.contains(key)) return true;
     return false;
   }
+
+  /* Libraries no project program may write to (files it opens for update / output, SQL INSERT / UPDATE / DELETE
+     resolving there): such a target fails before it is compiled */
+  @JsonProperty(value = "protectedLibs", required = false)
+  public final List<String> protectedLibs = new ArrayList<>();
 
   /* Global compilation command params */
   @JsonProperty(value = "defaults", required = false)
