@@ -22,4 +22,11 @@ public class QualifyProjectObjectsTest {
     /* external objects and explicit libraries are left alone */
     assertEquals("*LIBL/QC2LE OTHER/MCDCALC", MasterCompiler.qualifyNames("*LIBL/QC2LE OTHER/MCDCALC", libs));
   }
+
+  @org.junit.jupiter.api.Test
+  void test_SqlRpg_BndDir_Goes_To_CompileOpt() {
+    org.junit.jupiter.api.Assertions.assertEquals("TGTCCSID(*JOB) BNDDIR(*CURLIB/MCDDEMO *LIBL/OTHER)",
+        MasterCompiler.compileOptWithBndDir("''TGTCCSID(*JOB)''", "*CURLIB/MCDDEMO OTHER"));
+    org.junit.jupiter.api.Assertions.assertEquals("BNDDIR(X)", MasterCompiler.compileOptWithBndDir("BNDDIR(X)", "Y"), "kept");
+  }
 }

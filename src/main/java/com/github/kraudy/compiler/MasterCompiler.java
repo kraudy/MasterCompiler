@@ -302,6 +302,13 @@ public class MasterCompiler{
         /* Set target specific params */
         key.putAll(targetSpec.params);
 
+        /* CRTSQLRPGI has no BNDDIR: it goes to the RPG compiler through COMPILEOPT */
+        String bndDir = targetSpec.params.containsKey(ParamCmd.BNDDIR) ? targetSpec.params.get(ParamCmd.BNDDIR)
+            : globalSpec.defaults.get(ParamCmd.BNDDIR);
+        if (bndDir != null && key.getCompilationCommand() == CompilationPattern.CompCmd.CRTSQLRPGI) {
+          key.put(ParamCmd.COMPILEOPT, compileOptWithBndDir(key.containsKey(ParamCmd.COMPILEOPT) ? key.get(ParamCmd.COMPILEOPT) : "", bndDir));
+        }
+
 
         /* Migrate source file */
         if (!noMigrate) migrator.migrateSource(key);
@@ -364,6 +371,19 @@ public class MasterCompiler{
     if (!failedTargets.isEmpty()) {
       throw new CompilerException(failedTargets.size() + " target(s) failed: " + String.join(", ", failedTargets));
     }
+  }
+
+  /* COMPILEOPT for CRTSQLRPGI with BNDDIR(...) added (unless it has one); unqualified directories are *LIBL.
+     The stored value is quoted for QCMDEXC (''TGTCCSID(*JOB)''): the quotes are taken off first. */
+  static String compileOptWithBndDir(String compileOpt, String bndDir) {
+    String opt = compileOpt == null ? "" : compileOpt.trim().replaceAll("^'+|'+$", "");
+    if (opt.toUpperCase().contains("BNDDIR(")) return opt;
+    StringBuilder dirs = new StringBuilder();
+    for (String dir : bndDir.trim().split("\\s+")) {
+      if (dirs.length() > 0) dirs.append(' ');
+      dirs.append(dir.contains("/") || dir.startsWith("*") ? dir : "*LIBL/" + dir);
+    }
+    return (opt + " BNDDIR(" + dirs + ")").trim();
   }
 
   private final Map<TargetKey, List<String>> targetWrites = new java.util.HashMap<TargetKey, List<String>>();
@@ -482,10 +502,12 @@ public class MasterCompiler{
     java.util.Map<String, String> modules = new java.util.HashMap<String, String>();
     java.util.Map<String, String> srvpgms = new java.util.HashMap<String, String>();
     java.util.Map<String, String> entries = new java.util.HashMap<String, String>();
+    java.util.Map<String, String> bnddirs = new java.util.HashMap<String, String>();
     String curlib = null;
     for (TargetKey key : globalSpec.targets.keySet()) {
       String lib = key.isCurLib() ? ValCmd.CURLIB.toString() : key.getLibrary();
       if (key.isModule()) modules.put(key.getObjectName().toUpperCase(), lib);
+      if (key.isBndDir()) bnddirs.put(key.getObjectName().toUpperCase(), lib);
       if (key.isServiceProgram()) {
         srvpgms.put(key.getObjectName().toUpperCase(), lib);
         if (key.isCurLib() && curlib == null) curlib = buildCurLib();
@@ -496,6 +518,7 @@ public class MasterCompiler{
       if (spec == null) continue;
       qualify(spec.params, ParamCmd.MODULE, modules);
       qualify(spec.params, ParamCmd.BNDSRVPGM, srvpgms);
+      qualify(spec.params, ParamCmd.BNDDIR, bnddirs);
       for (List<CommandObject> hooks : Arrays.asList(spec.before, spec.after, spec.success, spec.failure)) qualifyHooks(hooks, entries);
     }
     for (List<CommandObject> hooks : Arrays.asList(globalSpec.before, globalSpec.after, globalSpec.success, globalSpec.failure)) {

@@ -132,7 +132,9 @@ public class Utilities {
         break;
     
       case CRTBNDDIR:
-        targetKey.put(ParamCmd.BNDDIR, targetKey.getObjectName());
+        /* the binding directory MC creates: in its target library (references elsewhere default to *LIBL) */
+        targetKey.put(ParamCmd.BNDDIR, (targetKey.isCurLib() ? ValCmd.CURLIB.toString() : targetKey.getLibrary())
+            + "/" + targetKey.getObjectName());
         break;
     
       case CRTDTAARA:
@@ -389,6 +391,17 @@ public class Utilities {
         break;
 
       case BNDDIR:
+        /* A reference (CRTBNDRPG, CRTPGM, ADDBNDDIRE ...): unqualified is *LIBL, like the commands' own default.
+           Project binding directories are pointed at their library by MasterCompiler.qualifyProjectObjects. */
+        if (value.trim().startsWith("*") && !value.contains("/")) break;  // *NONE
+        String[] bndDirs = value.trim().split("\\s+");
+        StringBuilder qualified = new StringBuilder();
+        for (String dir : bndDirs) {
+          if (qualified.length() > 0) qualified.append(' ');
+          qualified.append(dir.contains("/") ? dir : ValCmd.LIBL.toString() + "/" + dir);
+        }
+        return qualified.toString();
+
       case DTAARA:
       case DTAQ:
         /* If not qualified, set to CURLIB */

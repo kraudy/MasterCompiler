@@ -225,6 +225,20 @@ public class DependencyAwareness {
         }
       }
 
+      /* BNDDIR param naming a project binding directory: build it first, as a ctl-opt BNDDIR does */
+      if (!target.isModule() && targetSpec.params.containsKey(ParamCmd.BNDDIR)) {
+        for (String dir : targetSpec.params.get(ParamCmd.BNDDIR).trim().split("\\s+")) {
+          String name = dir.substring(dir.indexOf('/') + 1).toUpperCase();
+          TargetKey bndDirDep = keyLookup.get(name + "." + ObjectType.BNDDIR.name());
+          if (bndDirDep != null && bndDirDep.isBndDir()) {
+            target.addChild(bndDirDep);
+            bndDirDep.addFather(target);
+          } else if (!name.startsWith("*")) {
+            target.addExternal("*BNDDIR", name);
+          }
+        }
+      }
+
       /* Explicit PGM from YAML for CRTCMD (overrides later source inference) */
       if (target.isCmd() && targetSpec.params.containsKey(ParamCmd.PGM)) {
         String pgm = targetSpec.params.get(ParamCmd.PGM);
