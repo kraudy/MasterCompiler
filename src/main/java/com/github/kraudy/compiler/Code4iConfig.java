@@ -129,10 +129,15 @@ public final class Code4iConfig {
 
   /* Host servers connection as the Code for IBM i user; password from IBMI_PASSWORD */
   public AS400 connect() throws Exception {
-    String password = System.getenv("IBMI_PASSWORD");
+    return connect("IBMI_PASSWORD");
+  }
+
+  /* The same with the password in another variable (a read-only connection's IBMI_PASSWORD_<NAME>) */
+  public AS400 connect(String passwordVariable) throws Exception {
+    String password = System.getenv(passwordVariable);
     if (password == null || password.isEmpty()) {
-      throw new IllegalArgumentException("IBMI_PASSWORD is not set. In .vscode/mcp.json give the server "
-          + "\"env\": { \"IBMI_PASSWORD\": \"${input:ibmiPassword}\" } with a password input "
+      throw new IllegalArgumentException(passwordVariable + " is not set. In .vscode/mcp.json give the server "
+          + "\"env\": { \"" + passwordVariable + "\": \"${input:...}\" } with a password input "
           + "(java -jar MasterCompiler.jar --setup-vscode writes it).");
     }
     AS400 system = new AS400(host, username, password.toCharArray());

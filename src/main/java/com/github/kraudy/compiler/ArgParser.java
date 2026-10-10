@@ -3,6 +3,7 @@ package com.github.kraudy.compiler;
 import java.io.File;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /*
@@ -28,6 +29,9 @@ public class ArgParser {
     SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json (MC over SSH) and .github/skills for Copilot in the --project folder (default: current)"),
     LIBL          (null, "libl",         Kind.VALUE, "Library list for the build job (CHGLIBL), space-separated"),
     CURLIB        (null, "curlib",       Kind.VALUE, "Current library for the build job (CHGCURLIB)"),
+    READ_ONLY     (null, "read-only",    Kind.FLAG,  "With --mcp: a read-only server for another IBM i (sql, find_object, find_source, object_info, export_rows); --libl lists the only libraries it reads"),
+    MAX_ROWS      (null, "max-rows",     Kind.VALUE, "With --read-only: most rows one query or seed may read"),
+    MASK_COLUMNS  (null, "mask-columns", Kind.VALUE, "With --read-only: columns (comma-separated) shown masked and copied only replaced"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
     INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code)"),
@@ -116,6 +120,9 @@ public class ArgParser {
   private String libl;
   private String curlib;
   private boolean ssh;
+  private boolean readOnly;
+  private int maxRows;
+  private String maskColumns;
   private boolean hostServers;
   private boolean installSkills;
   private boolean version;
@@ -220,6 +227,7 @@ public class ArgParser {
       case SETUP_VSCODE:  setupVscode = true; break;
       case PRINT:         print = true; break;
       case SSH:           ssh = true; break;
+      case READ_ONLY:     readOnly = true; break;
       case HOST_SERVERS:  hostServers = true; break;
       case INSTALL_SKILLS: installSkills = true; break;
       case VERSION:       version = true; break;
@@ -273,6 +281,14 @@ public class ArgParser {
       case CURLIB:
         curlib = value;
         break;
+      case MAX_ROWS:
+        try {
+          maxRows = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException("--max-rows needs a number: " + value);
+        }
+        break;
+      case MASK_COLUMNS:  maskColumns = value; break;
       case CONNECTION:
         connection = value;
         code4i = true;
@@ -294,6 +310,10 @@ public class ArgParser {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
     }
     if (installSkills || version) return;  // need nothing else
+    if (readOnly && !mcp) throw new IllegalArgumentException("--read-only goes with --mcp");
+    if ((maxRows != 0 || maskColumns != null) && !readOnly) {
+      throw new IllegalArgumentException("--max-rows and --mask-columns go with --read-only");
+    }
 
     if (hostServers && !setupVscode) {
       throw new IllegalArgumentException("--host-servers goes with --setup-vscode");
@@ -417,6 +437,24 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  /** {@code --read-only}: an MCP server that only reads, for a second IBM i. */
+  public boolean isReadOnly() {
+    return readOnly;
+  }
+
+  /** {@code --max-rows}, or 0 when not given. */
+  public int getMaxRows() {
+    return maxRows;
+  }
+
+  /** {@code --mask-columns}, upper case, or an empty list. */
+  public List<String> getMaskColumns() {
+    List<String> columns = new java.util.ArrayList<String>();
+    if (maskColumns == null) return columns;
+    for (String c : maskColumns.split("[,\\s]+")) if (!c.trim().isEmpty()) columns.add(c.trim().toUpperCase());
+    return columns;
   }
 
   private static String readNextFile(String path) {

@@ -62,6 +62,7 @@ public class SshMcpProxy {
     return t;
   });
   private volatile boolean closing;
+  private ReadOnlyConnections.Router router;  // calls for the spec's read-only connections
   private final Set<String> pendingImports = java.util.concurrent.ConcurrentHashMap.newKeySet();  // import_source call ids  // VS Code closed the session: the remote end stopping is expected
 
   public SshMcpProxy(ArgParser parser) {
@@ -78,6 +79,7 @@ public class SshMcpProxy {
     String user = code4i != null ? code4i.username : required("IBMI_USERNAME");
     int port = code4i != null ? code4i.port : Integer.parseInt(env("IBMI_SSH_PORT", "22"));
     project = new File(parser.getProjectRoot()).getCanonicalFile();
+    router = new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
 
     /*
      * initialize and tools/list are answered here right away; connecting, the first jar upload and the
@@ -131,6 +133,7 @@ public class SshMcpProxy {
       closing = true;
       if (remote != null) remote.disconnect();
       if (ssh != null) ssh.close();
+      router.close();
     }
   }
 
@@ -146,7 +149,7 @@ public class SshMcpProxy {
     remoteDir = parser.getPush() != null ? trimSlash(parser.getPush()) : home + "/mc/" + project.getName();
 
     stage("2/5 checking MasterCompiler on the IBM i");
-    String jar = ensureRemoteJar(home);
+    String jar = ensureRemoteJar(ssh, home);
     long jarDone = System.currentTimeMillis();
     stage("3/5 syncing the sources to " + remoteDir);
     int uploaded = sync(projectFiles(), true);
@@ -178,6 +181,8 @@ public class SshMcpProxy {
 
   /* A call the remote MC answers: wait until it runs, upload what changed, pass it on */
   private void forward(String line) {
+    line = routed(line);
+    if (line == null) return;  // answered by a read-only connection
     OutputStream toRemote;
     try {
       if (!remoteReady.isDone()) logger.info("Tool call waiting for the start-up, now at stage {}", stage);
@@ -194,6 +199,26 @@ public class SshMcpProxy {
       toRemote.flush();
     } catch (Exception e) {
       sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
+    }
+  }
+
+  /* Calls for a read-only connection are answered here; compare and seed get what the other system holds */
+  private String routed(String line) {
+    try {
+      JsonNode request = mapper.readTree(line);
+      if (!"tools/call".equals(request.path("method").asText())) return line;
+      ObjectNode params = (ObjectNode) request.path("params");
+      ObjectNode args = params.has("arguments") && params.get("arguments").isObject()
+          ? (ObjectNode) params.get("arguments") : params.putObject("arguments");
+      ObjectNode answer = router.handle(params.path("name").asText(), args);
+      if (answer != null) {
+        sendResult(request.get("id"), answer);
+        return null;
+      }
+      return mapper.writeValueAsString(request);
+    } catch (Exception e) {
+      sendToolError(line, "Could not prepare the call: " + e.getMessage());
+      return null;
     }
   }
 
@@ -433,7 +458,7 @@ public class SshMcpProxy {
   }
 
   /* The jar running here, uploaded once per version (named by its hash) */
-  private String ensureRemoteJar(String home) throws Exception {
+  static String ensureRemoteJar(SshTarget ssh, String home) throws Exception {
     File local = new File(VscodeSetup.jarPath());
     if (!local.isFile()) throw new IllegalStateException("Run MasterCompiler from its jar to use --ssh");
     String remote = home + "/mc/.mc/MasterCompiler-" + sha256(local).substring(0, 12) + ".jar";
@@ -570,7 +595,7 @@ public class SshMcpProxy {
     return value;
   }
 
-  private static String env(String name, String fallback) {
+  static String env(String name, String fallback) {
     String value = System.getenv(name);
     return value == null || value.isEmpty() ? fallback : value;
   }

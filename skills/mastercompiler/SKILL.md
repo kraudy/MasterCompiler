@@ -73,11 +73,11 @@ targets:             # compiled in this order: dependencies first
 
 ```yaml
 curlib: DEVLIB                 # library settings for the build job (CHGLIBL / CHGCURLIB before any hook);
-libl: [DEVLIB, APPLIB]         # also allowed alone in mc-base.yaml for scanned projects
-protectedLibs: [PRODLIB]       # a program that can write to a file resolving here fails before compiling
+libl: [DEVLIB, LIB1]         # also allowed alone in mc-base.yaml for scanned projects
+protectedLibs: [LIB4]       # a program that can write to a file resolving here fails before compiling
 before:
-  - ChgLibl: { LibL: "DEVLIB APPLIB" }       # also applied by plan, find_source, sql, ...
-  - Cmd: CPYOBJS FROMLIB(APPLIB) TOLIB(DEVLIB)   # any CL command, run as written
+  - ChgLibl: { LibL: "DEVLIB LIB1" }       # also applied by plan, find_source, sql, ...
+  - Cmd: CPYOBJS FROMLIB(LIB1) TOLIB(DEVLIB)   # any CL command, run as written
     ignore: [CPF2105]                        # like MONMSG: these messages do not fail the hook
   - DltObj: { Obj: "*CURLIB/WORK", ObjType: "*FILE" }
     ignore: [CPF2105]
@@ -238,14 +238,44 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
 | `joblog` | none | The job's messages since the previous `joblog` call |
-| `sql` | `statement`, `maxRows`, `maxColumns` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
-| `find_object` | `name`, `type` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
+| `sql` | `statement`, `maxRows`, `maxColumns`, `connection` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
+| `find_object` | `name`, `type`, `connection` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
+| `compare` | `object`, `type`, `connection` | The object on the build system and on a read-only connection side by side (library, create / change timestamps, per module the source member, the source change timestamp its compile recorded, the module's create timestamp), `differences` and `sameRecordedSource` |
 | `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`; over SSH also the host and the start-up stage. Call it first when something looks off |
 | `seed` | `names`, `confirm` | Runs the project's `seeds.yaml` (see below). Without `confirm`: the SQL it would run; show it to the user, then call with `confirm: true` |
 | `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
-| `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
+| `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`), `connection` | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
 | `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun`, `refresh` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
+
+### Other IBM i systems (read-only connections)
+
+The spec can name the system builds go to and other systems the tools may only read, e.g. to check
+what runs in production or to copy test rows from it:
+
+```yaml
+connections:
+  build: SYS1                  # Code for IBM i connection; the tools refuse to run on another one
+  readOnly:
+    - name: SYS2               # a Code for IBM i connection
+      libraries: [LIB1, LIB2]  # the only libraries read there (also its library list)
+      maxRows: 500             # most rows one query or seed reads there (default 1000)
+      maskColumns: [COL3]      # sql shows them masked; a seed from here must replace them in set
+```
+
+- `sql`, `find_object` and `find_source` take `connection: SYS2` to read that system instead. Only
+  its `libraries` (and the catalogs `QSYS2`, `SYSIBM`, ...) are read; the JDBC connection is read
+  only. `build`, `seed`, `call_program`, `clean` and `import_source` never run there.
+- `compare` with `object` shows the object on both systems: whether the other system runs the
+  source you changed (same source member and recorded source change timestamp per module).
+- A seed with `fromConnection: SYS2` reads its rows there (`from`, `where`; `set` is applied there,
+  so replaced values never leave that system) and inserts them on the build system with their exact
+  values. More rows than `maxRows` fail the seed instead of cutting it. Preview first (rows, the
+  first three, the statements), then `confirm: true`; every confirmed copy is logged in
+  `.mc/copies.log`. When the other system holds personal data, list those columns in `maskColumns`
+  and replace them in the seed's `set`; the user's company rules may require it.
+- MC opens a read-only connection on first use. Its password comes from its own VS Code password
+  prompt (`--setup-vscode` adds one per read-only connection in the spec); never ask for it in chat.
 
 ### Sources the project does not have
 
@@ -262,17 +292,22 @@ change that object: it then becomes part of the build and is compiled into their
 time (replacing a hand-kept list of SQL):
 
 ```yaml
-seedLibs: [TESTLIB]               # besides the current library, the only libraries seeds write to
+seedLibs: [LIB2]                # besides the current library, the only libraries seeds write to
 seeds:
   - name: seed1
-    to: TABLE1                    # unqualified: the current library, never the library list
-    from: APPLIB/TABLE1           # copy rows from anywhere (read only) ...
+    to: TABLE1                   # unqualified: the current library, never the library list
+    from: LIB1/TABLE1            # copy rows from anywhere (read only) ...
     where: "COL1 = 'A01'"
-    set: { COL2: "'X'" }       # ... replacing these columns (SQL expressions: quote strings)
+    set: { COL2: "'X'" }         # ... replacing these columns (SQL expressions: quote strings)
     deleteWhere: "COL1 = 'A01'"  # cleared first, so replaying gives the same rows
   - name: seed2
     to: TABLE2
-    values: { COL1: 1, COL2: "'test'" }   # one literal row
+    values: { COL1: 1, COL2: "'test'" }  # one literal row
+  - name: seed3
+    fromConnection: SYS2         # rows read on a read-only connection (see above) ...
+    from: LIB1/TABLE1
+    where: "COL1 = 1"
+    to: TABLE1                   # ... inserted here with their exact values
 ```
 
 A target in a `protectedLibs` library is always refused. Loop for logic changes: edit → `build`

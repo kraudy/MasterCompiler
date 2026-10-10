@@ -101,6 +101,10 @@ public class BuildSpec {
   @JsonProperty(value = "protectedLibs", required = false)
   public final List<String> protectedLibs = new ArrayList<>();
 
+  /* Which Code for IBM i connection builds, and other IBM i systems the tools may read (ReadOnlyConnections) */
+  @JsonProperty(value = "connections", required = false)
+  public com.fasterxml.jackson.databind.JsonNode connections;
+
   /* Global compilation command params */
   @JsonProperty(value = "defaults", required = false)
   @JsonDeserialize(using = ParamMapDeserializer.class)

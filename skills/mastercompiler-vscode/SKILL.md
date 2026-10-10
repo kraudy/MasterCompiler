@@ -236,6 +236,12 @@ which library an object resolves to.
 
 With a single connection, drop the `ibmiConnection` input and put its name after `--connection`.
 
+Read-only connections (`connections.readOnly` in the spec) get a password prompt each, like the
+build connection: an input `{ "id": "ibmiPassword_SYS2", "type": "promptString", "password": true }`
+and `"IBMI_PASSWORD_SYS2": "${input:ibmiPassword_SYS2}"` in `env` (the name upper case, characters
+other than letters and digits as `_`). Running `--setup-vscode` again after adding one to the spec
+adds them.
+
 Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME` and
 `IBMI_USERNAME` to `env` (as values or as more `promptString` inputs).
 
@@ -257,6 +263,7 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | `VS Code user settings not found` | Set `MC_VSCODE_SETTINGS` to the `settings.json` holding `code-for-ibmi.connections`, or configure without `--code4i`. |
 | Connection refused / timeouts | Over SSH: the IBM i's SSH port must be reachable (Code for IBM i working from this PC proves it). With `--host-servers`: ports 449, 8470-8476 (or 9470-9476 with TLS), as for ACS. |
 | `--ssh`: host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator. |
+| `IBMI_PASSWORD_<NAME> is not set` | A read-only connection without its password prompt: rerun `--setup-vscode`, restart the server, type that system's password in its prompt. |
 | `--ssh`: no key and no password | Enter the password when the server starts, or create an SSH key the IBM i accepts. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |
 | Server seems stuck at start | Read its log: **MCP: List Servers** → `mastercompiler` → **Show Output**. It shows each start-up stage (`MC start-up 1/5 connecting` … `5/5 ready`) and, for the jar upload, progress every 5 s. A tool call that waits logs which stage it waits for. |

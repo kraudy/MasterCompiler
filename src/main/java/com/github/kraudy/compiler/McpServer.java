@@ -49,8 +49,52 @@ public class McpServer {
   private Connection connection;
   private Timestamp lastJoblog;
 
+  /* --read-only: a server for another IBM i that only reads (ReadOnlyConnections), limited to these libraries */
+  private final boolean readOnlyMode;
+  private final List<String> readLibs;
+  private final int maxRows;
+  private final List<String> mask;
+  private final java.util.concurrent.Callable<AS400> connector;  // in-process read-only server: its own system
+  private ReadOnlyConnections.Router router;  // MC on the PC: calls for read-only connections
+
   public McpServer(ArgParser parser) {
     this.parser = parser;
+    this.readOnlyMode = parser != null && parser.isReadOnly();
+    this.readLibs = new java.util.ArrayList<String>();
+    if (readOnlyMode && parser.getLibl() != null) {
+      for (String lib : parser.getLibl().trim().toUpperCase().split("\\s+")) if (!lib.isEmpty()) readLibs.add(lib);
+    }
+    if (readOnlyMode && readLibs.isEmpty()) throw new IllegalArgumentException("--read-only needs --libl: the libraries it may read");
+    this.maxRows = parser != null ? parser.getMaxRows() : 0;
+    this.mask = parser != null ? parser.getMaskColumns() : new java.util.ArrayList<String>();
+    this.connector = null;
+  }
+
+  private McpServer(List<String> libraries, int maxRows, List<String> mask, java.util.concurrent.Callable<AS400> connector) {
+    this.parser = null;
+    this.readOnlyMode = true;
+    this.readLibs = libraries;
+    this.maxRows = maxRows;
+    this.mask = mask;
+    this.connector = connector;
+  }
+
+  /* A read-only server in this process (a read-only connection over the host servers) */
+  static McpServer readOnly(List<String> libraries, int maxRows, List<String> mask, java.util.concurrent.Callable<AS400> connector) {
+    return new McpServer(libraries, maxRows, mask, connector);
+  }
+
+  /* One tool call, for the router: the tool result */
+  JsonNode call(String tool, JsonNode arguments) throws Exception {
+    ObjectNode params = mapper.createObjectNode();
+    params.put("name", tool);
+    params.set("arguments", arguments);
+    return callTool(params);
+  }
+
+  void close() {
+    if (router != null) router.close();
+    disconnect();
   }
 
   /* Reads requests until stdin closes */
@@ -69,7 +113,7 @@ public class McpServer {
         handle(line);
       }
     } finally {
-      disconnect();
+      close();
     }
   }
 
@@ -140,6 +184,7 @@ public class McpServer {
   }
 
   private ObjectNode toolsList() {
+    if (readOnlyMode) return readOnlyToolsList();
     ObjectNode result = mapper.createObjectNode();
     ArrayNode tools = result.putArray("tools");
 
@@ -182,6 +227,7 @@ public class McpServer {
     find.put("type", "object");
     ObjectNode findProps = find.putObject("properties");
     objectsProperty(findProps);
+    connectionProperty(findProps);
     find.putArray("required").add("objects");
     tools.add(tool("find_source",
         "Where the IBM i says objects were compiled from: source file members (ILE programs: per bound module), "
@@ -219,6 +265,7 @@ public class McpServer {
         .put("description", "Rows to return (default " + SqlTools.DEFAULT_ROWS + ", at most " + SqlTools.MAX_ROWS + ")");
     sqlProps.putObject("maxColumns").put("type", "integer")
         .put("description", "Columns to return (default " + SqlTools.DEFAULT_COLUMNS + ")");
+    connectionProperty(sqlProps);
     sqlSchema.putArray("required").add("statement");
     tools.add(tool("sql",
         "Read-only Db2 for i query on the IBM i: table rows, catalog views (QSYS2.SYSCOLUMNS2, SYSTABLES, "
@@ -232,6 +279,7 @@ public class McpServer {
     ObjectNode findObjProps = findObj.putObject("properties");
     findObjProps.putObject("name").put("type", "string").put("description", "Object name, e.g. CUSTMAST");
     findObjProps.putObject("type").put("type", "string").put("description", "Object type, e.g. *FILE, *PGM (default: any)");
+    connectionProperty(findObjProps);
     findObj.putArray("required").add("name");
     tools.add(tool("find_object",
         "Every library holding an object, which one the spec's library list resolves to (resolvesTo), and whether "
@@ -249,6 +297,21 @@ public class McpServer {
         "Who exports a symbol: service programs on the spec's library list, the binding directories there that list them, "
         + "and project sources that export it. Use it on binder errors (CPD5D02, CPD5D03).",
         findExp));
+
+    ObjectNode compareSchema = mapper.createObjectNode();
+    compareSchema.put("type", "object");
+    ObjectNode compareProps = compareSchema.putObject("properties");
+    compareProps.putObject("object").put("type", "string").put("description", "Object: NAME (library list) or LIB/NAME");
+    compareProps.putObject("type").put("type", "string").put("description", "Object type, e.g. *PGM (default: *PGM *SRVPGM *MODULE *FILE *CMD)");
+    compareProps.putObject("connection").put("type", "string")
+        .put("description", "The read-only connection to compare with (connections.readOnly in the spec; default: the only one)");
+    compareSchema.putArray("required").add("object");
+    tools.add(tool("compare",
+        "The same object on the build system and on a read-only connection side by side: library, create and change "
+        + "timestamps, and per bound module the source member, the source change timestamp its compile recorded and the "
+        + "module's create timestamp, with the differences listed. Answers \"does the other system run the source I "
+        + "changed?\". Reads only.",
+        compareSchema));
 
     ObjectNode statusSchema = mapper.createObjectNode();
     statusSchema.put("type", "object");
@@ -309,6 +372,46 @@ public class McpServer {
     return result;
   }
 
+  /* connections.readOnly in the spec: the call reads that IBM i instead */
+  private void connectionProperty(ObjectNode props) {
+    props.putObject("connection").put("type", "string").put("description", "Optional: a read-only connection of the "
+        + "spec (connections.readOnly) to read instead of the build system; only its listed libraries are read");
+  }
+
+  /* --read-only: what another IBM i answers; nothing here writes */
+  private ObjectNode readOnlyToolsList() {
+    ObjectNode result = mapper.createObjectNode();
+    ArrayNode tools = result.putArray("tools");
+    ObjectNode sqlSchema = mapper.createObjectNode();
+    sqlSchema.put("type", "object");
+    ObjectNode sqlProps = sqlSchema.putObject("properties");
+    sqlProps.putObject("statement").put("type", "string");
+    sqlProps.putObject("maxRows").put("type", "integer");
+    sqlProps.putObject("maxColumns").put("type", "integer");
+    tools.add(tool("sql", "Read-only query on " + readLibs, sqlSchema));
+    ObjectNode findObj = mapper.createObjectNode();
+    findObj.put("type", "object");
+    findObj.putObject("properties").putObject("name").put("type", "string");
+    tools.add(tool("find_object", "Libraries holding an object", findObj));
+    ObjectNode find = mapper.createObjectNode();
+    find.put("type", "object");
+    objectsProperty(find.putObject("properties"));
+    tools.add(tool("find_source", "Where objects were compiled from", find));
+    ObjectNode info = mapper.createObjectNode();
+    info.put("type", "object");
+    info.putObject("properties").putObject("object").put("type", "string");
+    tools.add(tool("object_info", "An object's create, change and source timestamps (for compare)", info));
+    ObjectNode export = mapper.createObjectNode();
+    export.put("type", "object");
+    export.putObject("properties").putObject("from").put("type", "string");
+    tools.add(tool("export_rows", "Rows of a table, typed, for a seed on the build system", export));
+    ObjectNode status = mapper.createObjectNode();
+    status.put("type", "object");
+    status.putObject("properties");
+    tools.add(tool("status", "Version, user and the libraries read", status));
+    return result;
+  }
+
   private void objectsProperty(ObjectNode props) {
     ObjectNode objects = props.putObject("objects");
     objects.put("type", "array");
@@ -356,8 +459,16 @@ public class McpServer {
   private ObjectNode callTool(JsonNode params) throws Exception {
     String name = params.path("name").asText("");
     JsonNode args = params.path("arguments");
+    if (readOnlyMode) return callReadOnly(name, args);
+    if (router() != null) {
+      ObjectNode ready = args.isObject() ? (ObjectNode) args : mapper.createObjectNode();
+      ObjectNode routed = router.handle(name, ready);
+      if (routed != null) return routed;
+      args = ready;
+    }
     try {
       switch (name) {
+        case "compare":       return compare(args);
         case "build":  return build(args, false);
         case "plan":   return build(args, true);
         case "impact": return impact(args);
@@ -378,6 +489,63 @@ public class McpServer {
       String message = e instanceof CompilerException ? ((CompilerException) e).getFullContext() : e.toString();
       return toolResult(message, true);
     }
+  }
+
+  /* MC on the PC (not on the IBM i, where the SSH proxy routes instead): the router for read-only connections */
+  private ReadOnlyConnections.Router router() {
+    if (router != null || parser == null || IBMiDotEnv.isIBMi()) return router;
+    String connected = null;
+    try {
+      Code4iConfig code4i = MasterCompiler.code4i(parser);
+      if (code4i != null) connected = code4i.name;
+    } catch (Exception unknown) { /* no Code for IBM i connection: not checked */ }
+    router = new ReadOnlyConnections.Router(projectDir(), false, connected);
+    return router;
+  }
+
+  private ObjectNode callReadOnly(String name, JsonNode args) {
+    try {
+      switch (name) {
+        case "sql":          return sql(args);
+        case "find_object":  return findObject(args);
+        case "find_source":  return findSource(args);
+        case "status":       return status();
+        case "object_info":
+          connect();
+          return toolResult(pretty.writeValueAsString(new SqlTools().objectInfo(connection,
+              args.path("object").asText(""), args.path("type").asText(null))), false);
+        case "export_rows": {
+          connect();
+          java.util.Map<String, String> set = new java.util.LinkedHashMap<String, String>();
+          java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = args.path("set").fields();
+          while (fields.hasNext()) {
+            java.util.Map.Entry<String, JsonNode> f = fields.next();
+            set.put(f.getKey(), f.getValue().asText());
+          }
+          return toolResult(mapper.writeValueAsString(new SqlTools(maxRows, mask).exportRows(connection,
+              args.path("from").asText(""), args.path("where").asText(null), set, args.path("maxRows").asInt(0), readLibs)), false);
+        }
+        default: return toolResult(name + " does not run on a read-only connection (it reads only " + readLibs + ")", true);
+      }
+    } catch (Exception e) {
+      logger.error("Tool failed: " + name, e);
+      return toolResult(e instanceof java.sql.SQLException
+          ? "SQL error " + ((java.sql.SQLException) e).getSQLState() + ": " + e.getMessage() : e.getMessage(), true);
+    }
+  }
+
+  /* compare: this system's view of the object next to the read-only connection's (otherInfo, from the router) */
+  private ObjectNode compare(JsonNode args) throws Exception {
+    String object = args.path("object").asText("").trim();
+    if (object.isEmpty()) return toolResult("Give the 'object'", true);
+    if (!args.has("otherInfo")) {
+      return toolResult("compare runs from MasterCompiler on the PC (the mastercompiler MCP server in VS Code), which "
+          + "reads the other system; it needs connections.readOnly in the spec", true);
+    }
+    connectWithLibraryList();
+    JsonNode here = new SqlTools().objectInfo(connection, object, args.path("type").asText(null));
+    return toolResult(pretty.writeValueAsString(SqlTools.compare(args.path("buildConnection").asText("build"), here,
+        args.path("otherConnection").asText("other"), args.get("otherInfo"))), false);
   }
 
   private ObjectNode build(JsonNode args, boolean dryRun) throws Exception {
@@ -495,6 +663,7 @@ public class McpServer {
   /* The connection's library list, then the spec's own CHGLIBL / CHGCURLIB hooks, as a build applies them */
   private void connectWithLibraryList() throws Exception {
     connect();
+    if (readOnlyMode) return;  // its library list is the libraries it reads
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
     for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
       executor.executeCommand(hook);
@@ -530,6 +699,13 @@ public class McpServer {
     } catch (IllegalArgumentException e) {
       return toolResult(e.getMessage() + ". The sql tool is read only.", true);
     }
+    if (readOnlyMode) {
+      try {
+        SqlTools.checkLibraries(statement, readLibs);
+      } catch (IllegalArgumentException e) {
+        return toolResult(e.getMessage(), true);
+      }
+    }
     connectWithLibraryList();
     List<String> libl = SqlTools.libraryList(connection);
     if (readOnly == null || readOnly.isClosed() || !String.join(" ", libl).equals(readOnlyLibl)) {
@@ -538,7 +714,7 @@ public class McpServer {
       readOnlyLibl = String.join(" ", libl);
     }
     try {
-      ObjectNode result = new SqlTools().query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
+      ObjectNode result = new SqlTools(maxRows, mask).query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
       return toolResult(pretty.writeValueAsString(result), false);
     } catch (java.sql.SQLException e) {
       return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage(), true);
@@ -555,6 +731,15 @@ public class McpServer {
   private ObjectNode status() throws Exception {
     ObjectNode result = mapper.createObjectNode();
     result.put("version", MasterCompiler.version());
+    if (readOnlyMode) {
+      connect();
+      result.put("readOnly", true);
+      result.put("user", system.getUserId());
+      result.put("system", system.getSystemName());
+      result.put("libraries", String.join(" ", readLibs));
+      if (!mask.isEmpty()) result.put("maskColumns", String.join(" ", mask));
+      return toolResult(pretty.writeValueAsString(result), false);
+    }
     result.put("projectFolder", projectDir().getAbsolutePath());
     result.put("spec", specName());
     connectWithLibraryList();
@@ -580,7 +765,8 @@ public class McpServer {
     List<String> libl = SqlTools.libraryList(connection);
     boolean confirm = args.path("confirm").asBoolean(false);
     try (Connection writer = confirm ? SeedRunner.writeConnection(system, libl) : null) {
-      ObjectNode result = SeedRunner.run(connection, writer, seeds, names, currentLibrary(), protectedLibs(), confirm);
+      ObjectNode result = SeedRunner.run(connection, writer, seeds, names, currentLibrary(), protectedLibs(), confirm,
+          args.get("fetched"));
       return toolResult(pretty.writeValueAsString(result), false);
     }
   }
@@ -848,6 +1034,12 @@ public class McpServer {
   private void connect() throws Exception {
     if (connection != null && !connection.isClosed()) return;
     disconnect();
+    if (readOnlyMode) {
+      system = connector != null ? connector.call() : MasterCompiler.connect(parser);
+      connection = SqlTools.readOnlyConnection(system, readLibs);
+      logger.info("Connected read only to {} as {}, reading {}", system.getSystemName(), system.getUserId(), readLibs);
+      return;
+    }
     /* An MCP server cannot prompt: without credentials, say how to provide them */
     if (!parser.isCode4i() && !IBMiDotEnv.isIBMi() && System.getenv("IBMI_PASSWORD") == null && !new File(".env").isFile()) {
       throw new IllegalArgumentException("No IBM i credentials: start MC with --code4i and IBMI_PASSWORD from a password "

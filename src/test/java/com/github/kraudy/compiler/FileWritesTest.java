@@ -36,21 +36,21 @@ public class FileWritesTest {
         "**free",
         "dcl-f custmast usage(*update:*delete) keyed;",
         "dcl-f table3 usage(*output)",
-        "      extfile('APPLIB/TABLE3');",
+        "      extfile('LIB1/TABLE3');",
         "dcl-f rates keyed;",
         "dcl-f report printer(132) usage(*output);",
         "     for i = 1 to 10;",
         "exec sql insert into ORDHIST values(:x);",
-        "exec sql update APPLIB.ITEMS i set qty = 0 where id = :id;",
+        "exec sql update LIB1.ITEMS i set qty = 0 where id = :id;",
         "exec sql delete from TEMPWORK;",
         "exec sql select * into :r from RATES;",
         "// exec sql delete from COMMENTED;"));
     assertEquals("[delete, update]", w.get("CUSTMAST").toString());
-    assertEquals("[output]", w.get("APPLIB/TABLE3").toString(), "EXTFILE names the file opened");
+    assertEquals("[output]", w.get("LIB1/TABLE3").toString(), "EXTFILE names the file opened");
     assertNull(w.get("RATES"));
     assertNull(w.get("REPORT"));
     assertEquals("[output]", w.get("ORDHIST").toString());
-    assertEquals("[update]", w.get("APPLIB/ITEMS").toString());
+    assertEquals("[update]", w.get("LIB1/ITEMS").toString());
     assertEquals("[delete]", w.get("TEMPWORK").toString());
     assertNull(w.get("COMMENTED"));
     assertEquals(5, w.size(), w.toString());

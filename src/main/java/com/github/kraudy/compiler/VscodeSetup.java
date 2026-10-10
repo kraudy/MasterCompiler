@@ -100,17 +100,41 @@ public final class VscodeSetup {
         ? "  Over SSH, like Code for IBM i: MC runs on the IBM i (SSH key or password). --host-servers to use the ACS ports instead.\n"
         : "  Through the host servers (ports 449, 8470-8476, like ACS).\n");
 
+    /* Read-only connections of the spec: a password prompt each, like the build connection's */
+    List<String> readOnly = new ArrayList<String>();
+    try {
+      for (ReadOnlyConnections.ReadOnly ro : ReadOnlyConnections.load(project).readOnly.values()) readOnly.add(ro.name);
+    } catch (Exception e) {
+      out.append("  connections in the spec not read: ").append(e.getMessage()).append('\n');
+    }
+    for (String name : readOnly) {
+      out.append("  read-only connection ").append(name).append(": its password is asked in its own VS Code prompt\n");
+    }
+
     /* .vscode/mcp.json */
     File mcp = new File(project, ".vscode/mcp.json");
     out.append("\n.vscode/mcp.json\n");
     if (mcp.isFile() && JSONC.readTree(mcp).path("servers").has(SERVER)) {
-      out.append("  kept: already has a \"").append(SERVER).append("\" server\n");
+      ObjectNode content = (ObjectNode) JSONC.readTree(mcp);
+      int added = addReadOnlyPrompts(content, readOnly);
+      if (added == 0) {
+        out.append("  kept: already has a \"").append(SERVER).append("\" server\n");
+      } else if (!isPlainJson(mcp)) {
+        out.append("  not changed: it has comments, which rewriting would lose. Add these password prompts by hand:\n")
+            .append(indent(WRITER.writeValueAsString(fragment(connections, ssh, readOnly)))).append('\n');
+      } else if (print) {
+        out.append("  would add ").append(added).append(" read-only connection password prompt(s), keeping the rest\n");
+      } else {
+        WRITER.writeValue(mcp, content);
+        out.append("  added ").append(added).append(" read-only connection password prompt(s), the rest kept\n");
+      }
     } else if (mcp.isFile() && !isPlainJson(mcp)) {
       out.append("  not changed: it has comments, which rewriting would lose. Add this to it by hand:\n")
-          .append(indent(WRITER.writeValueAsString(fragment(connections, ssh)))).append('\n');
+          .append(indent(WRITER.writeValueAsString(fragment(connections, ssh, readOnly)))).append('\n');
     } else {
       ObjectNode content = mcp.isFile() ? (ObjectNode) JSONC.readTree(mcp) : WRITER.createObjectNode();
       addServer(content, connections, ssh);
+      addReadOnlyPrompts(content, readOnly);
       if (print) {
         out.append(mcp.isFile() ? "  would add the server, keeping the rest:\n" : "  would write:\n")
             .append(indent(WRITER.writeValueAsString(content))).append('\n');
@@ -219,6 +243,33 @@ public final class VscodeSetup {
     }
     ObjectNode servers = root.has("servers") ? (ObjectNode) root.get("servers") : root.putObject("servers");
     servers.set(SERVER, fragment.path("servers").path(SERVER));
+  }
+
+  /* A password prompt and IBMI_PASSWORD_<NAME> for each read-only connection the server lacks; how many were added */
+  static int addReadOnlyPrompts(ObjectNode root, List<String> readOnly) {
+    ObjectNode server = (ObjectNode) root.path("servers").path(SERVER);
+    if (server.isMissingNode() || readOnly.isEmpty()) return 0;
+    ObjectNode env = server.has("env") && server.get("env").isObject() ? (ObjectNode) server.get("env") : server.putObject("env");
+    ArrayNode inputs = root.has("inputs") ? (ArrayNode) root.get("inputs") : root.putArray("inputs");
+    int added = 0;
+    for (String name : readOnly) {
+      String variable = ReadOnlyConnections.passwordVariable(name);
+      if (env.has(variable)) continue;
+      String id = "ibmiPassword_" + variable.substring("IBMI_PASSWORD_".length());
+      boolean present = false;
+      for (JsonNode input : inputs) present |= id.equals(input.path("id").asText());
+      if (!present) input(inputs, id, "IBM i password for the read-only connection " + name
+          + " (leave empty if you log in there with an SSH key)", true);
+      env.put(variable, "${input:" + id + "}");
+      added++;
+    }
+    return added;
+  }
+
+  static ObjectNode fragment(List<Code4iConfig> connections, boolean ssh, List<String> readOnly) {
+    ObjectNode root = fragment(connections, ssh);
+    addReadOnlyPrompts(root, readOnly);
+    return root;
   }
 
   /* {"inputs": [...], "servers": {"mastercompiler": {...}}} for these connections */
