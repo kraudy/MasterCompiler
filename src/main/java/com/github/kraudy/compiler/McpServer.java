@@ -202,6 +202,8 @@ public class McpServer {
     ObjectNode into = impProps.putObject("into");
     into.put("type", "string");
     into.putArray("enum").add("reference").add("repo");
+    impProps.putObject("refresh").put("type", "boolean")
+        .put("description", "into repo: overwrite files already in the project with the IBM i's current members (default false: kept)");
     ObjectNode dry = impProps.putObject("dryRun");
     dry.put("type", "boolean");
     dry.put("description", "true: check what exists and list the files it would write (wouldWrite, notImported); write nothing");
@@ -238,9 +240,11 @@ public class McpServer {
 
     ObjectNode findExp = mapper.createObjectNode();
     findExp.put("type", "object");
-    findExp.putObject("properties").putObject("symbol").put("type", "string")
+    ObjectNode findExpProps = findExp.putObject("properties");
+    findExpProps.putObject("symbol").put("type", "string")
         .put("description", "Exported procedure or data name, e.g. CALCTAX (as in CPD5D02 'Definition not found for symbol')");
-    findExp.putArray("required").add("symbol");
+    findExpProps.putObject("serviceProgram").put("type", "string")
+        .put("description", "Instead of a symbol: list everything this service program (NAME or LIB/NAME) exports");
     tools.add(tool("find_export",
         "Who exports a symbol: service programs on the spec's library list, the binding directories there that list them, "
         + "and project sources that export it. Use it on binder errors (CPD5D02, CPD5D03).",
@@ -623,8 +627,16 @@ public class McpServer {
 
   private ObjectNode findExport(JsonNode args) throws Exception {
     String symbol = args.path("symbol").asText("").trim();
-    if (symbol.isEmpty()) return toolResult("Give the 'symbol'", true);
+    String serviceProgram = args.path("serviceProgram").asText("").trim();
+    if (symbol.isEmpty() && serviceProgram.isEmpty()) return toolResult("Give the 'symbol' (or a 'serviceProgram' to list)", true);
     connectWithLibraryList();
+    if (symbol.isEmpty()) {
+      try {
+        return toolResult(pretty.writeValueAsString(new SqlTools().exportsOf(connection, serviceProgram)), false);
+      } catch (IllegalArgumentException e) {
+        return toolResult(e.getMessage(), true);
+      }
+    }
     java.util.Map<String, String> sources = new java.util.LinkedHashMap<String, String>();
     try {
       BuildSpec spec = loadSpec();
@@ -685,7 +697,7 @@ public class McpServer {
 
     String outDir = (intoRepo ? project.getPath() : new File(project, ".mc/sources").getPath()).replace(File.separatorChar, '/');
     LibraryImporter importer = new LibraryImporter(system, connection, parser.isVerbose());
-    importer.setKeepExisting(intoRepo);
+    importer.setKeepExisting(intoRepo && !args.path("refresh").asBoolean(false));
     importer.setWriteReportFile(false);
     importer.setDryRun(dryRun);
     if (!intoRepo && !dryRun) importer.writeFile(new File(project, ".mc/.gitignore").getPath(), "# MasterCompiler working files\n*");
@@ -713,10 +725,22 @@ public class McpServer {
     ArrayNode written = result.putArray(dryRun ? "wouldWrite" : "written");
     ArrayNode kept = result.putArray("kept");
     if (!intoRepo && !dryRun) written.add(".mc/.gitignore");
+    /* A note shared by several files is given once (notes) and referred to by number */
+    java.util.Map<String, Integer> noteCount = new java.util.HashMap<String, Integer>();
+    for (LibraryImporter.ImportedMember file : files) if (file.note != null) noteCount.merge(file.note, 1, Integer::sum);
+    ArrayNode notes = mapper.createArrayNode();
+    java.util.Map<String, Integer> noteIndex = new java.util.HashMap<String, Integer>();
     ArrayNode fileList = mapper.createArrayNode();
     for (LibraryImporter.ImportedMember file : files) {
       if ("copybook".equals(file.how)) copybooksFound++;
       ObjectNode entry = pretty.valueToTree(file);
+      if (file.note != null && noteCount.get(file.note) > 1) {
+        if (!noteIndex.containsKey(file.note)) {
+          noteIndex.put(file.note, notes.size() + 1);
+          notes.add(file.note);
+        }
+        entry.put("note", "see notes[" + noteIndex.get(file.note) + "]");
+      }
       if (!"error".equals(file.how)) {
         entry.put("path", prefix + file.file);
         (file.kept != null ? kept : written).add(prefix + file.file);
@@ -729,6 +753,7 @@ public class McpServer {
     if (copybooksFound == 0) {
       result.put("copybookNote", "No /COPY, /INCLUDE or EXEC SQL INCLUDE member was found in these sources (or none is in this selection)");
     }
+    if (notes.size() > 0) result.set("notes", notes);
     result.set("files", fileList);
     result.put("next", dryRun ? "Nothing written. Call again without dryRun to import."
         : notImported.size() > 0 ? "Some sources were not imported: see notImported. The rest was imported."

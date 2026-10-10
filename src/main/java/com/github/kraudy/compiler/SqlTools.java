@@ -255,6 +255,34 @@ final class SqlTools {
     return result;
   }
 
+  /* What one service program exports (LIB/NAME, or NAME resolved on the library list) */
+  ObjectNode exportsOf(Connection connection, String serviceProgram) throws SQLException {
+    String name = serviceProgram.trim().toUpperCase(Locale.ROOT).replace('.', '/');
+    String lib;
+    if (name.contains("/")) {
+      lib = name.substring(0, name.indexOf('/'));
+      name = name.substring(name.indexOf('/') + 1);
+    } else {
+      String resolved = findObject(connection, name, "*SRVPGM").path("resolvesTo").asText("");
+      if (!resolved.contains("/")) throw new IllegalArgumentException("Service program " + name + " is not on the library list");
+      lib = resolved.substring(0, resolved.indexOf('/'));
+    }
+    ObjectNode result = mapper.createObjectNode();
+    result.put("serviceProgram", lib + "/" + name);
+    ArrayNode procedures = result.putArray("procedures");
+    ArrayNode data = result.putArray("data");
+    try (PreparedStatement stmt = connection.prepareStatement(
+        "SELECT TRIM(SYMBOL_NAME), TRIM(SYMBOL_USAGE) FROM QSYS2.PROGRAM_EXPORT_IMPORT_INFO " +
+        "WHERE PROGRAM_LIBRARY = ? AND PROGRAM_NAME = ? AND OBJECT_TYPE = '*SRVPGM' AND SYMBOL_USAGE IN ('*PROCEXP', '*DATAEXP')")) {
+      stmt.setString(1, lib);
+      stmt.setString(2, name);
+      try (ResultSet rs = stmt.executeQuery()) {
+        while (rs.next()) ("*DATAEXP".equals(rs.getString(2)) ? data : procedures).add(rs.getString(1));
+      }
+    }
+    return result;
+  }
+
   /* *USE-like authority (QSYS2.SQL_CHECK_AUTHORITY); null text when the system cannot tell */
   private static String authorized(Connection connection, String lib, String object, String type) {
     try (PreparedStatement stmt = connection.prepareStatement("VALUES QSYS2.SQL_CHECK_AUTHORITY(?, ?, ?)")) {

@@ -213,8 +213,16 @@ public class LibraryImporter {
       return;
     }
     if (isCopied) {
-      entry.file = dir + entry.member + ".include." + type;
+      /* TXT / untyped members used as RPG copybooks: .include.rpgle, so editors and the scan read them as RPG */
+      String copyType = type.equals("txt") || type.isEmpty() ? "rpgle" : type;
+      entry.file = dir + entry.member + ".include." + copyType;
       entry.how = "copybook";
+      return;
+    }
+    if (isDocumentation(lines)) {
+      /* only comments: a description member kept next to the program, not something to compile */
+      entry.file = dir + entry.member + ".doc.txt";
+      entry.how = "documentation";
       return;
     }
     entry.file = dir + entry.member + "." + type;
@@ -350,6 +358,29 @@ public class LibraryImporter {
       built.putIfAbsent("SQL:" + key, new Built(key, sqlObjects.get(key), "sql_object"));
     }
     return built;
+  }
+
+  /* Every non-blank line is a comment (RPG * in column 7 or //, CL and C style block comments, SQL --) */
+  static boolean isDocumentation(List<String> lines) {
+    boolean any = false;
+    boolean inBlock = false;
+    for (String line : lines) {
+      String code = line.trim();
+      if (code.isEmpty()) continue;
+      any = true;
+      if (inBlock) {
+        if (code.contains("*/")) inBlock = false;
+        continue;
+      }
+      if (line.length() > 6 && line.charAt(6) == '*' && line.substring(0, 6).trim().length() <= 5) continue;
+      if (code.startsWith("//") || code.startsWith("--") || code.startsWith("*")) continue;
+      if (code.startsWith("/*")) {
+        if (!code.contains("*/")) inBlock = true;
+        continue;
+      }
+      return false;
+    }
+    return any;
   }
 
   /* ctl-opt nomain / H NOMAIN outside comments */

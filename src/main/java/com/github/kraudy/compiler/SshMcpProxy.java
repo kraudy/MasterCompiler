@@ -267,7 +267,7 @@ public class SshMcpProxy {
       JsonNode result = response.path("result");
       if (result.path("isError").asBoolean(false)) return line;
       JsonNode report = mapper.readTree(result.path("content").path(0).path("text").asText("{}"));
-      if (!report.isObject()) return line;
+      if (!report.isObject() || report.path("dryRun").asBoolean(false)) return line;  // a dry run writes and downloads nothing
       /* Written now, plus files kept on the IBM i that this PC does not have (e.g. from a call that failed before) */
       int downloaded = 0;
       for (String list : new String[] { "written", "kept" }) {

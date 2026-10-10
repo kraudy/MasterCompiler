@@ -87,7 +87,8 @@ public class SourceLocator {
       if (found.isEmpty()) {
         Located missing = new Located();
         missing.request = request.trim();
-        missing.note = "Not found in " + (library.equals("*LIBL") ? "the library list" : library) + " as " + types;
+        missing.note = "Not found in " + (library.equals("*LIBL") ? "the library list" : library) + " as " + types
+            + elsewhere(name, types);
         all.add(missing);
         continue;
       }
@@ -97,6 +98,35 @@ public class SourceLocator {
       }
     }
     return all;
+  }
+
+  /* Where else it is, and whether the user may use it there (a missing authority looks like "not found") */
+  private String elsewhere(String name, String types) {
+    List<String> found = new ArrayList<String>();
+    try (PreparedStatement stmt = connection.prepareStatement(
+        "SELECT TRIM(OBJLIB), TRIM(OBJTYPE) FROM TABLE(QSYS2.OBJECT_STATISTICS('*ALL', ?, OBJECT_NAME => ?)) X")) {
+      stmt.setString(1, types);
+      stmt.setString(2, name);
+      stmt.setQueryTimeout(60);
+      try (ResultSet rs = stmt.executeQuery()) {
+        while (rs.next() && found.size() < 10) {
+          String auth = "";
+          try (PreparedStatement check = connection.prepareStatement("VALUES QSYS2.SQL_CHECK_AUTHORITY(?, ?, ?)")) {
+            check.setString(1, rs.getString(1));
+            check.setString(2, name);
+            check.setString(3, rs.getString(2));
+            try (ResultSet a = check.executeQuery()) {
+              if (a.next()) auth = a.getInt(1) == 1 ? "" : ", no *USE authority";
+            }
+          } catch (SQLException unknown) { /* authority not checked */ }
+          found.add(rs.getString(1) + " (" + rs.getString(2) + auth + ")");
+        }
+      }
+    } catch (SQLException e) {
+      return "";
+    }
+    return found.isEmpty() ? ". It is in no library you can see (it may not exist, or you have no authority to it)"
+        : ". It exists in " + String.join(", ", found) + ", not on the library list: add the library, or ask for it as LIB/NAME";
   }
 
   /* The object in its first library-list library (or the given one), one entry per type found there */
