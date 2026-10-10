@@ -200,11 +200,13 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 
 | Tool | Arguments | Returns |
 |------|-----------|---------|
-| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true`) | The build report above; `isError` when the build failed |
+| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true`), `minSeverity` (default 20) | The build report above, compacted: `summary` per target first, messages below `minSeverity` and duplicates dropped, joblog severity 30+ in `errors`; `warnings` (e.g. two sources for one object); `isError` when the build failed |
 | `plan` | same as `build` | The report with `planned` targets; compiles nothing |
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
 | `joblog` | none | The job's messages since the previous `joblog` call |
+| `sql` | `statement`, `maxRows`, `maxColumns` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
+| `find_object` | `name`, `type` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
 | `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
 
@@ -217,40 +219,19 @@ a copybook's data structure), call `find_source` with those names, then `import_
 and read the copies under `.mc/sources/`. Import with `into: repo` only when the user wants to
 change that object: it then becomes part of the build and is compiled into their library.
 
-### Db2 queries
+### Db2 queries and objects
 
-For data and catalog questions (columns of a table, which objects use a file, rows in a
-table) use the **Db2 for IBM i** VS Code extension: its "Run SQL statement" tool (`#result`)
-and `@db2i` chat participant use the same Code for IBM i connection. MC has no SQL tool.
-Run only `SELECT` unless the user explicitly asks for a change; that tool executes any
-statement. If it is not installed, suggest the "Db2 for IBM i" extension (`halcyontechltd.vscode-db2i`).
-Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.OBJECT_STATISTICS`, `QSYS2.PROGRAM_INFO`,
-`QSYS2.SYSPARTITIONSTAT` (source members).
+Use MC's `sql` tool for data and catalog questions (columns of a table, rows, which objects use a
+file): one `SELECT` / `VALUES` / `WITH` per call on a connection the driver opens read only, with
+the spec's library list, so unqualified names resolve the way the programs see them. Results are
+capped (`maxRows`, default 100; `maxColumns`, default 40). It cannot change data; never try to work
+around that. Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.SYSTABLES`, `QSYS2.SYSTABLEDEP`,
+`QSYS2.OBJECT_STATISTICS`, `QSYS2.PROGRAM_INFO`, `QSYS2.SYSPARTITIONSTAT` (source members).
 
-In VS Code with Copilot (Windows included), `java -jar MC.jar --setup-vscode --project .` writes
-`.vscode/mcp.json` for you: MC starts on the PC with `--code4i` (the Code for IBM i connection:
-host, user, library list) and `--project ${workspaceFolder}`, uploads itself and the sources over
-SSH and runs the tools on the IBM i; files `import_source` writes there are copied back to the PC.
-VS Code prompts for the password. See the `mastercompiler-vscode` skill.
+`find_object NAME *TYPE` lists every library holding an object, the one the library list resolves to
+(`resolvesTo`) and your authority to each: check it before relying on an unqualified name.
 
-Or run it **on the IBM i over SSH**, so it uses the SSH user's own job and no credentials
-file (the login banner goes to stderr, so stdio stays clean):
-
-```json
-{ "mcpServers": { "mastercompiler": {
-    "command": "ssh",
-    "args": ["-S", "/tmp/ibmi.sock", "USER@HOST",
-             "cd /home/USER/repo && java -jar MC.jar --mcp -f build.yaml 2>/dev/null"] } } }
-```
-
-Or **remotely** from the machine with the checkout, with `.env` in the working directory,
-pushing sources before each build:
-
-```json
-{ "mcpServers": { "mastercompiler": {
-    "command": "java",
-    "args": ["-jar", "MC.jar", "--mcp", "-f", "build.yaml", "--push", "/home/USER/build"] } } }
-```
+The Db2 for IBM i VS Code extension (`#result`, `@db2i`) works too when it is installed.
 
 ## Edit–compile–fix loop
 

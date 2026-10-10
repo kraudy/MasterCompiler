@@ -208,6 +208,34 @@ public class McpServer {
     into.put("description", "reference (default): read-only copies under .mc/sources/<LIB>/<SRCPF>/ (git-ignored, "
         + "never built). repo: into the project as <SRCPF>/<OBJECT>.<type>.<srctype>, so the next build compiles "
         + "it into the current library; only when the user wants to change that object. Existing files are kept.");
+    ObjectNode sqlSchema = mapper.createObjectNode();
+    sqlSchema.put("type", "object");
+    ObjectNode sqlProps = sqlSchema.putObject("properties");
+    sqlProps.putObject("statement").put("type", "string")
+        .put("description", "One SELECT, VALUES or WITH query. Unqualified names resolve through the spec's library list");
+    sqlProps.putObject("maxRows").put("type", "integer")
+        .put("description", "Rows to return (default " + SqlTools.DEFAULT_ROWS + ", at most " + SqlTools.MAX_ROWS + ")");
+    sqlProps.putObject("maxColumns").put("type", "integer")
+        .put("description", "Columns to return (default " + SqlTools.DEFAULT_COLUMNS + ")");
+    sqlSchema.putArray("required").add("statement");
+    tools.add(tool("sql",
+        "Read-only Db2 for i query on the IBM i: table rows, catalog views (QSYS2.SYSCOLUMNS2, SYSTABLES, "
+        + "OBJECT_STATISTICS, PROGRAM_INFO, ...). The connection is opened read only, so only SELECT / VALUES / WITH "
+        + "run; it has the spec's library list (system naming: LIB/TABLE or LIB.TABLE). Long values are cut at "
+        + SqlTools.MAX_VALUE_CHARS + " characters.",
+        sqlSchema));
+
+    ObjectNode findObj = mapper.createObjectNode();
+    findObj.put("type", "object");
+    ObjectNode findObjProps = findObj.putObject("properties");
+    findObjProps.putObject("name").put("type", "string").put("description", "Object name, e.g. CUSTMAST");
+    findObjProps.putObject("type").put("type", "string").put("description", "Object type, e.g. *FILE, *PGM (default: any)");
+    findObj.putArray("required").add("name");
+    tools.add(tool("find_object",
+        "Every library holding an object, which one the spec's library list resolves to (resolvesTo), and whether "
+        + "you are authorized to use each. Use it before reading or changing anything named without a library.",
+        findObj));
+
     tools.add(tool("import_source",
         "Copy sources from the IBM i into the project folder, named with MC's conventions (copybooks as "
         + "*.include.*). Takes the objects (it finds their sources and /COPY members like find_source) or source "
@@ -278,6 +306,8 @@ public class McpServer {
         case "clean":  return clean(args);
         case "joblog": return joblog();
         case "find_source":   return findSource(args);
+        case "sql":           return sql(args);
+        case "find_object":   return findObject(args);
         case "import_source": return importSource(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -424,6 +454,40 @@ public class McpServer {
       if (!object.asText("").trim().isEmpty()) objects.add(object.asText().trim());
     }
     return objects;
+  }
+
+  /* Read-only connection for the sql tool, kept while the library list stays the same */
+  private Connection readOnly;
+  private String readOnlyLibl;
+
+  private ObjectNode sql(JsonNode args) throws Exception {
+    String statement = args.path("statement").asText("").trim();
+    if (statement.isEmpty()) return toolResult("Give the query in 'statement'", true);
+    try {
+      SqlTools.checkReadOnly(statement);
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage() + ". The sql tool is read only.", true);
+    }
+    connectWithLibraryList();
+    List<String> libl = SqlTools.libraryList(connection);
+    if (readOnly == null || readOnly.isClosed() || !String.join(" ", libl).equals(readOnlyLibl)) {
+      if (readOnly != null) try { readOnly.close(); } catch (Exception ignored) { /* reopened below */ }
+      readOnly = SqlTools.readOnlyConnection(system, libl);
+      readOnlyLibl = String.join(" ", libl);
+    }
+    try {
+      ObjectNode result = new SqlTools().query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
+      return toolResult(pretty.writeValueAsString(result), false);
+    } catch (java.sql.SQLException e) {
+      return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage(), true);
+    }
+  }
+
+  private ObjectNode findObject(JsonNode args) throws Exception {
+    String name = args.path("name").asText("").trim();
+    if (name.isEmpty()) return toolResult("Give the object 'name'", true);
+    connectWithLibraryList();
+    return toolResult(pretty.writeValueAsString(new SqlTools().findObject(connection, name, args.path("type").asText(null))), false);
   }
 
   private ObjectNode findSource(JsonNode args) throws Exception {
@@ -595,6 +659,10 @@ public class McpServer {
   }
 
   private void disconnect() {
+    try {
+      if (readOnly != null && !readOnly.isClosed()) readOnly.close();
+    } catch (Exception ignored) {}
+    readOnly = null;
     try {
       if (connection != null && !connection.isClosed()) connection.close();
     } catch (Exception ignored) {}

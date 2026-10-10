@@ -208,9 +208,8 @@ Tell the user:
 Then check it works: call `plan` without arguments. A list of targets means MC reached the
 IBM i and understood the project.
 
-For SQL (table columns, data, the catalog), MC has no tool: check that the **Db2 for IBM i**
-extension (`halcyontechltd.vscode-db2i`) is installed and suggest it if not. Its "Run SQL
-statement" tool uses the same Code for IBM i connection.
+For SQL (table columns, data, the catalog), use MC's read-only `sql` tool; `find_object` tells
+which library an object resolves to.
 
 ## Manual configuration (when setup cannot run)
 
