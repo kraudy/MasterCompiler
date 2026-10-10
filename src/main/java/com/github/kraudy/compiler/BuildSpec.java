@@ -107,6 +107,10 @@ public class BuildSpec {
     @JsonDeserialize(using = CommandStringParser.CommandFormDeserializer.class)
     public CommandStringParser.CommandForm command;
 
+    /* Binding directories: true deletes an existing one and creates it again (only the spec's entries remain) */
+    @JsonProperty(value = "recreate", required = false)
+    public Boolean recreate;
+
     /* Per-target compilation command params */
     @JsonProperty(value = "params", required = false)
     @JsonDeserialize(using = ParamMapDeserializer.class)
@@ -135,7 +139,7 @@ public class BuildSpec {
     @JsonAnySetter
     public void unknown(String name, Object value) {
       throw new IllegalArgumentException(
-          "Unknown field in target '" + name + "'. Valid fields: params, command, before, after, success, failure.");
+          "Unknown field in target '" + name + "'. Valid fields: params, command, recreate, before, after, success, failure.");
     }
   }
 }

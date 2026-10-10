@@ -9,6 +9,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -188,6 +189,69 @@ final class SqlTools {
     result.put("resolvesTo", winner != null ? winner : "not on the library list");
     result.put("libraryList", String.join(" ", libl));
     if (found.size() == 0) result.put("note", "No such object in any library you can see");
+    return result;
+  }
+
+  /*
+   * Who exports a procedure or data symbol: service programs on the library list (and the binding
+   * directories there that list them), and project sources that export it (dcl-proc ... export, P ... B EXPORT)
+   */
+  ObjectNode findExport(Connection connection, String symbol, java.util.Map<String, String> projectSources) throws SQLException {
+    List<String> libl = libraryList(connection);
+    ObjectNode result = mapper.createObjectNode();
+    result.put("symbol", symbol);
+    ArrayNode exporters = result.putArray("servicePrograms");
+    List<String> srvpgms = new ArrayList<String>();
+    if (!libl.isEmpty()) {
+      String in = "'" + String.join("','", libl) + "'";
+      try (PreparedStatement stmt = connection.prepareStatement(
+          "SELECT TRIM(PROGRAM_LIBRARY), TRIM(PROGRAM_NAME), TRIM(SYMBOL_NAME), TRIM(SYMBOL_USAGE) " +
+          "FROM QSYS2.PROGRAM_EXPORT_IMPORT_INFO WHERE PROGRAM_LIBRARY IN (" + in + ") AND OBJECT_TYPE = '*SRVPGM' " +
+          "AND UPPER(SYMBOL_NAME) = UPPER(?) AND SYMBOL_USAGE IN ('*PROCEXP', '*DATAEXP')")) {
+        stmt.setString(1, symbol.trim());
+        stmt.setQueryTimeout(TIMEOUT_SECONDS);
+        try (ResultSet rs = stmt.executeQuery()) {
+          while (rs.next()) {
+            ObjectNode e = exporters.addObject();
+            e.put("serviceProgram", rs.getString(1) + "/" + rs.getString(2));
+            e.put("symbol", rs.getString(3));
+            e.put("kind", "*DATAEXP".equals(rs.getString(4)) ? "data" : "procedure");
+            int position = libl.indexOf(rs.getString(1));
+            if (position >= 0) e.put("libraryListPosition", position + 1);
+            srvpgms.add(rs.getString(2));
+          }
+        }
+      }
+      if (!srvpgms.isEmpty()) {
+        ArrayNode dirs = result.putArray("bindingDirectories");
+        try (PreparedStatement stmt = connection.prepareStatement(
+            "SELECT TRIM(BINDING_DIRECTORY_LIBRARY), TRIM(BINDING_DIRECTORY), TRIM(ENTRY_LIBRARY), TRIM(ENTRY) " +
+            "FROM QSYS2.BINDING_DIRECTORY_INFO WHERE BINDING_DIRECTORY_LIBRARY IN (" + in + ") AND ENTRY_TYPE = '*SRVPGM' " +
+            "AND ENTRY IN ('" + String.join("','", srvpgms) + "')")) {
+          try (ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) dirs.add(rs.getString(1) + "/" + rs.getString(2) + " lists " + rs.getString(3) + "/" + rs.getString(4));
+          }
+        } catch (SQLException e) {
+          result.put("bindingDirectoriesNote", "Not read: " + e.getMessage());
+        }
+      }
+    }
+    ArrayNode project = result.putArray("projectSources");
+    Pattern free = Pattern.compile("^\\s*DCL-PROC\\s+" + Pattern.quote(symbol.trim()) + "\\b[^;]*\\bEXPORT\\b", Pattern.CASE_INSENSITIVE);
+    Pattern fixed = Pattern.compile("^.{5}P" + Pattern.quote(symbol.trim().toUpperCase(Locale.ROOT)) + "\\s+B\\b.*\\bEXPORT\\b",
+        Pattern.CASE_INSENSITIVE);
+    for (java.util.Map.Entry<String, String> source : projectSources.entrySet()) {
+      for (String line : source.getValue().split("\\R")) {
+        if (free.matcher(line).find() || fixed.matcher(line).find()) {
+          project.add(source.getKey());
+          break;
+        }
+      }
+    }
+    if (exporters.size() == 0 && project.size() == 0) {
+      result.put("note", "No service program on the library list and no project source exports it: a CPD5D02 "
+          + "'Definition not found' means the module or service program is missing from the bind");
+    }
     return result;
   }
 

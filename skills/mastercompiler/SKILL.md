@@ -69,6 +69,31 @@ targets:             # compiled in this order: dependencies first
 - Params are CL keywords; values are flexible (`no`, `*NO`, `NO` all work).
 - A full CRT* command can be pasted as `command:`; `params:` still wins.
 
+### Hooks, protected libraries, binding directories
+
+```yaml
+protectedLibs: [PRODLIB]       # a program that can write to a file resolving here fails before compiling
+before:
+  - ChgLibl: { LibL: "DEVLIB APPLIB" }       # also applied by plan, find_source, sql, ...
+  - Cmd: CPYOBJS FROMLIB(APPLIB) TOLIB(DEVLIB)   # any CL command, run as written
+    ignore: [CPF2105]                        # like MONMSG: these messages do not fail the hook
+  - DltObj: { Obj: "*CURLIB/WORK", ObjType: "*FILE" }
+    ignore: [CPF2105]
+targets:
+  curlib.APPDIR.bnddir.bnddir:
+    recreate: true               # delete and create it: only the spec's ADDBNDDIRE entries remain
+```
+
+- Commands MC knows are validated (params and values); other names (shop commands) are sent
+  as written, so a misspelled command name only fails when it runs.
+- Each RPG / COBOL target lists in `writes` the database files it can change (F-specs U/O/A,
+  `dcl-f usage(*update/*output/*delete)`, `EXTFILE`, SQL INSERT / UPDATE / DELETE / MERGE) and the
+  library each resolves to on the library list. With `protectedLibs`, a write there fails the
+  target with the file named. Overrides (OVRDBF) and dynamic SQL are not seen.
+- The report's `hooks` lists every hook command in order with its outcome (`ok`, `planned` in a
+  plan, `ignored CPFxxxx`, `failed`). CHGLIBL / CHGCURLIB hooks also run in a plan, so a plan sees
+  the spec's library list.
+
 ## Generate a spec instead of writing one
 
 ```bash
@@ -207,6 +232,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `joblog` | none | The job's messages since the previous `joblog` call |
 | `sql` | `statement`, `maxRows`, `maxColumns` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
 | `find_object` | `name`, `type` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
+| `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`) | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
 | `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
 

@@ -87,7 +87,10 @@ public class CommandExecutor {
   public void executeCommand(TargetKey key) throws Exception{
     if (key.objectExists()) {
       /* A binding directory is kept as it is (other entries stay); its ADDBNDDIRE hooks still run */
-      if (key.getObjectTypeEnum() == ObjectType.BNDDIR) {
+      if (key.getObjectTypeEnum() == ObjectType.BNDDIR && key.isRecreate()) {
+        logger.warn("Deleting existing binding directory to create it again (recreate: true): " + key.asString());
+        deleteObject(key);
+      } else if (key.getObjectTypeEnum() == ObjectType.BNDDIR) {
         logger.info("Binding directory exists, kept: " + key.asString());
         key.setLastBuild(getCurrentTime());
         return;

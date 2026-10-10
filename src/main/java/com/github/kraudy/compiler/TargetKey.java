@@ -434,6 +434,17 @@ public class TargetKey {
   /* Objects the source uses that the project does not build ("*PGM CUSTSRV"), from the dependency scan */
   private final java.util.Set<String> externals = new java.util.TreeSet<String>();
 
+  /* recreate: true in the spec (binding directories): delete and create it, so the spec's entries are all it holds */
+  private boolean recreate;
+
+  public boolean isRecreate() {
+    return recreate;
+  }
+
+  public void setRecreate(boolean recreate) {
+    this.recreate = recreate;
+  }
+
   public synchronized void addExternal(String objectType, String name) {
     externals.add(name.toUpperCase() + " " + objectType);
   }

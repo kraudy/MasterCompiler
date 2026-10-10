@@ -287,6 +287,8 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.before);
         }
 
+        key.setRecreate(Boolean.TRUE.equals(targetSpec.recreate));
+
         /* Files the program can change, resolved like at run time; one in a protected library fails the target */
         checkWrites(key);
 
@@ -442,6 +444,10 @@ public class MasterCompiler{
     result.command = command;
     result.error = error;
     result.writes = targetWrites.get(key);
+    if (key.objectExists() && key.isRecreate() && key.getObjectTypeEnum() == CompilationPattern.ObjectType.BNDDIR) {
+      result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *BNDDIR and create it again (recreate: true): "
+          + "only the spec's entries remain";
+    }
     if (key.objectExists() && CommandExecutor.RECREATED.contains(key.getObjectTypeEnum())) {
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *" + key.getObjectTypeEnum().name()
           + " and create it again" + (key.getObjectTypeEnum() == CompilationPattern.ObjectType.PF ? ": its data is lost" : "");

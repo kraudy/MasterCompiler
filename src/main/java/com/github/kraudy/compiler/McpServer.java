@@ -236,6 +236,16 @@ public class McpServer {
         + "you are authorized to use each. Use it before reading or changing anything named without a library.",
         findObj));
 
+    ObjectNode findExp = mapper.createObjectNode();
+    findExp.put("type", "object");
+    findExp.putObject("properties").putObject("symbol").put("type", "string")
+        .put("description", "Exported procedure or data name, e.g. CALCTAX (as in CPD5D02 'Definition not found for symbol')");
+    findExp.putArray("required").add("symbol");
+    tools.add(tool("find_export",
+        "Who exports a symbol: service programs on the spec's library list, the binding directories there that list them, "
+        + "and project sources that export it. Use it on binder errors (CPD5D02, CPD5D03).",
+        findExp));
+
     tools.add(tool("import_source",
         "Copy sources from the IBM i into the project folder, named with MC's conventions (copybooks as "
         + "*.include.*). Takes the objects (it finds their sources and /COPY members like find_source) or source "
@@ -308,6 +318,7 @@ public class McpServer {
         case "find_source":   return findSource(args);
         case "sql":           return sql(args);
         case "find_object":   return findObject(args);
+        case "find_export":   return findExport(args);
         case "import_source": return importSource(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -488,6 +499,27 @@ public class McpServer {
     if (name.isEmpty()) return toolResult("Give the object 'name'", true);
     connectWithLibraryList();
     return toolResult(pretty.writeValueAsString(new SqlTools().findObject(connection, name, args.path("type").asText(null))), false);
+  }
+
+  private ObjectNode findExport(JsonNode args) throws Exception {
+    String symbol = args.path("symbol").asText("").trim();
+    if (symbol.isEmpty()) return toolResult("Give the 'symbol'", true);
+    connectWithLibraryList();
+    java.util.Map<String, String> sources = new java.util.LinkedHashMap<String, String>();
+    try {
+      BuildSpec spec = loadSpec();
+      File base = spec.getBaseDirectory() != null ? new File(spec.getBaseDirectory()) : projectDir();
+      for (TargetKey key : spec.targets.keySet()) {
+        if (!key.containsStreamFile()) continue;
+        File file = new File(key.getStreamFile());
+        if (!file.isAbsolute()) file = new File(base, key.getStreamFile());
+        if (file.isFile()) sources.put(key.getStreamFile(), new String(java.nio.file.Files.readAllBytes(file.toPath()),
+            java.nio.charset.StandardCharsets.UTF_8));
+      }
+    } catch (Exception noSpec) {
+      /* only the IBM i side */
+    }
+    return toolResult(pretty.writeValueAsString(new SqlTools().findExport(connection, symbol, sources)), false);
   }
 
   private ObjectNode findSource(JsonNode args) throws Exception {

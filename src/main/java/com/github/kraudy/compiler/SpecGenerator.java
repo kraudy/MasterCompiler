@@ -244,6 +244,8 @@ public class SpecGenerator {
       BuildSpec.TargetSpec scannedSpec = scanned.targets.get(scannedKey);
       if (scannedSpec == null) continue;
 
+      if (baseSpec.recreate != null) scannedSpec.recreate = baseSpec.recreate;
+
       /* Params: base fills/overrides; keep scan SRCSTMF when base omits it */
       String scanSrcstmf = scannedSpec.params.get(ParamCmd.SRCSTMF);
       if (baseSpec.params != null) {
@@ -288,6 +290,7 @@ public class SpecGenerator {
     if (src.after != null) dst.after.addAll(src.after);
     if (src.success != null) dst.success.addAll(src.success);
     if (src.failure != null) dst.failure.addAll(src.failure);
+    dst.recreate = src.recreate;
     return dst;
   }
 

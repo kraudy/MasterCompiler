@@ -33,7 +33,7 @@ public class SourceLocator {
   private static final Pattern RPG_COPY = Pattern.compile("^.{0,6}?\\s*/(?:COPY|INCLUDE)\\s+(\\S+)", Pattern.CASE_INSENSITIVE);
   private static final Pattern SQL_INCLUDE = Pattern.compile("\\bEXEC\\s+SQL\\s+INCLUDE\\s+(\\S+?)\\s*;?\\s*$", Pattern.CASE_INSENSITIVE);
   private static final List<String> DDL_TYPES = Arrays.asList("TABLE", "VIEW", "INDEX");
-  private static final String DEFAULT_TYPES = "*PGM *SRVPGM *MODULE *FILE *CMD";
+  private static final String DEFAULT_TYPES = "*PGM *SRVPGM *MODULE *FILE *CMD *BNDDIR";
   private static final int COPY_DEPTH = 5;
 
   private final Connection connection;
@@ -68,6 +68,8 @@ public class SourceLocator {
     public String sqlType;
     public List<SourceRef> sources = new ArrayList<SourceRef>();
     public List<SourceRef> copybooks = new ArrayList<SourceRef>();
+    public List<String> boundServicePrograms;   // *PGM / *SRVPGM: what it binds to
+    public List<String> bindingDirectoryEntries; // *BNDDIR: what it holds
     public String note;
   }
 
@@ -142,7 +144,17 @@ public class SourceLocator {
 
   private void sources(Located located, String lib, String obj, String type, String srcLib, String srcFile,
       String srcMbr, Timestamp compiled, String longName) throws SQLException {
+    if (type.equals("*BNDDIR")) {
+      located.bindingDirectoryEntries = list(
+          "SELECT TRIM(ENTRY_LIBRARY) || '/' || TRIM(ENTRY) || ' ' || TRIM(ENTRY_TYPE) FROM QSYS2.BINDING_DIRECTORY_INFO " +
+          "WHERE BINDING_DIRECTORY_LIBRARY = ? AND BINDING_DIRECTORY = ?", lib, obj);
+      located.note = "A binding directory has no source: its entries are listed";
+      return;
+    }
     if (type.equals("*PGM") || type.equals("*SRVPGM")) {
+      located.boundServicePrograms = list(
+          "SELECT TRIM(BOUND_SERVICE_PROGRAM_LIBRARY) || '/' || TRIM(BOUND_SERVICE_PROGRAM) FROM QSYS2.BOUND_SRVPGM_INFO " +
+          "WHERE PROGRAM_LIBRARY = ? AND PROGRAM_NAME = ? AND OBJECT_TYPE = '" + type + "'", lib, obj);
       boundModules(located, lib, obj, type);
       if (type.equals("*SRVPGM")) binderSource(located, lib, obj);
       if (!located.sources.isEmpty()) return;
@@ -173,6 +185,21 @@ public class SourceLocator {
     located.note = located.sqlType != null
         ? "SQL " + located.sqlType.toLowerCase() + ": no source member recorded; read its definition with SQL (Db2 for i)"
         : "The object description names no source member";
+  }
+
+  /* One text column per row; null when the catalog view is not there (older releases) */
+  private List<String> list(String sql, String a, String b) {
+    List<String> rows = new ArrayList<String>();
+    try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+      stmt.setString(1, a);
+      stmt.setString(2, b);
+      try (ResultSet rs = stmt.executeQuery()) {
+        while (rs.next()) rows.add(rs.getString(1));
+      }
+    } catch (SQLException e) {
+      return null;
+    }
+    return rows;
   }
 
   /* ILE: one source per bound module (a module named like its *PGM is a CRTBND* program) */
