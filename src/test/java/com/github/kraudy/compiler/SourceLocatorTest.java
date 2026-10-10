@@ -39,4 +39,24 @@ public class SourceLocatorTest {
         LibraryImporter.missing("MYLIB", Arrays.asList("QDDSSRC")));
     assertEquals("no source members in library MYLIB", LibraryImporter.missing("MYLIB", Arrays.asList("*")));
   }
+
+  @Test
+  void test_Fixed_Form_Copy_Variants() {
+    List<String[]> copies = SourceLocator.copyDirectives(Arrays.asList(
+        "     D/COPY QCPYSRC,DSFMT",
+        "MOD01 /COPY QCPYSRC,CAMBIO",
+        "0010 /copy qcpysrc,añoñ#",
+        "     C*/COPY QCPYSRC,COMMENTED"), "QRPGSRC");
+    assertEquals(3, copies.size());
+    assertArrayEquals(new String[] { null, "QCPYSRC", "DSFMT" }, copies.get(0));
+    assertArrayEquals(new String[] { null, "QCPYSRC", "CAMBIO" }, copies.get(1));
+    assertArrayEquals(new String[] { null, "QCPYSRC", "AÑOÑ#" }, copies.get(2));
+  }
+
+  @Test
+  void test_NoMain() {
+    assertTrue(LibraryImporter.isNoMain(Arrays.asList("**free", "ctl-opt nomain option(*srcstmt);")));
+    assertTrue(LibraryImporter.isNoMain(Arrays.asList("     H NOMAIN")));
+    assertFalse(LibraryImporter.isNoMain(Arrays.asList("**free", "// ctl-opt nomain", "dsply 'x';")));
+  }
 }

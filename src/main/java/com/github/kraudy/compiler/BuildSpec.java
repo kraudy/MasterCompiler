@@ -24,6 +24,10 @@ public class BuildSpec {
   public String getBaseDirectory() { return baseDirectory; }
 
   /* Set once the dependency graph is built, so a build does not scan the sources a second time */
+  /* Problems found while reading the sources (e.g. two files building the same object), shown in the build report */
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  public final java.util.List<String> warnings = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
+
   private boolean dependenciesDetected;
   public boolean isDependenciesDetected() { return dependenciesDetected; }
   public void setDependenciesDetected(boolean detected) { this.dependenciesDetected = detected; }

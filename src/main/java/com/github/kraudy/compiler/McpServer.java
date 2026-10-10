@@ -242,6 +242,10 @@ public class McpServer {
     ObjectNode since = props.putObject("since");
     since.put("type", "string");
     since.put("description", "Git ref: build what changed since it (committed, uncommitted and untracked)");
+    ObjectNode minSeverity = props.putObject("minSeverity");
+    minSeverity.put("type", "integer");
+    minSeverity.put("description", "Lowest message severity in the report (default 20: errors that stop a compile). "
+        + "0 shows everything, including informational messages");
     ObjectNode keepGoing = props.putObject("keepGoing");
     keepGoing.put("type", "boolean");
     keepGoing.put("description", "build only (default true): false stops at the first failed target");
@@ -303,6 +307,7 @@ public class McpServer {
 
     compiler.build();
     BuildReport report = compiler.getReport();
+    report.compact(args.path("minSeverity").asInt(20));
     return toolResult(pretty.writeValueAsString(report), !report.success);
   }
 
@@ -395,11 +400,21 @@ public class McpServer {
   }
 
   /* Connected, with the developer's library list (unqualified names resolve as in their compiles) */
+  /* The connection's library list, then the spec's own CHGLIBL / CHGCURLIB hooks, as a build applies them */
   private void connectWithLibraryList() throws Exception {
     connect();
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
     for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
       executor.executeCommand(hook);
+    }
+    BuildSpec spec;
+    try {
+      spec = loadSpec();
+    } catch (Exception noSpecYet) {
+      return;  // e.g. an empty repository import_source is filling
+    }
+    for (CommandObject hook : spec.before) {
+      if (CommandExecutor.isLibraryListCommand(hook)) executor.executeCommand(hook);
     }
   }
 

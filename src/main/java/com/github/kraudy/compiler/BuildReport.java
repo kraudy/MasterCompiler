@@ -29,6 +29,8 @@ public class BuildReport {
   public int skipped;
   public int blocked;
   public String error;  // failure outside a target (global hooks, connection, ...)
+  public List<String> warnings;  // from reading the sources, e.g. two files building the same object
+  public List<String> summary;   // compact(): one line per target, before the details
   public List<TargetResult> targets = new ArrayList<TargetResult>();
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
@@ -66,6 +68,47 @@ public class BuildReport {
     public String id;
     public int severity;
     public String text;
+  }
+
+  /*
+   * For agents (MCP): a summary line per target first; compile errors below minSeverity dropped and
+   * duplicates removed; joblog deduplicated, its severity 30+ messages moved into errors (a binder or
+   * authority failure has no EVFEVENT record), the rest kept only at minSeverity+ and only for targets
+   * that did not build. Reports went from megabytes to what the agent needs.
+   */
+  public void compact(int minSeverity) {
+    summary = new ArrayList<String>();
+    for (TargetResult t : targets) {
+      List<CompileError> errors = new ArrayList<CompileError>();
+      java.util.Set<String> seen = new java.util.HashSet<String>();
+      if (t.errors != null) {
+        for (CompileError e : t.errors) {
+          if (e.severity >= minSeverity && seen.add(e.file + ":" + e.line + ":" + e.id + ":" + e.message)) errors.add(e);
+        }
+      }
+      List<JoblogMessage> joblog = new ArrayList<JoblogMessage>();
+      java.util.Set<String> seenJoblog = new java.util.HashSet<String>();
+      if (t.joblog != null) {
+        for (JoblogMessage m : t.joblog) {
+          if (!seenJoblog.add(m.id + ":" + m.text)) continue;
+          if (m.severity >= 30) {
+            if (seen.add("null:0:" + m.id + ":" + m.text)) {
+              CompileError e = new CompileError();
+              e.id = m.id;
+              e.severity = m.severity;
+              e.message = m.text;
+              errors.add(e);
+            }
+          } else if (m.severity >= minSeverity && !BUILT.equals(t.status)) {
+            joblog.add(m);
+          }
+        }
+      }
+      t.errors = errors.isEmpty() ? null : errors;
+      t.joblog = joblog.isEmpty() ? null : joblog;
+      summary.add(t.target + " " + t.status + (t.errors != null ? " (" + t.errors.size() + " errors)" : "")
+          + (t.warning != null ? " WARNING" : ""));
+    }
   }
 
   public TargetResult add(String target, String status) {

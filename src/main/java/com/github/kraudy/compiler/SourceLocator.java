@@ -29,7 +29,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
  * The members' /COPY, /INCLUDE and EXEC SQL INCLUDE members are listed too (resolved like the compiler).
  */
 public class SourceLocator {
-  private static final Pattern RPG_COPY = Pattern.compile("^.{0,5}\\s*/(?:COPY|INCLUDE)\\s+(\\S+)", Pattern.CASE_INSENSITIVE);
+  /* Columns 1-6 may hold a sequence/change marker or the spec type (D/COPY, C/COPY); free form starts anywhere */
+  private static final Pattern RPG_COPY = Pattern.compile("^.{0,6}?\\s*/(?:COPY|INCLUDE)\\s+(\\S+)", Pattern.CASE_INSENSITIVE);
   private static final Pattern SQL_INCLUDE = Pattern.compile("\\bEXEC\\s+SQL\\s+INCLUDE\\s+(\\S+?)\\s*;?\\s*$", Pattern.CASE_INSENSITIVE);
   private static final List<String> DDL_TYPES = Arrays.asList("TABLE", "VIEW", "INDEX");
   private static final String DEFAULT_TYPES = "*PGM *SRVPGM *MODULE *FILE *CMD";

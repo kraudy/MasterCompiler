@@ -138,7 +138,7 @@ public class SshMcpProxy {
     String jar = ensureRemoteJar(home);
     long jarDone = System.currentTimeMillis();
     stage("3/5 syncing the sources to " + remoteDir);
-    int uploaded = sync(projectFiles());
+    int uploaded = sync(projectFiles(), true);
     logger.info("Sources synced: {} files uploaded ({} s for MC, {} s for sources)", uploaded,
         (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
 
@@ -218,7 +218,7 @@ public class SshMcpProxy {
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
       if (tool.equals("import_source")) {
-        sync(projectFiles());  // "repo" keeps files already there: the IBM i copy must be current
+        sync(projectFiles(), true);  // "repo" keeps files already there: the IBM i copy must be current
         pendingImports.add(request.path("id").toString());
         return line;
       }
@@ -242,7 +242,7 @@ public class SshMcpProxy {
         for (JsonNode f : args.get("files")) files.add(f.asText());
         uploaded = sync(absolute(files));
       } else {
-        uploaded = sync(projectFiles());
+        uploaded = sync(projectFiles(), true);
       }
       if (uploaded > 0) logger.info("Uploaded {} changed files before {}", uploaded, tool);
       return mapper.writeValueAsString(request);
@@ -306,6 +306,15 @@ public class SshMcpProxy {
    * Many files go as one tar (one upload and one command instead of a few round trips per file).
    */
   int sync(Set<String> localFiles) throws Exception {
+    return sync(localFiles, false);
+  }
+
+  /*
+   * mirror (a full sync): files in the IBM i copy that the project no longer has (renamed, moved, deleted)
+   * are removed too, so they cannot become a second target. Only in MC's own folder (<home>/mc/...),
+   * never in a --push folder the user chose; MC's .mc/ working files stay.
+   */
+  int sync(Set<String> localFiles, boolean mirror) throws Exception {
     logger.info("Comparing {} local files with the copy on the IBM i", localFiles.size());
     Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
     Map<String, File> changed = new LinkedHashMap<String, File>();
@@ -322,6 +331,27 @@ public class SshMcpProxy {
         continue;
       }
       changed.put(rel, local);
+    }
+
+    if (mirror && parser.getPush() == null) {
+      Set<String> localRel = new java.util.HashSet<String>();
+      for (String path : localFiles) {
+        String rel = relative(new File(path));
+        if (rel != null) localRel.add(rel);
+      }
+      List<String> gone = new ArrayList<String>();
+      for (String rel : remoteFiles.keySet()) {
+        if (!localRel.contains(rel) && !rel.startsWith(".mc/") && !rel.equals(".mc-sync.tar")) gone.add(rel);
+      }
+      if (!gone.isEmpty()) {
+        logger.info("Removing {} files from the IBM i copy that the project no longer has: {}", gone.size(),
+            gone.size() <= 10 ? String.join(", ", gone) : String.join(", ", gone.subList(0, 10)) + ", ...");
+        for (int i = 0; i < gone.size(); i += 50) {
+          StringBuilder rm = new StringBuilder("rm -f");
+          for (String rel : gone.subList(i, Math.min(gone.size(), i + 50))) rm.append(' ').append(SshTarget.quote(remoteDir + "/" + rel));
+          ssh.exec(rm.toString());
+        }
+      }
     }
 
     List<String> uploaded = new ArrayList<String>();

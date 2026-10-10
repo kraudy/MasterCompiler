@@ -55,7 +55,7 @@ public class CommandExecutor {
 
 
     try {
-      executeCommand(commandString, commandTime);
+      executeCommand(commandString, commandTime, isLibraryListCommand(command));
     } catch (CompilerException e) {
 
       if(verbose) logger.error("No error messages found : " + commandString);
@@ -112,8 +112,17 @@ public class CommandExecutor {
     key.setObjectExists(true);
   }
 
+  /* CHGLIBL / CHGCURLIB only change this job: a dry run runs them too, so it sees the spec's library list */
+  static boolean isLibraryListCommand(CommandObject command) {
+    return command.getSystemCommand() == SysCmd.CHGLIBL || command.getSystemCommand() == SysCmd.CHGCURLIB;
+  }
+
   /* Executes system commands */
   public void executeCommand(String commandString, Timestamp commandTime) throws CompilerException {
+    executeCommand(commandString, commandTime, false);
+  }
+
+  private void executeCommand(String commandString, Timestamp commandTime, boolean evenInDryRun) throws CompilerException {
 
     if (this.CmdExecutionChain.length() > 0) {
       this.CmdExecutionChain.append(" => ");
@@ -121,7 +130,7 @@ public class CommandExecutor {
     this.CmdExecutionChain.append(commandString);
 
     /* Dry run just returns before executing the command */
-    if(dryRun){
+    if(dryRun && !evenInDryRun){
       return;
     }
 

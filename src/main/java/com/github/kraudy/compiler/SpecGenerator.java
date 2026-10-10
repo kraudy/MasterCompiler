@@ -88,6 +88,7 @@ public class SpecGenerator {
     spec.setBaseDirectory(baseDir);
 
     int added = 0;
+    java.util.Map<String, String> objects = new java.util.HashMap<String, String>();  // LIB.NAME.TYPE -> file
     for (CandidateSource candidate : candidates) {
       Optional<ParsedName> parsed = SourceNaming.parseFileName(candidate.fileName);
       if (!parsed.isPresent()) continue;
@@ -102,9 +103,20 @@ public class SpecGenerator {
         continue;
       }
 
+      /* One object, one source: e.g. ORD.pgm.rpgle left behind when it became ORD.pgm.sqlrpgle. Both stay
+         targets (the later build replaces the object), but the report says so. */
+      String object = key.getLibrary() + "." + key.getObjectName() + "." + key.getObjectTypeEnum();
+      if (objects.containsKey(object)) {
+        String warning = "Two sources build " + key.getObjectName() + " *" + key.getObjectTypeEnum() + ": "
+            + objects.get(object) + " and " + candidate.relativePath + "; the one built last wins. "
+            + "Delete or rename the one that is not in use.";
+        logger.warn(warning);
+        spec.warnings.add(warning);
+      } else {
+        objects.put(object, candidate.relativePath);
+      }
       if (spec.targets.containsKey(key)) {
-        logger.warn("Duplicate target key {} from {}; keeping first",
-            key.asString(), candidate.relativePath);
+        logger.warn("Duplicate target key {} from {}; keeping first", key.asString(), candidate.relativePath);
         continue;
       }
 

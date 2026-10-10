@@ -427,7 +427,9 @@ public class MasterCompiler{
     List<CommandObject> hooks = new ArrayList<CommandObject>(libraryHooks);
     hooks.addAll(globalSpec.before);
     for (CommandObject hook : hooks) {
-      if (hook.getSystemCommand() == SysCmd.CHGCURLIB && hook.get(ParamCmd.CURLIB) != null) lib = hook.get(ParamCmd.CURLIB).trim();
+      boolean setsCurlib = hook.getSystemCommand() == SysCmd.CHGCURLIB || hook.getSystemCommand() == SysCmd.CHGLIBL;
+      String value = setsCurlib && hook.containsKey(ParamCmd.CURLIB) ? hook.get(ParamCmd.CURLIB) : null;
+      if (value != null && !value.trim().equalsIgnoreCase("*SAME")) lib = value.trim();
     }
     if (lib != null && !lib.startsWith("*")) return lib.toUpperCase();
     try {
@@ -498,6 +500,7 @@ public class MasterCompiler{
   /* Targets never reached are listed as not built, then the report is written (--json) */
   private void finishReport() {
     if (compilationError) report.success = false;
+    if (!globalSpec.warnings.isEmpty()) report.warnings = new ArrayList<String>(globalSpec.warnings);
     report.dryRun = dryRun;
 
     Set<String> reported = new HashSet<String>();
