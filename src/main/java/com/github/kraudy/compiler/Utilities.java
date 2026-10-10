@@ -268,6 +268,17 @@ public class Utilities {
    * Deserialize directly from any InputStream (remote IFS, classpath, etc.)
    */
   public static BuildSpec deserializeYaml(InputStream yamlStream) {
+    return deserializeYaml(yamlStream, false);
+  }
+
+  /* An overlay (mc-base.yaml) may hold only globals: library settings, defaults, hooks */
+  public static BuildSpec deserializeOverlay(String yamlPath) throws Exception {
+    try (InputStream stream = new FileInputStream(yamlPath)) {
+      return deserializeYaml(stream, true);
+    }
+  }
+
+  public static BuildSpec deserializeYaml(InputStream yamlStream, boolean overlay) {
     ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
     BuildSpec spec;
 
@@ -279,9 +290,10 @@ public class Utilities {
       spec = mapper.readValue(yamlStream, BuildSpec.class);
 
       // Post-deserialization sanity check
-      if (spec.targets == null || spec.targets.isEmpty()) {
+      if (!overlay && (spec.targets == null || spec.targets.isEmpty())) {
         throw new IllegalArgumentException("YAML must define at least one target in 'targets' section.");
       }
+      spec.applyLibrarySettings();
 
       CommandStringParser.applyCommandForms(spec);
 
@@ -289,18 +301,34 @@ public class Utilities {
       spec.setTargetsList(spec.targets.keySet());
 
     } catch (MismatchedInputException e) {
-        throw new RuntimeException("Invalid or empty YAML content: " + e.getMessage(), e);
+        throw new RuntimeException("Invalid or empty YAML content" + where(e) + ": " + firstLine(e), e);
     } catch (JsonMappingException e) {
-        throw new RuntimeException("YAML schema error: " + e.getMessage() + 
+        throw new RuntimeException("YAML schema error" + where(e) + ": " + firstLine(e) +
             "\nCheck required fields like 'targets' or 'params'.", e);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        String hint = String.valueOf(e.getMessage()).toLowerCase().contains("alias")
+            || String.valueOf(e.getMessage()).toLowerCase().contains("anchor")
+            ? " YAML anchors and aliases (&name / *name) are not supported: repeat the values instead." : "";
+        throw new RuntimeException("YAML syntax error" + where(e) + ": " + firstLine(e) + hint, e);
     } catch (IOException e) {
         throw new RuntimeException("IO error reading YAML: " + e.getMessage(), e);
+    } catch (IllegalArgumentException e) {
+        throw e;
     } catch (Exception e) {
-        e.printStackTrace();
         throw new RuntimeException("Could not map YAML to BuildSpec: " + e.getMessage(), e);
     }
 
     return spec;
+  }
+
+  private static String where(com.fasterxml.jackson.core.JsonProcessingException e) {
+    return e.getLocation() != null ? " at line " + e.getLocation().getLineNr() + ", column " + e.getLocation().getColumnNr() : "";
+  }
+
+  private static String firstLine(Exception e) {
+    String message = e instanceof com.fasterxml.jackson.core.JsonProcessingException
+        ? ((com.fasterxml.jackson.core.JsonProcessingException) e).getOriginalMessage() : e.getMessage();
+    return message == null ? e.toString() : message.split("\\R")[0];
   }
 
   public static String nodeToString(JsonNode node) {

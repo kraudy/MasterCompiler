@@ -199,7 +199,7 @@ public class SpecGenerator {
     }
 
     logger.info("Merging base overlay: {}", path);
-    BuildSpec base = Utilities.deserializeYaml(path);
+    BuildSpec base = Utilities.deserializeOverlay(path);
 
     /* Global defaults: base fills / overrides */
     if (base.defaults != null && !base.defaults.isEmpty()) {

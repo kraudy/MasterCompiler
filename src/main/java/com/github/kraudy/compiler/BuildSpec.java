@@ -62,6 +62,40 @@ public class BuildSpec {
     return false;
   }
 
+  /* Library settings for the build job, so a spec (or mc-base.yaml) need not spell out the hooks:
+     curlib: DEVLIB / libl: [DEVLIB, APPLIB] become CHGLIBL / CHGCURLIB before every other hook */
+  @JsonProperty(value = "curlib", required = false)
+  public String curlib;
+
+  @JsonProperty(value = "libl", required = false)
+  @JsonDeserialize(using = LibraryListDeserializer.class)
+  public String libl;
+
+  public void applyLibrarySettings() {
+    if (libl != null && !libl.trim().isEmpty()) {
+      CommandObject chglibl = new CommandObject(CompilationPattern.SysCmd.CHGLIBL).put(ParamCmd.LIBL, libl.trim().toUpperCase());
+      if (curlib != null && !curlib.trim().isEmpty()) chglibl.put(ParamCmd.CURLIB, curlib.trim().toUpperCase());
+      before.add(0, chglibl);
+    } else if (curlib != null && !curlib.trim().isEmpty()) {
+      before.add(0, new CommandObject(CompilationPattern.SysCmd.CHGCURLIB).put(ParamCmd.CURLIB, curlib.trim().toUpperCase()));
+    }
+    curlib = null;  // applied once
+    libl = null;
+  }
+
+  /* libl as a YAML list or a space-separated string */
+  public static final class LibraryListDeserializer extends com.fasterxml.jackson.databind.JsonDeserializer<String> {
+    @Override
+    public String deserialize(com.fasterxml.jackson.core.JsonParser p, com.fasterxml.jackson.databind.DeserializationContext c)
+        throws java.io.IOException {
+      com.fasterxml.jackson.databind.JsonNode node = p.getCodec().readTree(p);
+      if (!node.isArray()) return node.asText();
+      StringBuilder libs = new StringBuilder();
+      for (com.fasterxml.jackson.databind.JsonNode lib : node) libs.append(libs.length() > 0 ? " " : "").append(lib.asText());
+      return libs.toString();
+    }
+  }
+
   /* Libraries no project program may write to (files it opens for update / output, SQL INSERT / UPDATE / DELETE
      resolving there): such a target fails before it is compiled */
   @JsonProperty(value = "protectedLibs", required = false)
@@ -94,7 +128,7 @@ public class BuildSpec {
   public final List<CommandObject> failure = new ArrayList<>();
 
   /* Ordered sequence of targets and their spec */
-  @JsonProperty(value = "targets", required = true) // Required
+  @JsonProperty(value = "targets", required = false) // required in a spec, optional in an mc-base.yaml overlay
   public final LinkedHashMap<TargetKey, TargetSpec> targets = new LinkedHashMap<>();
 
   public BuildSpec() {

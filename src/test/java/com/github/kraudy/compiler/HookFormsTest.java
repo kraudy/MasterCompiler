@@ -41,4 +41,26 @@ public class HookFormsTest {
     assertEquals("SHOPCMD LIB(DEVLIB)", spec.before.get(2).getCommandStringWithoutSummary(), "unknown command: run as written");
     assertEquals("[prodlib]", spec.protectedLibs.toString());
   }
+
+  @Test
+  void test_Library_Keys_And_Overlay_Without_Targets(@TempDir Path dir) throws Exception {
+    Path base = dir.resolve("mc-base.yaml");
+    Files.write(base, ("curlib: devlib\n"
+        + "libl: [devlib, applib]\n"
+        + "before:\n"
+        + "  - ChgCurDir: { Dir: /home/dev }\n").getBytes(StandardCharsets.UTF_8));
+    BuildSpec overlay = Utilities.deserializeOverlay(base.toString());
+    assertTrue(overlay.targets.isEmpty(), "an overlay may hold only globals");
+    assertEquals(SysCmd.CHGLIBL, overlay.before.get(0).getSystemCommand(), "library settings run first");
+    assertEquals("DEVLIB APPLIB", overlay.before.get(0).get(com.github.kraudy.compiler.CompilationPattern.ParamCmd.LIBL));
+    assertEquals("DEVLIB", overlay.before.get(0).get(com.github.kraudy.compiler.CompilationPattern.ParamCmd.CURLIB));
+  }
+
+  @Test
+  void test_Yaml_Error_Says_Where(@TempDir Path dir) throws Exception {
+    Path yaml = dir.resolve("build.yaml");
+    Files.write(yaml, "targets:\n  curlib.a.pgm.rpgle: {\n    params: [\n".getBytes(StandardCharsets.UTF_8));
+    RuntimeException e = assertThrows(RuntimeException.class, () -> Utilities.deserializeYaml(yaml.toString()));
+    assertTrue(e.getMessage().contains("line"), e.getMessage());
+  }
 }
