@@ -322,21 +322,6 @@ public class McpServer {
         + "Call it first when something looks off.",
         statusSchema));
 
-    ObjectNode seedSchema = mapper.createObjectNode();
-    seedSchema.put("type", "object");
-    ObjectNode seedProps = seedSchema.putObject("properties");
-    ObjectNode seedNames = seedProps.putObject("names");
-    seedNames.put("type", "array");
-    seedNames.putObject("items").put("type", "string");
-    seedNames.put("description", "Seeds to run (default: all in seeds.yaml)");
-    seedProps.putObject("confirm").put("type", "boolean")
-        .put("description", "false (default): only show the SQL. true: run it, after the user agreed");
-    tools.add(tool("seed",
-        "Test data from the project's seeds.yaml: copy rows (from / where / set) or insert a row (values) into tables of the "
-        + "current library or seedLibs; never into a protectedLibs library. First call without confirm and show the "
-        + "statements to the user; call again with confirm: true only if they agree. Seeds with deleteWhere replay cleanly.",
-        seedSchema));
-
     ObjectNode callSchema = mapper.createObjectNode();
     callSchema.put("type", "object");
     ObjectNode callProps = callSchema.putObject("properties");
@@ -401,10 +386,6 @@ public class McpServer {
     info.put("type", "object");
     info.putObject("properties").putObject("object").put("type", "string");
     tools.add(tool("object_info", "An object's create, change and source timestamps (for compare)", info));
-    ObjectNode export = mapper.createObjectNode();
-    export.put("type", "object");
-    export.putObject("properties").putObject("from").put("type", "string");
-    tools.add(tool("export_rows", "Rows of a table, typed, for a seed on the build system", export));
     ObjectNode status = mapper.createObjectNode();
     status.put("type", "object");
     status.putObject("properties");
@@ -447,7 +428,7 @@ public class McpServer {
     tool.put("description", description);
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
-    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("seed") || name.equals("call_program");
+    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
     annotations.put("readOnlyHint", !writes);
@@ -478,7 +459,6 @@ public class McpServer {
         case "sql":           return sql(args);
         case "find_object":   return findObject(args);
         case "find_export":   return findExport(args);
-        case "seed":          return seed(args);
         case "status":        return status();
         case "call_program":  return callProgram(args);
         case "import_source": return importSource(args);
@@ -514,17 +494,6 @@ public class McpServer {
           connect();
           return toolResult(pretty.writeValueAsString(new SqlTools().objectInfo(connection,
               args.path("object").asText(""), args.path("type").asText(null))), false);
-        case "export_rows": {
-          connect();
-          java.util.Map<String, String> set = new java.util.LinkedHashMap<String, String>();
-          java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = args.path("set").fields();
-          while (fields.hasNext()) {
-            java.util.Map.Entry<String, JsonNode> f = fields.next();
-            set.put(f.getKey(), f.getValue().asText());
-          }
-          return toolResult(mapper.writeValueAsString(new SqlTools(maxRows, mask).exportRows(connection,
-              args.path("from").asText(""), args.path("where").asText(null), set, args.path("maxRows").asInt(0), readLibs)), false);
-        }
         default: return toolResult(name + " does not run on a read-only connection (it reads only " + readLibs + ")", true);
       }
     } catch (Exception e) {
@@ -750,25 +719,6 @@ public class McpServer {
     ArrayNode prot = result.putArray("protectedLibs");
     for (String lib : protectedLibs()) prot.add(lib);
     return toolResult(pretty.writeValueAsString(result), false);
-  }
-
-  private ObjectNode seed(JsonNode args) throws Exception {
-    File seedsFile = new File(projectDir(), "seeds.yaml");
-    if (!seedsFile.isFile()) {
-      return toolResult("No seeds.yaml in the project. Create one (see the mastercompiler skill: seedLibs, seeds with to, from / where / set "
-          + "or values, deleteWhere) and call seed again.", true);
-    }
-    SeedRunner.SeedFile seeds = SeedRunner.load(seedsFile);
-    connectWithLibraryList();
-    List<String> names = new java.util.ArrayList<String>();
-    for (JsonNode n : args.path("names")) names.add(n.asText());
-    List<String> libl = SqlTools.libraryList(connection);
-    boolean confirm = args.path("confirm").asBoolean(false);
-    try (Connection writer = confirm ? SeedRunner.writeConnection(system, libl) : null) {
-      ObjectNode result = SeedRunner.run(connection, writer, seeds, names, currentLibrary(), protectedLibs(), confirm,
-          args.get("fetched"));
-      return toolResult(pretty.writeValueAsString(result), false);
-    }
   }
 
   private List<String> protectedLibs() {

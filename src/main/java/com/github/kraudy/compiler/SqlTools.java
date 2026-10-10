@@ -127,8 +127,6 @@ final class SqlTools {
     AS400JDBCDataSource ds = new AS400JDBCDataSource(system);
     ds.setAccess("read only");
     ds.setNaming("system");
-    ds.setDateFormat("iso");  // dates and times as text that inserts back unchanged (seeds between systems)
-    ds.setTimeFormat("iso");
     if (!libraryList.isEmpty()) ds.setLibraries(String.join(",", libraryList));
     Connection connection = ds.getConnection();
     connection.setReadOnly(true);
@@ -526,101 +524,6 @@ final class SqlTools {
       map.put(object.substring(object.lastIndexOf(' ') + 1), o);
     }
     return map;
-  }
-
-  /* ---- seeds from another IBM i: the rows, typed, as that system has them ---- */
-
-  /*
-   * SELECT the rows of LIB/TABLE (one of the allowed libraries) WHERE ..., with the 'set' columns replaced by
-   * SQL expressions there, so masked values never leave this system. Columns in 'mask' must be replaced.
-   * More rows than maxRows is an error, not a cut: a seed copies all it selects or nothing.
-   */
-  ObjectNode exportRows(Connection connection, String from, String where, java.util.Map<String, String> set, int maxRows,
-      List<String> allowed) throws SQLException {
-    String name = from.trim().toUpperCase(Locale.ROOT).replace('.', '/');
-    String lib;
-    if (name.contains("/")) {
-      lib = name.substring(0, name.indexOf('/'));
-      name = name.substring(name.indexOf('/') + 1);
-    } else {
-      String resolved = findObject(connection, name, "*FILE").path("resolvesTo").asText("");
-      if (!resolved.contains("/")) throw new IllegalArgumentException(name + " is not in the libraries this connection reads " + allowed);
-      lib = resolved.substring(0, resolved.indexOf('/'));
-    }
-    if (!allowed.contains(lib)) throw new IllegalArgumentException(lib + "/" + name + ": this connection reads only " + allowed);
-    List<String> columns = SeedRunner.columns(connection, lib + "/" + name);
-    java.util.Map<String, String> replace = new java.util.LinkedHashMap<String, String>();
-    for (java.util.Map.Entry<String, String> e : set.entrySet()) {
-      String col = e.getKey().trim().toUpperCase(Locale.ROOT);
-      if (!columns.contains(col)) throw new IllegalArgumentException("set: " + lib + "/" + name + " has no column " + col);
-      replace.put(col, e.getValue());
-    }
-    List<String> unmasked = new ArrayList<String>();
-    for (String col : mask) if (columns.contains(col) && !replace.containsKey(col)) unmasked.add(col);
-    if (!unmasked.isEmpty()) {
-      throw new IllegalArgumentException("This connection masks " + unmasked + ": give each a replacement in the seed's set "
-          + "(e.g. " + unmasked.get(0) + ": \"'TEST'\"), so the real values are not copied");
-    }
-    List<String> select = new ArrayList<String>();
-    for (String col : columns) select.add(replace.containsKey(col) ? "(" + replace.get(col) + ") AS " + col : col);
-    String statement = "SELECT " + String.join(", ", select) + " FROM " + lib + "/" + name
-        + (where != null && !where.trim().isEmpty() ? " WHERE " + where : "");
-    checkReadOnly(statement);
-    checkLibraries(statement, allowed);
-
-    int cap = Math.max(1, Math.min(maxRows > 0 ? maxRows : MAX_ROWS, rowCap > 0 ? rowCap : MAX_ROWS));
-    ObjectNode result = mapper.createObjectNode();
-    result.put("from", lib + "/" + name);
-    result.put("statement", statement);
-    try (Statement stmt = connection.createStatement()) {
-      stmt.setMaxRows(cap + 1);
-      stmt.setQueryTimeout(TIMEOUT_SECONDS);
-      try (ResultSet rs = stmt.executeQuery(statement)) {
-        ResultSetMetaData meta = rs.getMetaData();
-        int n = meta.getColumnCount();
-        ArrayNode cols = result.putArray("columns");
-        for (int c = 1; c <= n; c++) {
-          ObjectNode col = cols.addObject();
-          col.put("name", meta.getColumnLabel(c).toUpperCase(Locale.ROOT));
-          col.put("jdbcType", meta.getColumnType(c));
-          col.put("typeName", meta.getColumnTypeName(c));
-        }
-        ArrayNode data = result.putArray("rows");
-        while (rs.next()) {
-          if (data.size() == cap) {
-            throw new IllegalArgumentException("More than " + cap + " rows match: narrow the seed's where (a seed copies all its rows or none)");
-          }
-          ArrayNode row = data.addArray();
-          for (int c = 1; c <= n; c++) {
-            int t = meta.getColumnType(c);
-            if (t == java.sql.Types.BINARY || t == java.sql.Types.VARBINARY || t == java.sql.Types.LONGVARBINARY || t == java.sql.Types.BLOB) {
-              byte[] bytes = rs.getBytes(c);
-              if (bytes == null) row.addNull();
-              else row.add(hex(bytes));
-              continue;
-            }
-            String value = rs.getString(c);
-            if (value == null) row.addNull();
-            else row.add(t == java.sql.Types.CHAR || t == java.sql.Types.NCHAR ? value.replaceAll("\\s+$", "") : value);
-          }
-        }
-        result.put("rowCount", data.size());
-      }
-    }
-    if (!replace.isEmpty()) result.set("replaced", mapper.valueToTree(replace.keySet()));
-    return result;
-  }
-
-  static String hex(byte[] bytes) {
-    StringBuilder out = new StringBuilder();
-    for (byte b : bytes) out.append(String.format("%02X", b));
-    return out.toString();
-  }
-
-  static byte[] unhex(String text) {
-    byte[] bytes = new byte[text.length() / 2];
-    for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) Integer.parseInt(text.substring(2 * i, 2 * i + 2), 16);
-    return bytes;
   }
 
   /* *USE-like authority (QSYS2.SQL_CHECK_AUTHORITY); null text when the system cannot tell */

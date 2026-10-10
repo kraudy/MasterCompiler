@@ -5,6 +5,9 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
 ## v0.3.9
 
+Removed
+- The `seed` tool and `seeds.yaml`: test data belongs in the tests (e.g. an RPGUnit test inserting its rows with SQL).
+
 Read-only connections
 - `connections:` in the spec: `build` (tools refuse to run on another connection) and `readOnly` systems with the
   only `libraries` read there, `maxRows` and `maskColumns`.
@@ -12,9 +15,7 @@ Read-only connections
   SSH, or in process over the host servers) with a read-only JDBC connection and no tool that writes.
 - `compare`: one object on the build system and a read-only one side by side (create timestamps, per module the
   source member, recorded source change and module create timestamps), with the differences.
-- Seeds with `fromConnection`: rows read on the other system (`set` applied there, masked columns must be replaced)
-  and inserted with their exact values; more than `maxRows` fails the seed; confirmed copies logged in
-  `.mc/copies.log`.
+- `maskColumns`: `sql` shows those values masked.
 - Each read-only connection's password comes from its own VS Code prompt (`IBMI_PASSWORD_<NAME>`); `--setup-vscode`
   adds the prompts, also to an existing `mcp.json`.
 

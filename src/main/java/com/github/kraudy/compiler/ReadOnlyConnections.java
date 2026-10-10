@@ -28,16 +28,14 @@ import com.jcraft.jsch.ChannelExec;
  *     readOnly:
  *       - name: SYS2               # a Code for IBM i connection
  *         libraries: [LIB1, LIB2]  # the only libraries read there (its library list)
- *         maxRows: 500             # most rows one query or seed reads (default 1000)
- *         maskColumns: [COL3]      # shown masked by sql; a seed from here must replace them (set)
+ *         maxRows: 500             # most rows one query reads (default 1000)
+ *         maskColumns: [COL3]      # shown masked by sql
  *
  * MC on the PC (the MCP server VS Code starts) routes here: sql, find_object and find_source with
- * connection: SYS2 run there; compare reads the object there; a seed with fromConnection: SYS2 reads its rows
- * there and hands them to the build system's MC, which inserts them. Each read-only connection is a second
+ * connection: SYS2 run there; compare reads the object there. Each read-only connection is a second
  * MC started with --read-only (over SSH on that system, or in this process over the host servers), opened on
  * first use, with a read-only JDBC connection; it has no tool that writes. Its password, when SSH has no key,
- * comes from IBMI_PASSWORD_<NAME> (a VS Code password prompt). Rows copied by seeds are logged in
- * .mc/copies.log.
+ * comes from IBMI_PASSWORD_<NAME> (a VS Code password prompt).
  */
 final class ReadOnlyConnections {
   private static final Logger logger = LoggerFactory.getLogger(ReadOnlyConnections.class);
@@ -124,7 +122,7 @@ final class ReadOnlyConnections {
 
     /*
      * A tool result when the call is for a read-only connection (or refused), null when the build system's MC
-     * answers it. For that MC the call is made ready: 'connection' removed, compare and seed given what the
+     * answers it. For that MC the call is made ready: 'connection' removed, compare given what the
      * other system holds.
      */
     ObjectNode handle(String tool, ObjectNode args) {
@@ -134,8 +132,7 @@ final class ReadOnlyConnections {
       } catch (Exception e) {
         return error("connections in the spec: " + e.getMessage());
       }
-      args.remove("fetched");      // only this router fills them
-      args.remove("otherInfo");
+      args.remove("otherInfo");      // only this router fills them
       args.remove("otherConnection");
       if (config.build != null && connected != null && !config.build.equalsIgnoreCase(connected) && !tool.equals("status")) {
         return error("The spec builds on the connection " + config.build + " (connections.build), but this server is "
@@ -146,7 +143,6 @@ final class ReadOnlyConnections {
       boolean other = !target.isEmpty() && !target.equalsIgnoreCase(config.build) && !target.equalsIgnoreCase(connected);
       try {
         if (tool.equals("compare")) return compare(config, target, args);
-        if (tool.equals("seed")) return seed(config, args);
         if (!other) return null;
         ReadOnly ro = config.readOnly.get(target.toUpperCase(Locale.ROOT));
         if (ro == null) return error(unknown(config, target));
@@ -176,61 +172,6 @@ final class ReadOnlyConnections {
       if (config.build != null) args.put("buildConnection", config.build);
       else if (connected != null) args.put("buildConnection", connected);
       return null;
-    }
-
-    /* seed: rows of fromConnection seeds read now, so the build system's MC can insert them */
-    private ObjectNode seed(ReadOnlyConnections config, ObjectNode args) throws Exception {
-      File seedsFile = new File(project, "seeds.yaml");
-      if (!seedsFile.isFile()) return null;  // the build system's MC says what to do
-      SeedRunner.SeedFile seeds = SeedRunner.load(seedsFile);
-      List<String> names = new ArrayList<String>();
-      for (JsonNode n : args.path("names")) names.add(n.asText());
-      boolean confirm = args.path("confirm").asBoolean(false);
-      ObjectNode fetched = mapper.createObjectNode();
-      for (SeedRunner.Seed seed : seeds.seeds) {
-        if (seed.fromConnection == null || (!names.isEmpty() && !names.contains(seed.name))) continue;
-        ReadOnly ro = config.readOnly.get(seed.fromConnection.trim().toUpperCase(Locale.ROOT));
-        if (ro == null) {
-          fetched.putObject(seed.name).put("error", unknown(config, seed.fromConnection));
-          continue;
-        }
-        ObjectNode request = mapper.createObjectNode();
-        request.put("from", seed.from);
-        if (seed.where != null) request.put("where", seed.where);
-        ObjectNode set = request.putObject("set");
-        for (Map.Entry<String, Object> s : seed.set.entrySet()) set.put(s.getKey(), String.valueOf(s.getValue()));
-        JsonNode result = backend(ro).call("export_rows", request);
-        String text = result.path("content").path(0).path("text").asText("");
-        if (result.path("isError").asBoolean(false)) {
-          fetched.putObject(seed.name).put("error", text);
-          continue;
-        }
-        JsonNode rows = mapper.readTree(text);
-        fetched.set(seed.name, rows);
-        if (confirm) logCopy(seed, ro, rows);
-      }
-      if (fetched.size() > 0) args.set("fetched", fetched);
-      return null;
-    }
-
-    /* .mc/copies.log: one line per seed run that copied rows from another system */
-    private void logCopy(SeedRunner.Seed seed, ReadOnly ro, JsonNode rows) {
-      try {
-        File log = new File(project, ".mc/copies.log");
-        log.getParentFile().mkdirs();
-        ObjectNode line = mapper.createObjectNode();
-        line.put("time", java.time.OffsetDateTime.now().toString());
-        line.put("seed", seed.name);
-        line.put("fromConnection", ro.name);
-        line.put("read", rows.path("statement").asText());
-        line.put("rows", rows.path("rows").size());
-        line.put("to", seed.to);
-        if (rows.has("replaced")) line.set("replaced", rows.get("replaced"));
-        java.nio.file.Files.write(log.toPath(), (mapper.writeValueAsString(line) + "\n").getBytes(StandardCharsets.UTF_8),
-            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
-      } catch (Exception e) {
-        logger.warn("Could not write .mc/copies.log: {}", e.getMessage());
-      }
     }
 
     private Backend backend(ReadOnly ro) throws Exception {

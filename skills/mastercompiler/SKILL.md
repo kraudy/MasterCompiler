@@ -242,7 +242,6 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `find_object` | `name`, `type`, `connection` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
 | `compare` | `object`, `type`, `connection` | The object on the build system and on a read-only connection side by side (library, create / change timestamps, per module the source member, the source change timestamp its compile recorded, the module's create timestamp), `differences` and `sameRecordedSource` |
 | `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`; over SSH also the host and the start-up stage. Call it first when something looks off |
-| `seed` | `names`, `confirm` | Runs the project's `seeds.yaml` (see below). Without `confirm`: the SQL it would run; show it to the user, then call with `confirm: true` |
 | `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`), `connection` | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
@@ -251,7 +250,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 ### Other IBM i systems (read-only connections)
 
 The spec can name the system builds go to and other systems the tools may only read, e.g. to check
-what runs in production or to copy test rows from it:
+what runs in production:
 
 ```yaml
 connections:
@@ -259,21 +258,16 @@ connections:
   readOnly:
     - name: SYS2               # a Code for IBM i connection
       libraries: [LIB1, LIB2]  # the only libraries read there (also its library list)
-      maxRows: 500             # most rows one query or seed reads there (default 1000)
-      maskColumns: [COL3]      # sql shows them masked; a seed from here must replace them in set
+      maxRows: 500             # most rows one query reads there (default 1000)
+      maskColumns: [COL3]      # sql shows their values masked (personal data)
 ```
 
 - `sql`, `find_object` and `find_source` take `connection: SYS2` to read that system instead. Only
   its `libraries` (and the catalogs `QSYS2`, `SYSIBM`, ...) are read; the JDBC connection is read
-  only. `build`, `seed`, `call_program`, `clean` and `import_source` never run there.
+  only. `build`, `call_program`, `clean` and `import_source` never run there. `maskColumns`
+  hides those values in `sql` results (best effort: a column inside an expression is not masked).
 - `compare` with `object` shows the object on both systems: whether the other system runs the
   source you changed (same source member and recorded source change timestamp per module).
-- A seed with `fromConnection: SYS2` reads its rows there (`from`, `where`; `set` is applied there,
-  so replaced values never leave that system) and inserts them on the build system with their exact
-  values. More rows than `maxRows` fail the seed instead of cutting it. Preview first (rows, the
-  first three, the statements), then `confirm: true`; every confirmed copy is logged in
-  `.mc/copies.log`. When the other system holds personal data, list those columns in `maskColumns`
-  and replace them in the seed's `set`; the user's company rules may require it.
 - MC opens a read-only connection on first use. Its password comes from its own VS Code password
   prompt (`--setup-vscode` adds one per read-only connection in the spec); never ask for it in chat.
 
@@ -286,33 +280,11 @@ a copybook's data structure), call `find_source` with those names, then `import_
 and read the copies under `.mc/sources/`. Import with `into: "repo"` only when the user wants to
 change that object: it then becomes part of the build and is compiled into their library.
 
-### Test data and quick checks
+### Quick checks
 
-`seeds.yaml` in the project root holds the test rows a program needs, so they can be put back any
-time (replacing a hand-kept list of SQL):
-
-```yaml
-seedLibs: [LIB2]                # besides the current library, the only libraries seeds write to
-seeds:
-  - name: seed1
-    to: TABLE1                   # unqualified: the current library, never the library list
-    from: LIB1/TABLE1            # copy rows from anywhere (read only) ...
-    where: "COL1 = 'A01'"
-    set: { COL2: "'X'" }         # ... replacing these columns (SQL expressions: quote strings)
-    deleteWhere: "COL1 = 'A01'"  # cleared first, so replaying gives the same rows
-  - name: seed2
-    to: TABLE2
-    values: { COL1: 1, COL2: "'test'" }  # one literal row
-  - name: seed3
-    fromConnection: SYS2         # rows read on a read-only connection (see above) ...
-    from: LIB1/TABLE1
-    where: "COL1 = 1"
-    to: TABLE1                   # ... inserted here with their exact values
-```
-
-A target in a `protectedLibs` library is always refused. Loop for logic changes: edit → `build`
-(changed files) → `seed` if the data changed → `call_program` with the parameters → read the
-returned parameters and messages. A fixed-length message (a data structure) is one `char`
+Test data belongs in the tests themselves (e.g. an RPGUnit test inserting its rows with SQL), not in
+MC. Loop for logic changes: edit → `build` (changed files) → `call_program` with the parameters →
+read the returned parameters and messages. A fixed-length message (a data structure) is one `char`
 parameter of its full length: build the string with the fields at their positions.
 
 ### Db2 queries and objects

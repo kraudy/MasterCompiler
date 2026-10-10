@@ -202,7 +202,7 @@ public class SshMcpProxy {
     }
   }
 
-  /* Calls for a read-only connection are answered here; compare and seed get what the other system holds */
+  /* Calls for a read-only connection are answered here; compare gets what the other system holds */
   private String routed(String line) {
     try {
       JsonNode request = mapper.readTree(line);
@@ -256,8 +256,8 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
-      if (tool.equals("seed") || tool.equals("call_program") || tool.equals("find_export")) {
-        sync(projectFiles(), true);  // they read seeds.yaml or the sources in the IBM i copy
+      if (tool.equals("call_program") || tool.equals("find_export")) {
+        sync(projectFiles(), true);  // they read the sources in the IBM i copy
         return line;
       }
       if (tool.equals("import_source")) {
