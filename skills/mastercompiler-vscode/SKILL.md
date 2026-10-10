@@ -93,7 +93,7 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler <tag>` with the tag from above (v0.3.8 or newer).
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.9 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
 Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
