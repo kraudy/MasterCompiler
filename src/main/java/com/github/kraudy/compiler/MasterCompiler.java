@@ -178,6 +178,12 @@ public class MasterCompiler{
       }
 
       if(verbose) logger.info(showLibraryList());
+      if (reporting()) {
+        try {
+          report.currentLibrary = getCurLIb();
+          report.libraryList = String.join(" ", SqlTools.libraryList(connection));
+        } catch (Exception ignored) { /* reported without it */ }
+      }
 
       /* The dependency graph drives incremental selection and, with keep-going, what a failure blocks */
       if ((isIncremental() || keepGoing) && !globalSpec.isDependenciesDetected()) depAwareness.detectDependencies(globalSpec);
@@ -205,7 +211,7 @@ public class MasterCompiler{
 
       /* Get full compiler exception context */
       logger.error(e.getFullContext());
-      if (report.failed == 0 && report.error == null) report.error = e.getMessage();
+      if (report.failed == 0 && report.error == null) report.error = describe(e);
 
       /* Global compiler failure */
       try{
@@ -389,6 +395,10 @@ public class MasterCompiler{
   private final Map<TargetKey, List<String>> targetWrites = new java.util.HashMap<TargetKey, List<String>>();
   private final Map<String, String> fileLibrary = new java.util.HashMap<String, String>();  // FILE -> library on the library list
 
+  private final Map<TargetKey, List<String>> targetBndDirs = new java.util.HashMap<TargetKey, List<String>>();
+  private static final java.util.regex.Pattern BNDDIR_KEYWORD =
+      java.util.regex.Pattern.compile("\\bBNDDIR\\s*\\(([^)]*)\\)", java.util.regex.Pattern.CASE_INSENSITIVE);
+
   private static final List<String> WRITE_CHECKED = Arrays.asList("RPGLE", "SQLRPGLE", "RPG", "SQLRPG", "CBLLE", "SQLCBLLE");
 
   /* RPG / COBOL sources: report the files they can change; fail when one resolves into a protectedLibs library */
@@ -417,6 +427,26 @@ public class MasterCompiler{
       if (lib != null && globalSpec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(lib))) forbidden.add(line);
     }
     if (!writes.isEmpty()) targetWrites.put(key, writes);
+
+    /* Binding directories it binds with (ctl-opt / H-spec bnddir, the BNDDIR param) and where each resolves */
+    java.util.LinkedHashSet<String> dirs = new java.util.LinkedHashSet<String>();
+    java.util.regex.Matcher block = BNDDIR_KEYWORD.matcher(String.join("\n",
+        java.nio.file.Files.readAllLines(source.toPath(), java.nio.charset.StandardCharsets.UTF_8)));
+    while (block.find()) {
+      java.util.regex.Matcher name = java.util.regex.Pattern.compile("'([^']+)'").matcher(block.group(1));
+      while (name.find()) dirs.add(name.group(1).trim().toUpperCase());
+    }
+    String param = globalSpec.targets.get(key) != null ? globalSpec.targets.get(key).params.get(ParamCmd.BNDDIR) : null;
+    if (param == null) param = globalSpec.defaults.get(ParamCmd.BNDDIR);
+    if (param != null) for (String d : param.trim().split("\\s+")) if (!d.startsWith("*")) dirs.add(d.toUpperCase());
+    List<String> resolved = new ArrayList<String>();
+    for (String dir : dirs) {
+      String lib = dir.contains("/") && !dir.startsWith("*") ? dir.substring(0, dir.indexOf('/')) : null;
+      String name = dir.substring(dir.indexOf('/') + 1);
+      if (lib == null || lib.startsWith("*")) lib = libraryOf(name, "*BNDDIR");
+      resolved.add(name + " -> " + (lib != null ? lib : "(not found on the library list)"));
+    }
+    if (!resolved.isEmpty()) targetBndDirs.put(key, resolved);
     if (!forbidden.isEmpty()) {
       throw new CompilerException("Writes to a protected library (protectedLibs " + globalSpec.protectedLibs + "): "
           + String.join("; ", forbidden) + ". Point those files at a development library (library list, EXTFILE, "
@@ -424,12 +454,18 @@ public class MasterCompiler{
     }
   }
 
-  /* Where FILE resolves: a project target (its library), else the first library-list library holding it */
   private String libraryOf(String file) {
-    if (fileLibrary.containsKey(file)) return fileLibrary.get(file);
+    return libraryOf(file, "*FILE");
+  }
+
+  /* Where NAME (of a type) resolves: a project target (its library), else the first library-list library holding it */
+  private String libraryOf(String file, String type) {
+    String cacheKey = type.equals("*FILE") ? file : file + " " + type;
+    if (fileLibrary.containsKey(cacheKey)) return fileLibrary.get(cacheKey);
     String library = null;
     for (TargetKey target : globalSpec.targets.keySet()) {
-      if (target.getObjectName().equalsIgnoreCase(file) && target.isFile()) {
+      boolean sameType = type.equals("*FILE") ? target.isFile() : target.isBndDir();
+      if (target.getObjectName().equalsIgnoreCase(file) && sameType) {
         try {
           library = target.isCurLib() ? getCurLIb() : target.getLibrary();
         } catch (Exception ignored) { /* falls back to the library list */ }
@@ -438,7 +474,7 @@ public class MasterCompiler{
     }
     if (library == null) {
       try (java.sql.PreparedStatement stmt = connection.prepareStatement(
-          "SELECT TRIM(O.OBJLIB), COALESCE(L.ORDINAL_POSITION, 99999) FROM TABLE(QSYS2.OBJECT_STATISTICS('*LIBL', '*FILE', OBJECT_NAME => ?)) O " +
+          "SELECT TRIM(O.OBJLIB), COALESCE(L.ORDINAL_POSITION, 99999) FROM TABLE(QSYS2.OBJECT_STATISTICS('*LIBL', '" + type + "', OBJECT_NAME => ?)) O " +
           "LEFT JOIN QSYS2.LIBRARY_LIST_INFO L ON L.SYSTEM_SCHEMA_NAME = O.OBJLIB")) {
         stmt.setString(1, file);
         int best = Integer.MAX_VALUE;
@@ -454,8 +490,32 @@ public class MasterCompiler{
         logger.info("Could not resolve file {}: {}", file, e.getMessage());
       }
     }
-    fileLibrary.put(file, library);
+    fileLibrary.put(cacheKey, library);
     return library;
+  }
+
+  /* A failure outside the targets (a global hook): the command and its own escape / diagnostic messages */
+  static String describe(CompilerException e) {
+    String command = null;
+    String joblog = null;
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (!(t instanceof CompilerException)) continue;
+      CompilerException c = (CompilerException) t;
+      if (command == null && c.getFailedCommand() != null) command = c.getFailedCommand();
+      if (joblog == null && c.getExtraContext() != null) joblog = c.getExtraContext();
+    }
+    StringBuilder text = new StringBuilder(command != null ? "Hook failed: " + CommandStringParser.toPasteable(command) : e.getMessage());
+    if (joblog != null) {
+      for (String line : joblog.split("\\R")) {
+        String[] cols = line.split("\\|");
+        if (cols.length < 4) continue;
+        String id = cols[1].trim();
+        int severity;
+        try { severity = Integer.parseInt(cols[2].trim()); } catch (NumberFormatException notARow) { continue; }
+        if (severity >= 20 && !id.isEmpty()) text.append(" | ").append(id).append(' ').append(cols[3].trim());
+      }
+    }
+    return text.toString();
   }
 
   /* Adds the target to the report with its joblog and, when compiled, its EVFEVENT errors */
@@ -464,6 +524,7 @@ public class MasterCompiler{
     result.command = command;
     result.error = error;
     result.writes = targetWrites.get(key);
+    result.bindingDirectories = targetBndDirs.get(key);
     if (key.objectExists() && key.isRecreate() && key.getObjectTypeEnum() == CompilationPattern.ObjectType.BNDDIR) {
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *BNDDIR and create it again (recreate: true): "
           + "only the spec's entries remain";
@@ -606,6 +667,7 @@ public class MasterCompiler{
   private void finishReport() {
     if (compilationError) report.success = false;
     if (!globalSpec.warnings.isEmpty()) report.warnings = new ArrayList<String>(globalSpec.warnings);
+    report.spec = specFingerprint();
     if (commandExec != null && !commandExec.getHooksRun().isEmpty()) report.hooks = new ArrayList<String>(commandExec.getHooksRun());
     report.dryRun = dryRun;
 
@@ -682,7 +744,17 @@ public class MasterCompiler{
         ? changedFiles
         : GitChanges.changedFiles(globalSpec.getBaseDirectory(), since);
     Set<TargetKey> seeds = new HashSet<TargetKey>();
+    /* The spec itself changed: targets that exist only there (binding directories, data areas, ...) are rebuilt */
+    boolean specChanged = false;
+    for (String file : changed) {
+      String name = new java.io.File(file).getName();
+      specChanged |= SPEC_FILES.contains(name) || name.endsWith(".yaml") || name.endsWith(".yml");
+    }
     for (TargetKey key : globalSpec.targets.keySet()) {
+      if (specChanged && !key.containsStreamFile()) {
+        seeds.add(key);
+        continue;
+      }
       if (sourceChanged(key, changed)) {
         seeds.add(key);
         if (verbose) logger.info("Since seed: " + key.asString());
@@ -691,6 +763,26 @@ public class MasterCompiler{
     rebuildSet = DiffPlanner.expand(globalSpec, seeds);
     logger.info("{}: {} changed files, rebuilding {} of {} targets",
         since != null ? "Since " + since : "Changed files", changed.size(), rebuildSet.size(), globalSpec.targets.size());
+  }
+
+  static final List<String> SPEC_FILES = Arrays.asList("build.yaml", "mc-base.yaml", "Rules.mk", "Rules.mk.json");
+
+  /* "build.yaml 3f2a9c1b04de" for the spec files in the base directory: which spec a report was built from */
+  private String specFingerprint() {
+    if (globalSpec.getBaseDirectory() == null) return null;
+    List<String> parts = new ArrayList<String>();
+    for (String name : SPEC_FILES) {
+      java.io.File file = new java.io.File(globalSpec.getBaseDirectory(), name);
+      if (!file.isFile()) continue;
+      try {
+        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(java.nio.file.Files.readAllBytes(file.toPath()));
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < 6; i++) hex.append(String.format("%02x", hash[i]));
+        parts.add(name + " " + hex);
+      } catch (Exception ignored) { /* no fingerprint for it */ }
+    }
+    return parts.isEmpty() ? "scanned sources, no spec file" : String.join(", ", parts);
   }
 
   private boolean sourceChanged(TargetKey key, Set<String> changed) {

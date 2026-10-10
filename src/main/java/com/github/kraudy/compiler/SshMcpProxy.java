@@ -242,9 +242,8 @@ public class SshMcpProxy {
           if (new File(project, file).isFile()) files.add(file);
         }
       } else if (args.has("files") && args.get("files").isArray()) {
-        List<String> files = new ArrayList<String>();
-        for (JsonNode f : args.get("files")) files.add(f.asText());
-        uploaded = sync(absolute(files));
+        /* the whole copy, not only the files named: a changed spec (mc-base.yaml, build.yaml) must go up too */
+        uploaded = sync(projectFiles(), true);
       } else {
         uploaded = sync(projectFiles(), true);
       }

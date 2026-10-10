@@ -30,6 +30,9 @@ public class BuildReport {
   public int blocked;
   public String error;  // failure outside a target (global hooks, connection, ...)
   public List<String> warnings;  // from reading the sources, e.g. two files building the same object
+  public String spec;            // spec files and a short hash of each: which spec this report was built from
+  public String currentLibrary;  // after the global hooks ran: where *CURLIB targets go
+  public String libraryList;     // after the global hooks ran
   public List<String> summary;   // compact(): one line per target, before the details
   public List<String> hooks;     // hook commands that ran (or would run, in a plan), in order, with their outcome
   public List<TargetResult> targets = new ArrayList<TargetResult>();
@@ -44,6 +47,9 @@ public class BuildReport {
     public String error;
     public String warning;  // destructive step, e.g. an existing PF deleted and created again
     public List<String> writes;  // database files the program can change and where they resolve: "CUSTMAST update -> APPLIB"
+    public List<String> bindingDirectories;  // BNDDIR param / ctl-opt bnddir and where each resolves: "APPDIR -> APPLIB"
+    public List<String> unresolvedSymbols;   // CPD5D02 Definition not found for symbol ...
+    public List<String> binderWarnings;      // CPD5D1D and alike: harmless unless a CPD5D02 follows
     public List<CompileError> errors;
     public List<JoblogMessage> joblog;
 
@@ -93,6 +99,18 @@ public class BuildReport {
       if (t.joblog != null) {
         for (JoblogMessage m : t.joblog) {
           if (!seenJoblog.add(m.id + ":" + m.text)) continue;
+          if ("CPD5D09".equals(m.id)) continue;  // ADDBNDDIRE: entry already there
+          if ("CPD5D1D".equals(m.id)) {
+            if (t.binderWarnings == null) t.binderWarnings = new ArrayList<String>();
+            t.binderWarnings.add(m.text);
+            continue;
+          }
+          if ("CPD5D02".equals(m.id)) {
+            java.util.regex.Matcher symbol = java.util.regex.Pattern.compile("symbol '?([^' ]+)'?").matcher(m.text);
+            if (t.unresolvedSymbols == null) t.unresolvedSymbols = new ArrayList<String>();
+            String name = symbol.find() ? symbol.group(1).replaceAll("[.,]$", "") : m.text;
+            if (!t.unresolvedSymbols.contains(name)) t.unresolvedSymbols.add(name);
+          }
           if (m.severity >= 30) {
             if (seen.add("null:0:" + m.id + ":" + m.text)) {
               CompileError e = new CompileError();
@@ -104,6 +122,17 @@ public class BuildReport {
           } else if (m.severity >= minSeverity && !BUILT.equals(t.status)) {
             joblog.add(m);
           }
+        }
+      }
+      /* Failed with no compile error (e.g. RNS9321, a binder stop): the joblog's own errors are the reason */
+      if (errors.isEmpty() && FAILED.equals(t.status)) {
+        for (JoblogMessage m : joblog) {
+          if (m.severity < 20) continue;
+          CompileError e = new CompileError();
+          e.id = m.id;
+          e.severity = m.severity;
+          e.message = m.text;
+          errors.add(e);
         }
       }
       t.errors = errors.isEmpty() ? null : errors;
