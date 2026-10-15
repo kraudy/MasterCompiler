@@ -56,6 +56,7 @@ public class McpServer {
   private final List<String> mask;
   private final java.util.concurrent.Callable<AS400> connector;  // in-process read-only server: its own system
   private ReadOnlyConnections.Router router;  // MC on the PC: calls for read-only connections
+  private SignOnGuard.Target signOn;  // the password sign-on this server makes (null on the IBM i: its own job)
 
   public McpServer(ArgParser parser) {
     this.parser = parser;
@@ -80,8 +81,11 @@ public class McpServer {
   }
 
   /* A read-only server in this process (a read-only connection over the host servers) */
-  static McpServer readOnly(List<String> libraries, int maxRows, List<String> mask, java.util.concurrent.Callable<AS400> connector) {
-    return new McpServer(libraries, maxRows, mask, connector);
+  static McpServer readOnly(List<String> libraries, int maxRows, List<String> mask, java.util.concurrent.Callable<AS400> connector,
+      SignOnGuard.Target signOn) {
+    McpServer server = new McpServer(libraries, maxRows, mask, connector);
+    server.signOn = signOn;
+    return server;
   }
 
   /* One tool call, for the router: the tool result */
@@ -475,6 +479,7 @@ public class McpServer {
       args = ready;
     }
     try {
+      if (signOn != null && !name.equals("status")) SignOnGuard.check(signOn);  // no sign-on after a rejection
       switch (name) {
         case "compare":       return compare(args);
         case "copy_rows":     return copyRows(args);
@@ -494,6 +499,15 @@ public class McpServer {
       }
     } catch (Exception e) {
       logger.error("Tool failed: " + name, e);
+      if (signOn != null && !(e instanceof SignOnGuard.Blocked) && SignOnGuard.failed(signOn, e)) {
+        disconnect();
+        try {
+          SignOnGuard.check(signOn);
+        } catch (SignOnGuard.Blocked blocked) {
+          return toolResult(blocked.getMessage(), true);
+        }
+      }
+      if (e instanceof SignOnGuard.Blocked) return toolResult(e.getMessage(), true);
       String message = e instanceof CompilerException ? ((CompilerException) e).getFullContext() : e.toString();
       return toolResult(message, true);
     }
@@ -507,12 +521,14 @@ public class McpServer {
       Code4iConfig code4i = MasterCompiler.code4i(parser);
       if (code4i != null) connected = code4i.name;
     } catch (Exception unknown) { /* no Code for IBM i connection: not checked */ }
+    SignOnGuard.project(projectDir());
     router = new ReadOnlyConnections.Router(projectDir(), false, connected);
     return router;
   }
 
   private ObjectNode callReadOnly(String name, JsonNode args) {
     try {
+      if (signOn != null && !name.equals("status")) SignOnGuard.check(signOn);
       switch (name) {
         case "sql":          return sql(args);
         case "find_object":  return findObject(args);
@@ -537,7 +553,8 @@ public class McpServer {
       }
     } catch (Exception e) {
       logger.error("Tool failed: " + name, e);
-      return toolResult(e instanceof java.sql.SQLException
+      if (signOn != null && !(e instanceof SignOnGuard.Blocked) && SignOnGuard.failed(signOn, e)) disconnect();
+      return toolResult(e instanceof java.sql.SQLException && SignOnGuard.authCode(e) == null
           ? "SQL error " + ((java.sql.SQLException) e).getSQLState() + ": " + e.getMessage() : e.getMessage(), true);
     }
   }
@@ -740,7 +757,13 @@ public class McpServer {
     ObjectNode result = mapper.createObjectNode();
     result.put("version", MasterCompiler.version());
     if (readOnlyMode) {
-      connect();
+      try {
+        connect();
+      } catch (Exception e) {
+        result.put("readOnly", true);
+        result.put("error", e.getMessage());
+        return toolResult(pretty.writeValueAsString(result), false);
+      }
       result.put("readOnly", true);
       result.put("user", system.getUserId());
       result.put("system", system.getSystemName());
@@ -750,13 +773,21 @@ public class McpServer {
     }
     result.put("projectFolder", projectDir().getAbsolutePath());
     result.put("spec", specName());
-    connectWithLibraryList();
-    result.put("user", system.getUserId());
-    result.put("system", system.getSystemName());
-    result.put("currentLibrary", currentLibrary());
-    result.put("libraryList", String.join(" ", SqlTools.libraryList(connection)));
     ArrayNode prot = result.putArray("protectedLibs");
     for (String lib : protectedLibs()) prot.add(lib);
+    if (signOn == null) signOn = buildSignOn();
+    if (signOn != null) SignOnGuard.known(signOn);
+    /* Not connected (a rejected password, a network error): status still answers, with why */
+    try {
+      connectWithLibraryList();
+      result.put("user", system.getUserId());
+      result.put("system", system.getSystemName());
+      result.put("currentLibrary", currentLibrary());
+      result.put("libraryList", String.join(" ", SqlTools.libraryList(connection)));
+    } catch (Exception e) {
+      result.put("error", e.getMessage());
+    }
+    if (router() != null) result.set("connections", router.connectionsStatus());
     return toolResult(pretty.writeValueAsString(result), false);
   }
 
@@ -1043,8 +1074,9 @@ public class McpServer {
     if (connection != null && !connection.isClosed()) return;
     disconnect();
     if (readOnlyMode) {
-      system = connector != null ? connector.call() : MasterCompiler.connect(parser);
-      connection = SqlTools.readOnlyConnection(system, readLibs);
+      AS400 readSystem = connector != null ? connector.call() : MasterCompiler.connect(parser);
+      connection = signedOn(() -> SqlTools.readOnlyConnection(readSystem, readLibs));
+      system = readSystem;
       logger.info("Connected read only to {} as {}, reading {}", system.getSystemName(), system.getUserId(), readLibs);
       return;
     }
@@ -1054,10 +1086,31 @@ public class McpServer {
           + "input in .vscode/mcp.json (java -jar MasterCompiler.jar --setup-vscode writes it), or set "
           + "IBMI_HOSTNAME / IBMI_USERNAME / IBMI_PASSWORD, or put them in a .env file.");
     }
-    system = MasterCompiler.connect(parser);
-    connection = new AS400JDBCDataSource(system).getConnection();
+    if (signOn == null) signOn = buildSignOn();
+    connection = signedOn(() -> {
+      system = MasterCompiler.connect(parser);
+      return new AS400JDBCDataSource(system).getConnection();
+    });
     lastJoblog = new CommandExecutor(connection, false, false, false).getCurrentTime();
     logger.info("Connected to IBM i as {}", system.getUserId());
+  }
+
+  /* One sign-on attempt through SignOnGuard: none after IBM i rejected the password */
+  private <T> T signedOn(java.util.concurrent.Callable<T> attempt) throws Exception {
+    return signOn != null ? SignOnGuard.signOn(signOn, attempt) : attempt.call();
+  }
+
+  /* The build connection's sign-on on the PC: the Code for IBM i connection, else .env / IBMI_* */
+  private SignOnGuard.Target buildSignOn() throws Exception {
+    if (parser == null || IBMiDotEnv.isIBMi()) return null;
+    SignOnGuard.project(projectDir());
+    Code4iConfig code4i = MasterCompiler.code4i(parser);
+    if (code4i != null) {
+      return new SignOnGuard.Target(code4i.name, code4i.host, code4i.username, System.getenv("IBMI_PASSWORD"));
+    }
+    io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
+    return new SignOnGuard.Target(null, env.get("IBMI_HOSTNAME", ""), env.get("IBMI_USERNAME", ""),
+        env.get("IBMI_PASSWORD", ""));
   }
 
   private void disconnect() {

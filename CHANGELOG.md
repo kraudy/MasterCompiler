@@ -3,6 +3,20 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.11
+
+Sign-on safety (a wrong password never disables the profile)
+- Each sign-on is one attempt: over SSH the password goes once (no retry, not to both `password` and
+  `keyboard-interactive`), and keys from `~/.ssh` are not offered when a password is given and the connection
+  has no key of its own.
+- After IBM i rejects a password (`CPF22E2`, `CPF2204`, `CPF22E5`, SSH `Auth fail`, ...) MC does not sign on
+  to that host and user again in that run: every tool answers with the reason, and the server stays up.
+- `.mc/auth-blocked.json` keeps the rejection (no password, only a salted hash): a restart with the same
+  cached password does not sign on; another password gets one attempt; a successful sign-on clears it. A
+  disabled profile or expired password (`CPF22E3` / `CPF22E4`) gets no attempt until the file is removed.
+- `status` answers without a connection and lists every connection (build and read-only) with its state.
+- `--setup-vscode` password prompts say to run "MCP: Reset Cached Inputs" after a password change.
+
 ## v0.3.10
 
 - `copy_rows`, data from one system to another without `seeds.yaml`: rows of a table on a read-only connection

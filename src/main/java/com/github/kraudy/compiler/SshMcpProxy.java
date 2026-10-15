@@ -63,6 +63,7 @@ public class SshMcpProxy {
   });
   private volatile boolean closing;
   private ReadOnlyConnections.Router router;  // calls for the spec's read-only connections
+  private SignOnGuard.Target buildTarget;      // the build connection's sign-on
   private final Set<String> pendingImports = java.util.concurrent.ConcurrentHashMap.newKeySet();  // import_source call ids  // VS Code closed the session: the remote end stopping is expected
 
   public SshMcpProxy(ArgParser parser) {
@@ -80,6 +81,9 @@ public class SshMcpProxy {
     int port = code4i != null ? code4i.port : Integer.parseInt(env("IBMI_SSH_PORT", "22"));
     project = new File(parser.getProjectRoot()).getCanonicalFile();
     router = new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
+    SignOnGuard.project(project);
+    buildTarget = new SignOnGuard.Target(code4i != null ? code4i.name : host, host, user, System.getenv("IBMI_PASSWORD"));
+    SignOnGuard.known(buildTarget);
 
     /*
      * initialize and tools/list are answered here right away; connecting, the first jar upload and the
@@ -114,7 +118,8 @@ public class SshMcpProxy {
         JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
         /* status before MC runs on the IBM i: answered here, with the stage it is at */
         if (result == null && "tools/call".equals(request.path("method").asText(""))
-            && "status".equals(request.path("params").path("name").asText("")) && !remoteReady.isDone()) {
+            && "status".equals(request.path("params").path("name").asText(""))
+            && (!remoteReady.isDone() || remoteReady.isCompletedExceptionally())) {
           sendResult(id, statusHere());
           continue;
         }
@@ -141,8 +146,9 @@ public class SshMcpProxy {
   private OutputStream startRemote(Code4iConfig code4i, String host, int port, String user) throws Exception {
     long start = System.currentTimeMillis();
     stage("1/5 connecting to " + user + "@" + host + ":" + port + " over SSH");
-    ssh = SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
-        code4i != null ? code4i.privateKeyPath : null);
+    /* A rejected password: no further try in this run (or at a restart with the same one); the server stays up */
+    ssh = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
+        code4i != null ? code4i.privateKeyPath : null));
     /* Home: Code for IBM i's when it has one, else the SSH user's own */
     String home = code4i != null && code4i.homeKnown ? code4i.homeDirectory : ssh.exec("echo $HOME").trim();
     home = home.startsWith("/") ? trimSlash(home) : "/home/" + user.toUpperCase();
@@ -307,13 +313,23 @@ public class SshMcpProxy {
     into.put("startup", stage);
     into.put("localProjectFolder", project != null ? project.getAbsolutePath() : null);
     into.put("ibmiProjectFolder", remoteDir);
+    into.set("connections", router.connectionsStatus());
     return into;
   }
 
   private ObjectNode statusHere() {
     ObjectNode result = mapper.createObjectNode();
     ObjectNode text = statusFields(mapper.createObjectNode());
-    text.put("note", "MasterCompiler is not running on the IBM i yet: the user, current library and library list come once it is");
+    String failed = null;
+    if (remoteReady.isCompletedExceptionally()) {
+      try {
+        remoteReady.get();
+      } catch (Exception e) {
+        failed = (e.getCause() != null ? e.getCause() : e).getMessage();
+      }
+    }
+    text.put("note", failed != null ? "MasterCompiler could not start on the IBM i: " + failed
+        : "MasterCompiler is not running on the IBM i yet: the user, current library and library list come once it is");
     result.putArray("content").addObject().put("type", "text").put("text", text.toPrettyString());
     result.put("isError", false);
     return result;

@@ -93,7 +93,7 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler <tag>` with the tag from above (v0.3.10 or newer).
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.11 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
 Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
@@ -202,8 +202,13 @@ Tell the user:
    to trust the server first).
 2. Pick the connection (when there are several), then enter the IBM i password in the box
    VS Code shows. That box is the only place to type it: not the chat, not a terminal. VS Code
-   stores it securely and passes it only to MC; it is never written to the repository.
+   stores it securely and passes it only to MC; it is never written to the repository. VS Code
+   keeps it across restarts: when the password changes, run **MCP: Reset Cached Inputs** before
+   starting the server again.
 3. Back in Copilot Chat (Agent mode), MC's tools are available.
+
+After any authentication error, do not call another MC tool on that connection and do not retry:
+ask the user to reset the cached inputs and restart the server (Troubleshooting below).
 
 Then check it works: call `plan` without arguments. A list of targets means MC reached the
 IBM i and understood the project.
@@ -264,6 +269,8 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | Connection refused / timeouts | Over SSH: the IBM i's SSH port must be reachable (Code for IBM i working from this PC proves it). With `--host-servers`: ports 449, 8470-8476 (or 9470-9476 with TLS), as for ACS. |
 | `--ssh`: host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator. |
 | `IBMI_PASSWORD_<NAME> is not set` | A read-only connection without its password prompt: rerun `--setup-vscode`, restart the server, type that system's password in its prompt. |
+| `rejected the password`, `Auth fail`, `CPF22E2` | IBM i rejected the password (often: it changed, and VS Code resent the old one it keeps). MC stops signing on there so the profile is not disabled, also after a restart with the same password. The user runs **MCP: Reset Cached Inputs**, restarts the server and types the current password. Do not call more tools on that connection meanwhile. |
+| `disabled` (`CPF22E3`) / `expired` (`CPF22E4`) | The profile is disabled or its password expired: the user asks their security administrator, then deletes `.mc/auth-blocked.json` in the project, resets the cached inputs and restarts the server. |
 | `--ssh`: no key and no password | Enter the password when the server starts, or create an SSH key the IBM i accepts. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |
 | Server seems stuck at start | Read its log: **MCP: List Servers** → `mastercompiler` → **Show Output**. It shows each start-up stage (`MC start-up 1/5 connecting` … `5/5 ready`) and, for the jar upload, progress every 5 s. A tool call that waits logs which stage it waits for. |

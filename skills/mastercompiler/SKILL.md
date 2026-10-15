@@ -242,7 +242,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `find_object` | `name`, `type`, `connection` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
 | `copy_rows` | `connection`, `from`, `where`, `set`, `to`, `deleteWhere`, `confirm` | Copies rows from a table on a read-only connection into a table of the current library (see below). Without `confirm`: the rows, the first three and the statements; show them to the user, then call with `confirm: true` |
 | `compare` | `object`, `type`, `connection` | The object on the build system and on a read-only connection side by side (library, create / change timestamps, per module the source member, the source change timestamp its compile recorded, the module's create timestamp), `differences` and `sameRecordedSource` |
-| `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`; over SSH also the host and the start-up stage. Call it first when something looks off |
+| `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`, `connections` (each one's `state`, e.g. `auth-failed` with why); over SSH also the host and the start-up stage. Answers even when MC could not sign on. Call it first when something looks off |
 | `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`), `connection` | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
@@ -279,6 +279,20 @@ connections:
   other system holds personal data, the user's company rules may require replacing it.
 - MC opens a read-only connection on first use. Its password comes from its own VS Code password
   prompt (`--setup-vscode` adds one per read-only connection in the spec); never ask for it in chat.
+
+### Sign-on failures (never lock the user's profile)
+
+IBM i disables a profile after a few failed sign-ons (`QMAXSIGN`). MC signs on once per try, and after
+IBM i rejects a password it stops signing on to that system: every tool returns the reason
+(`isError`), and a restart with the same password (VS Code keeps typed inputs) does not try again.
+`status` lists every connection with its `state` (`connected`, `auth-failed`, `not connected`,
+`error`).
+
+After any authentication error (`rejected the password`, `Auth fail`, `CPF22E2`, `CPF22E3`, ...),
+do not call another tool on that connection and do not retry: tell the user to run
+**MCP: Reset Cached Inputs**, restart the `mastercompiler` server and type the current password in
+VS Code's prompt. A disabled profile (`CPF22E3`) or expired password (`CPF22E4`) needs their security
+administrator first.
 
 ### Sources the project does not have
 

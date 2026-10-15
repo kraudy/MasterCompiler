@@ -229,6 +229,19 @@ final class ReadOnlyConnections {
       }
     }
 
+    /* status: every connection's state, the spec's read-only ones included before their first use */
+    com.fasterxml.jackson.databind.node.ArrayNode connectionsStatus() {
+      try {
+        for (ReadOnly ro : load(project).readOnly.values()) {
+          Code4iConfig code4i = Code4iConfig.load(ro.name);
+          SignOnGuard.known(new SignOnGuard.Target(ro.name, code4i.host, code4i.username, null));
+        }
+      } catch (Exception e) {
+        logger.info("Read-only connections not listed in status: {}", e.getMessage());
+      }
+      return SignOnGuard.status();
+    }
+
     void close() {
       for (Backend b : open.values()) b.close();
       open.clear();
@@ -256,7 +269,8 @@ final class ReadOnlyConnections {
     LocalBackend(ReadOnly ro) throws Exception {
       Code4iConfig code4i = Code4iConfig.load(ro.name);
       String variable = passwordVariable(ro.name);
-      server = McpServer.readOnly(ro.libraries, ro.maxRows, ro.maskColumns, () -> code4i.connect(variable));
+      server = McpServer.readOnly(ro.libraries, ro.maxRows, ro.maskColumns, () -> code4i.connect(variable),
+          new SignOnGuard.Target(ro.name, code4i.host, code4i.username, System.getenv(variable)));
     }
 
     @Override public JsonNode call(String tool, JsonNode arguments) throws Exception {
@@ -280,8 +294,9 @@ final class ReadOnlyConnections {
     SshBackend(ReadOnly ro) throws Exception {
       Code4iConfig code4i = Code4iConfig.load(ro.name);
       try {
-        ssh = SshTarget.connect(code4i.host, code4i.port, code4i.username, System.getenv(passwordVariable(ro.name)),
-            code4i.privateKeyPath);
+        String password = System.getenv(passwordVariable(ro.name));
+        ssh = SignOnGuard.signOn(new SignOnGuard.Target(ro.name, code4i.host, code4i.username, password),
+            () -> SshTarget.connect(code4i.host, code4i.port, code4i.username, password, code4i.privateKeyPath));
       } catch (IllegalArgumentException e) {
         throw new IllegalArgumentException(e.getMessage().replace("IBMI_PASSWORD", passwordVariable(ro.name))
             + " (run java -jar MasterCompiler.jar --setup-vscode again: it adds that connection's password prompt)");

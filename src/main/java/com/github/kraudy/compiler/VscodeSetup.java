@@ -316,7 +316,9 @@ public final class VscodeSetup {
     ObjectNode input = inputs.addObject();
     input.put("id", id);
     input.put("type", "promptString");
-    input.put("description", description);
+    /* VS Code keeps what was typed across restarts: a changed password must be typed again, not resent */
+    input.put("description", password ? description + ". If your password changed, run \"MCP: Reset Cached Inputs\" "
+        + "first: MasterCompiler does not sign on again with a password IBM i rejected" : description);
     if (password) input.put("password", true);
   }
 

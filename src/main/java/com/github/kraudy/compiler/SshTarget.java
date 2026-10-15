@@ -51,25 +51,32 @@ public final class SshTarget implements AutoCloseable {
     }
     jsch.setKnownHosts(knownHosts.getPath());
 
+    /*
+     * One sign-on per try (SignOnGuard): with a password and no key configured for the connection, no key from ~/.ssh
+     * is offered (each one is a failed attempt, and too many end the session); the password goes once, to whichever
+     * of password / keyboard-interactive comes first, and is never repeated
+     */
+    boolean hasPassword = password != null && !password.isEmpty();
+    boolean configuredKey = privateKeyPath != null && new File(privateKeyPath).isFile();
     int keys = 0;
-    for (String key : keyCandidates(sshDir, privateKeyPath)) {
+    for (String key : configuredKey || !hasPassword ? keyCandidates(sshDir, privateKeyPath) : new ArrayList<String>()) {
       try {
         jsch.addIdentity(key);
         keys++;
       } catch (Exception e) {
         logger.info("SSH key not usable, skipped: {} ({})", key, e.getMessage());
       }
+      if (configuredKey) break;  // only the connection's own key
     }
-    boolean hasPassword = password != null && !password.isEmpty();
     if (keys == 0 && !hasPassword) {
       throw new IllegalArgumentException("No SSH key found and IBMI_PASSWORD is not set: provide one of them for --ssh");
     }
 
     Session session = jsch.getSession(user, host, port);
-    if (hasPassword) session.setPassword(password);
     session.setConfig("StrictHostKeyChecking", "ask");
     session.setConfig("FingerprintHash", "SHA256");
-    session.setConfig("PreferredAuthentications", "publickey,keyboard-interactive,password");
+    session.setConfig("PreferredAuthentications", keys == 0 ? "password,keyboard-interactive"
+        : hasPassword ? "publickey,password,keyboard-interactive" : "publickey");
     session.setUserInfo(new AcceptNewHosts(password));
     /* A link that stops answering (VPN drop, stuck firewall) ends the session after ~60 s instead of hanging */
     session.setServerAliveInterval(15_000);
@@ -337,15 +344,23 @@ public final class SshTarget implements AutoCloseable {
       return !changed;
     }
     @Override public String getPassphrase() { return null; }
+    /* The password goes out once per connect: JSch would ask again after a failure */
+    private boolean sent;
+
     @Override public String getPassword() { return password; }
-    @Override public boolean promptPassword(String message) { return password != null && !password.isEmpty(); }
+    @Override public boolean promptPassword(String message) {
+      if (sent || password == null || password.isEmpty()) return false;
+      sent = true;
+      return true;
+    }
     @Override public boolean promptPassphrase(String message) { return false; }
     @Override public void showMessage(String message) { logger.info("SSH: {}", message); }
 
     @Override
     public String[] promptKeyboardInteractive(String destination, String name, String instruction,
         String[] prompts, boolean[] echo) {
-      if (password == null || password.isEmpty()) return null;  // cancel: no password to give
+      if (sent || password == null || password.isEmpty()) return null;  // cancel: no password, or it was already sent
+      sent = true;
       String[] answers = new String[prompts.length];
       for (int i = 0; i < prompts.length; i++) answers[i] = password;
       return answers;
