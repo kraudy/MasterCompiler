@@ -3,6 +3,14 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.15
+
+- Windows download with its own Java: `MasterCompiler-windows-x64.zip` holds `MasterCompiler.jar` and a trimmed
+  Java 21 runtime (`runtime\`), so nothing else is installed. Setup uses that runtime when it is next to the jar.
+  The setup guide downloads it on 64-bit Windows; the plain jar stays for other systems and your own Java.
+- Moving an existing setup to the zip: point the `mastercompiler` entry in `mcp.json` at
+  `tools\MasterCompiler\runtime\bin\java.exe` and `tools\MasterCompiler\MasterCompiler.jar`.
+
 ## v0.3.14
 
 5250 sessions (green screens)

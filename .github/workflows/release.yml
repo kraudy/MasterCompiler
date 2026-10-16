@@ -3,6 +3,7 @@ name: Release
 # Push a tag like v1.2.0 to publish the jar as a GitHub release:
 #   git tag v1.2.0 && git push origin v1.2.0
 # Latest jar: https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar
+# Windows (no Java needed): MasterCompiler-windows-x64.zip, the same jar with its own Java in runtime\
 
 on:
   push:
@@ -33,6 +34,12 @@ jobs:
           cp target/MasterCompiler-1.0-SNAPSHOT.jar MasterCompiler.jar   # stable name for releases/latest/download
           cp target/MasterCompiler-1.0-SNAPSHOT.jar .                    # name earlier releases used
 
+      - name: Keep the jar for the Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar
+          path: MasterCompiler.jar
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,3 +48,42 @@ jobs:
             MasterCompiler.jar MasterCompiler-1.0-SNAPSHOT.jar \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+  windows:
+    # The same jar with a trimmed Java runtime (jlink), so Windows users install no Java
+    needs: release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Get the released jar
+        uses: actions/download-artifact@v4
+        with:
+          name: jar
+
+      - name: Build the runtime and the zip
+        shell: pwsh
+        run: |
+          # jdeps on the classes, plus what is loaded by name at run time (TLS / SSH EC crypto, charsets, Unsafe, JMX)
+          $modules = 'java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.security.jgss,java.sql,java.transaction.xa,java.xml,jdk.charsets,jdk.crypto.ec,jdk.unsupported'
+          New-Item -ItemType Directory -Force MasterCompiler | Out-Null
+          jlink --add-modules $modules --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output MasterCompiler/runtime
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item MasterCompiler.jar MasterCompiler/
+          $version = & MasterCompiler/runtime/bin/java.exe -jar MasterCompiler/MasterCompiler.jar --version
+          Write-Output $version
+          if ($version -ne "MasterCompiler $env:GITHUB_REF_NAME") { Write-Error "Unexpected version: $version"; exit 1 }
+          Compress-Archive -Path MasterCompiler -DestinationPath MasterCompiler-windows-x64.zip
+
+      - name: Add it to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" MasterCompiler-windows-x64.zip --repo "$env:GITHUB_REPOSITORY"

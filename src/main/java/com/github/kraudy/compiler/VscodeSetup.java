@@ -388,10 +388,17 @@ public final class VscodeSetup {
   /*
    * The Java VS Code starts the server with: the best one installed, not just the one running setup
    * (often an old 32-bit Java 8 first on PATH). 64-bit first, then the newest. Looks at this Java,
-   * JAVA_HOME, the Red Hat Java extension's bundled JRE and the usual install folders.
+   * JAVA_HOME, the Red Hat Java extension's bundled JRE and the usual install folders. The runtime that comes
+   * with the Windows download, next to the jar, always wins.
    */
   static JavaChoice java() {
     if (chosenJava != null) return chosenJava;
+    /* The Windows download: MasterCompiler.jar with its own Java in runtime\ next to it, made for it */
+    JavaChoice bundled = fromRelease(new File(new File(jarPath()).getAbsoluteFile().getParentFile(), "runtime"));
+    if (bundled != null) {
+      chosenJava = bundled;
+      return bundled;
+    }
     String bits = System.getProperty("sun.arch.data.model", "");
     String running = executable(new File(System.getProperty("java.home")));
     Boolean runningIs64 = is64(new File(running));

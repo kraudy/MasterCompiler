@@ -47,6 +47,10 @@ asking first.
 
 ## 1. Java
 
+**64-bit Windows (`$env:PROCESSOR_ARCHITECTURE` is `AMD64` or `ARM64`): skip this step.** MC comes
+with its own Java there (step 2, "Windows"), so nothing else is installed and setup uses that Java.
+The rest of this step is for other systems, or when the user wants their own Java.
+
 ```powershell
 cmd /c "java -version 2>&1"
 ```
@@ -72,7 +76,32 @@ system-wide without asking.
 
 ## 2. The MasterCompiler jar
 
-Keep it outside the repository, e.g. in the user's tools folder:
+### Windows: MasterCompiler with its own Java
+
+One zip with `MasterCompiler.jar` and a Java runtime made for it (`runtime\`), unpacked to
+`%USERPROFILE%\tools\MasterCompiler`, outside the repository:
+
+```powershell
+# Windows PowerShell 5.1 needs TLS 1.2; hiding the progress bar makes the download much faster
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ProgressPreference = 'SilentlyContinue'
+New-Item -ItemType Directory -Force "$env:USERPROFILE\tools" | Out-Null
+$tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/MasterCompiler/releases/latest).tag_name
+Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/kraudy/MasterCompiler/releases/download/$tag/MasterCompiler-windows-x64.zip" -OutFile "$env:TEMP\MasterCompiler-windows-x64.zip"
+if (Test-Path "$env:USERPROFILE\tools\MasterCompiler") { Remove-Item -Recurse -Force "$env:USERPROFILE\tools\MasterCompiler" }
+Expand-Archive "$env:TEMP\MasterCompiler-windows-x64.zip" -DestinationPath "$env:USERPROFILE\tools"
+& "$env:USERPROFILE\tools\MasterCompiler\runtime\bin\java.exe" -jar "$env:USERPROFILE\tools\MasterCompiler\MasterCompiler.jar" --version
+```
+
+The last line must print `MasterCompiler <tag>` with the tag from above. With this download, every
+`java -jar "$env:USERPROFILE\tools\MasterCompiler.jar"` below is
+`& "$env:USERPROFILE\tools\MasterCompiler\runtime\bin\java.exe" -jar "$env:USERPROFILE\tools\MasterCompiler\MasterCompiler.jar"`.
+Setup writes that Java into `mcp.json` by itself (the preview shows it as "Java for the server").
+Releases before v0.3.15 have no zip: use the jar below.
+
+### Other systems, or your own Java
+
+Keep the jar outside the repository, e.g. in the user's tools folder:
 
 ```powershell
 # Windows PowerShell 5.1 needs TLS 1.2; hiding the progress bar makes the download much faster
@@ -94,7 +123,7 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler <tag>` with the tag from above (v0.3.13 or newer).
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.15 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
 Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
@@ -225,9 +254,12 @@ which library an object resolves to.
    (`https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/CHANGELOG.md`): it says what
    changed and whether `mcp.json` needs something new.
 2. Stop the server first: Command Palette → **MCP: List Servers** → `mastercompiler` → **Stop**.
-   On Windows the running server keeps the jar open and the download over it fails.
-3. Run the download in step 2 above (look up `tag_name` again, download that tag's jar over the
-   existing `MasterCompiler.jar`) and check `--version` prints that tag.
+   On Windows the running server keeps the jar and its Java open and replacing them fails.
+3. Run the download in step 2 above (look up `tag_name` again; the Windows zip replaces the whole
+   `tools\MasterCompiler` folder, the jar download replaces `MasterCompiler.jar`) and check
+   `--version` prints that tag. Moving from the jar to the Windows zip: point the `mastercompiler`
+   entry's `command` at `...\tools\MasterCompiler\runtime\bin\java.exe` and its `-jar` argument at
+   `...\tools\MasterCompiler\MasterCompiler.jar`.
 4. Run `--setup-vscode` again (step 3) when the spec gained `connections.readOnly`: it adds the
    missing password prompts and keeps the rest of the `mastercompiler` entry as it is. For any other
    `mcp.json` change the changelog mentions, edit the entry (or remove it, with the user's agreement,
@@ -239,9 +271,10 @@ which library an object resolves to.
 
 When MC will not start or behaves oddly after the steps above:
 
-1. Stop the server, delete `MasterCompiler.jar`, download it again (step 2) and check `--version`.
-2. Check the `command` in `mcp.json` still points at a working Java (step 1; it breaks when a Java
-   folder it named was removed or updated). Setup does not change an existing `mastercompiler`
+1. Stop the server, delete `MasterCompiler.jar` (with the Windows zip: the `tools\MasterCompiler`
+   folder), download it again (step 2) and check `--version`.
+2. Check the `command` in `mcp.json` still points at a working Java (the Windows zip's
+   `runtime\bin\java.exe`, or step 1; it breaks when a Java folder it named was removed or updated). Setup does not change an existing `mastercompiler`
    entry: fix the path in it, or, with the user's agreement, remove the entry and run
    `--setup-vscode` again (step 3) to write a new one.
 3. Start the server.
@@ -282,8 +315,8 @@ This only changes what VS Code passes to MC. The IBM i password itself is change
   "servers": {
     "mastercompiler": {
       "type": "stdio",
-      "command": "C:\\path\\to\\java.exe",
-      "args": ["-jar", "C:\\Users\\USER\\tools\\MasterCompiler.jar",
+      "command": "C:\\Users\\USER\\tools\\MasterCompiler\\runtime\\bin\\java.exe",
+      "args": ["-jar", "C:\\Users\\USER\\tools\\MasterCompiler\\MasterCompiler.jar",
                "--mcp", "--code4i", "--connection", "${input:ibmiConnection}", "--project", "${workspaceFolder}"],
       "env": { "IBMI_PASSWORD": "${input:ibmiPassword}" }
     }
@@ -291,7 +324,8 @@ This only changes what VS Code passes to MC. The IBM i password itself is change
 }
 ```
 
-With a single connection, drop the `ibmiConnection` input and put its name after `--connection`.
+Paths are the Windows zip's (step 2); with your own Java, `command` is its `java.exe` and `-jar` the
+jar's path. With a single connection, drop the `ibmiConnection` input and put its name after `--connection`.
 
 Read-only connections (`connections.readOnly` in the spec) get a password prompt each, like the
 build connection: an input `{ "id": "ibmiPassword_SYS2", "type": "promptString", "password": true }`
