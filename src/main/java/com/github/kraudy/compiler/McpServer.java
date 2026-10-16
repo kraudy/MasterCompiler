@@ -174,7 +174,7 @@ public class McpServer {
         "column, message id and severity; severity 20 and up stop a compile), impact to see what " +
         "depends on an object, and joblog for the IBM i job's recent messages. Before the first build of a session, " +
         "call status and plan and show the user the current library and the targets; build once they agree. Tools that " +
-        "write (clean, call_program, copy_rows, screen_open) first show a preview: call them with confirm: true only " +
+        "write (clean, call_program, copy_rows, upload_file, screen_open) first show a preview: call them with confirm: true only " +
         "after the user agreed. The IBM i password is typed only in VS Code's prompt, never in the chat; after an " +
         "authentication error, do not retry: follow the error's steps." + pendingRequest());
     return result;
@@ -201,7 +201,9 @@ public class McpServer {
         "Compile targets on the IBM i. With 'files' or 'since' only the targets whose sources " +
         "(or /copy members) changed are built, plus everything that depends on them; with neither, " +
         "every target is built. Returns the build report: per target status, command, compile errors " +
-        "(file, line, column, id, severity, message) and joblog. A failed target does not stop the build: " +
+        "(file, line, column, id, severity, message) and joblog; hook messages apart (hookJoblog), failedAt " +
+        "(compile, hook, tests, protectedLibs), and tests: each RUCALLTST hook's RPGUnit result as JSON (counts, " +
+        "each failing test with its message and statement). A failed target does not stop the build: " +
         "everything that does not depend on it is still built, its dependents are reported as blocked.",
         selectionSchema()));
     tools.add(tool("plan",
@@ -383,6 +385,16 @@ public class McpServer {
     callParams.put("description", "In order: {type: char, length, value} | {type: packed|zoned, digits, decimals, value} | "
         + "{type: int, bytes: 2|4|8, value}. No value: output only. A data structure (e.g. a fixed-length message) is one char "
         + "parameter of its full length");
+    ObjectNode checkRows = callProps.putObject("checkRows");
+    checkRows.put("type", "array");
+    ObjectNode checkItem = checkRows.putObject("items");
+    checkItem.put("type", "object");
+    ObjectNode checkProps = checkItem.putObject("properties");
+    checkProps.putObject("sql").put("type", "string").put("description", "A SELECT over the rows the call works on (up to 1000 rows)");
+    checkProps.putObject("key").put("type", "array").put("description", "Columns that identify a row, e.g. [\"COL1\"]")
+        .putObject("items").put("type", "string");
+    checkRows.put("description", "Up to 5 queries run before and after the call: the answer lists the rows inserted, deleted "
+        + "and changed (column: [before, after]). Without confirm they run once, to check them");
     callProps.putObject("confirm").put("type", "boolean")
         .put("description", "false (default): show what would run and which files the program can change. true: run it, after the user agreed");
     callSchema.putArray("required").add("program");
@@ -392,6 +404,38 @@ public class McpServer {
         + "write to a file in a protectedLibs library (or when it writes files and the spec sets no protectedLibs). First "
         + "call without confirm and show the user what it would do; call again with confirm: true only if they agree.",
         callSchema));
+
+    ObjectNode spoolSchema = mapper.createObjectNode();
+    spoolSchema.put("type", "object");
+    ObjectNode spoolProps = spoolSchema.putObject("properties");
+    spoolProps.putObject("file").put("type", "string").put("description", "Spooled file name (RPGUNIT, QPJOBLOG, a compile "
+        + "listing's name). Left out: list the newest ones");
+    spoolProps.putObject("job").put("type", "string").put("description", "Qualified job name 123456/USER/JOBNAME (default: the newest file of that name)");
+    spoolProps.putObject("number").put("type", "integer").put("description", "Spooled file number within the job");
+    spoolProps.putObject("startLine").put("type", "integer").put("description", "First line to return (1)");
+    spoolProps.putObject("maxLines").put("type", "integer").put("description", "Lines to return (300, up to 2000)");
+    spoolProps.putObject("list").put("type", "boolean").put("description", "true: list the files of that name / job instead of reading one");
+    tools.add(tool("spool",
+        "The signed-on user's own spooled files: without 'file' the newest 30 (name, number, job, pages); with 'file' its "
+        + "lines, a page at a time. RPGUnit results already come as JSON in the build report's tests: read the RPGUNIT "
+        + "file only when those have just the counts.",
+        spoolSchema));
+
+    ObjectNode uploadSchema = mapper.createObjectNode();
+    uploadSchema.put("type", "object");
+    ObjectNode uploadProps = uploadSchema.putObject("properties");
+    uploadProps.putObject("file").put("type", "string").put("description", "A file in the project folder on this PC (e.g. target/app.jar)");
+    uploadProps.putObject("to").put("type", "string").put("description", "IFS folder: one of the spec's uploadFolders or below it");
+    uploadProps.putObject("name").put("type", "string").put("description", "File name there (default: the same name)");
+    uploadProps.putObject("confirm").put("type", "boolean")
+        .put("description", "false (default): show what would be uploaded and what it replaces. true: upload, after the user agreed");
+    uploadSchema.putArray("required").add("file").add("to");
+    tools.add(tool("upload_file",
+        "Upload a file of the project folder (a built jar, a properties file, test input) to an IFS folder the spec allows "
+        + "(uploadFolders). Text files are tagged UTF-8, others are copied as they are. First call without confirm and show "
+        + "the user the file, its size and SHA-256 and what it replaces; call again with confirm: true only if they agree. "
+        + "Confirmed uploads are logged in .mc/uploads.log.",
+        uploadSchema));
 
     tools.add(tool("import_source",
         "Copy sources from the IBM i into the project folder, named with MC's conventions (copybooks as "
@@ -542,6 +586,7 @@ public class McpServer {
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
     boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows")
+        || name.equals("upload_file")
         || name.equals("screen_open") || name.equals("screen_send");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
@@ -579,6 +624,8 @@ public class McpServer {
         case "status":        return status();
         case "call_program":  return callProgram(args);
         case "import_source": return importSource(args);
+        case "spool":         return spool(args);
+        case "upload_file":   return uploadFile(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
     } catch (Exception e) {
@@ -800,6 +847,17 @@ public class McpServer {
   private Connection readOnly;
   private String readOnlyLibl;
 
+  /* The read-only connection for queries, with the build connection's library list */
+  private Connection readOnlyConnection() throws Exception {
+    List<String> libl = SqlTools.libraryList(connection);
+    if (readOnly == null || readOnly.isClosed() || !String.join(" ", libl).equals(readOnlyLibl)) {
+      if (readOnly != null) try { readOnly.close(); } catch (Exception ignored) { /* reopened below */ }
+      readOnly = SqlTools.readOnlyConnection(system, libl);
+      readOnlyLibl = String.join(" ", libl);
+    }
+    return readOnly;
+  }
+
   private ObjectNode sql(JsonNode args) throws Exception {
     String statement = args.path("statement").asText("").trim();
     if (statement.isEmpty()) return toolResult("Give the query in 'statement'", true);
@@ -816,12 +874,7 @@ public class McpServer {
       }
     }
     connectWithLibraryList();
-    List<String> libl = SqlTools.libraryList(connection);
-    if (readOnly == null || readOnly.isClosed() || !String.join(" ", libl).equals(readOnlyLibl)) {
-      if (readOnly != null) try { readOnly.close(); } catch (Exception ignored) { /* reopened below */ }
-      readOnly = SqlTools.readOnlyConnection(system, libl);
-      readOnlyLibl = String.join(" ", libl);
-    }
+    readOnlyConnection();
     try {
       if (ResultFiles.wanted(args)) {
         java.util.Map<String, String> set = new java.util.LinkedHashMap<String, String>();
@@ -961,14 +1014,69 @@ public class McpServer {
           + "nothing keeps it from production data. Add protectedLibs: [<production libraries>] to the spec first.", true);
     }
     result.set("parameters", args.path("parameters"));
+    /* checkRows: the same queries before and after the call */
+    List<RowChanges> checks;
+    try {
+      checks = RowChanges.parse(args.path("checkRows"));
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage(), true);
+    }
+    SqlTools rowTools = new SqlTools(maxRows, mask, null);
+    List<java.util.Map<String, java.util.Map<String, String>>> before = new java.util.ArrayList<java.util.Map<String, java.util.Map<String, String>>>();
+    try {
+      Connection reader = readOnlyConnection();
+      for (RowChanges check : checks) before.add(check.snapshot(rowTools, reader));
+    } catch (IllegalArgumentException e) {
+      return toolResult("checkRows: " + e.getMessage(), true);
+    } catch (java.sql.SQLException e) {
+      return toolResult("checkRows: SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage(), true);
+    }
     if (!args.path("confirm").asBoolean(false)) {
+      if (!checks.isEmpty()) {
+        ArrayNode counts = result.putArray("checkRows");
+        for (int i = 0; i < checks.size(); i++) counts.addObject().put("sql", checks.get(i).sql).put("rowsNow", before.get(i).size());
+      }
       result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
       return toolResult(pretty.writeValueAsString(result), false);
     }
     ObjectNode ran = ProgramCaller.call(system, curlib, program, args.path("parameters").isArray()
         ? args.path("parameters") : mapper.createArrayNode(), SqlTools.libraryList(connection), curlib);
     ran.set("writes", writes);
+    if (!checks.isEmpty()) {
+      ArrayNode changes = ran.putArray("rowChanges");
+      List<String> masked = new java.util.ArrayList<String>();
+      for (String m : mask) masked.add(m.toUpperCase(java.util.Locale.ROOT));
+      for (int i = 0; i < checks.size(); i++) {
+        try {
+          changes.add(checks.get(i).compare(before.get(i), checks.get(i).snapshot(rowTools, readOnlyConnection()), masked));
+        } catch (Exception e) {
+          changes.addObject().put("sql", checks.get(i).sql).put("error", "Could not read the rows after the call: " + e.getMessage());
+        }
+      }
+    }
     return toolResult(pretty.writeValueAsString(ran), !ran.path("success").asBoolean(false));
+  }
+
+  private ObjectNode spool(JsonNode args) throws Exception {
+    connect();
+    try {
+      return toolResult(pretty.writeValueAsString(SpoolFiles.handle(connection, args)), false);
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage(), true);
+    }
+  }
+
+  /* The file is on the PC: MC on the PC uploads (over SSH the proxy does, before this server sees the call) */
+  private ObjectNode uploadFile(JsonNode args) throws Exception {
+    if (IBMiDotEnv.isIBMi()) {
+      return toolResult("upload_file runs where the project's files are: MasterCompiler on the PC (VS Code) uploads them", true);
+    }
+    connect();
+    try {
+      return toolResult(pretty.writeValueAsString(FileUpload.handle(args, projectDir(), FileUpload.over(system))), false);
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage(), true);
+    }
   }
 
   private ObjectNode findExport(JsonNode args) throws Exception {

@@ -168,6 +168,14 @@ public class MasterCompiler{
       /* Push local sources to the IFS; the job then compiles from that copy */
       if (push != null) {
         compileBaseDir = SourcePusher.push(system, baseDir, push, since, changedFiles, dryRun, verbose);
+        /* A scanned spec's CHGCURDIR names the folder on this PC: the job works in the pushed copy instead */
+        for (CommandObject hook : globalSpec.before) {
+          if (hook.getSystemCommand() == SysCmd.CHGCURDIR && hook.get(ParamCmd.DIR) != null && baseDir != null
+              && new java.io.File(hook.get(ParamCmd.DIR).replace("'", "").trim()).getAbsoluteFile().toPath().normalize()
+                  .equals(new java.io.File(baseDir).getAbsoluteFile().toPath().normalize())) {
+            hook.put(ParamCmd.DIR, compileBaseDir);
+          }
+        }
         globalSpec.before.add(0, new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, compileBaseDir));
       }
 
@@ -246,6 +254,9 @@ public class MasterCompiler{
     /* This is intended for a YAML file with multiple objects in a toposort order */
     Set<TargetKey> blocked = new HashSet<TargetKey>();  // keep-going: dependents of failed targets
     List<String> failedTargets = new ArrayList<String>();
+    /* Hooks that run before each target's compile, in order: a protectedLibs refusal names the ones that touch the file */
+    priorHooks.clear();
+    priorHooks.addAll(globalSpec.before);
 
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : targets.entrySet()) {
       TargetKey key = entry.getKey();
@@ -277,6 +288,10 @@ public class MasterCompiler{
       if (verbose) logger.info("Building: " + key.asString());
 
       Timestamp targetStart = reporting() ? commandExec.getCurrentTime() : null;
+      compileStart = null;
+      compileEnd = null;
+      String stage = "hook";  // where a failure happens: hook (before / after the compile), compile
+      int testsBefore = commandExec.getTestRuns().size();
       String command = null;
 
       try{
@@ -292,6 +307,10 @@ public class MasterCompiler{
           if (verbose) logger.info("Executing target before: " + targetSpec.before.size() + " commands found");
           commandExec.executeCommand(targetSpec.before);
         }
+        priorHooks.addAll(targetSpec.before);
+        stage = "compile";
+        /* Hooks so far (this target's before, earlier targets' after) may have created, copied or deleted files */
+        if (!dryRun) fileLibrary.clear();
 
         key.setRecreate(Boolean.TRUE.equals(targetSpec.recreate));
 
@@ -327,7 +346,10 @@ public class MasterCompiler{
 
         /* Execute compilation command */
         if (reporting()) command = CommandStringParser.toPasteableCommand(key);
+        if (reporting() && !dryRun) compileStart = commandExec.getCurrentTime();
         commandExec.executeCommand(key);
+        if (reporting() && !dryRun) compileEnd = commandExec.getCurrentTime();
+        stage = "hook";
 
         /* Per target success */
         if(!targetSpec.success.isEmpty()){
@@ -341,17 +363,30 @@ public class MasterCompiler{
           commandExec.executeCommand(targetSpec.after);
         } 
 
+        priorHooks.addAll(targetSpec.success);
+        priorHooks.addAll(targetSpec.after);
         if (reporting()) reportTarget(key, dryRun ? BuildReport.PLANNED : BuildReport.BUILT, command, null, targetStart);
+        if (reporting()) assignTests(key, testsBefore);
 
       } catch (CompilerException e){
         compilationError = true;
         if (verbose) logger.error("Target compilation failed: " + key.asString());
-        if (reporting()) reportTarget(key, BuildReport.FAILED, command, e.getMessage(), targetStart);
+        if (reporting()) {
+          /* Compiled, then a hook failed (tests among them): say which, apart from compile errors */
+          String failedAt = String.valueOf(e.getMessage()).startsWith(PROTECTED_REFUSAL) ? "protectedLibs" : stage;
+          boolean testsFailed = assignTests(key, testsBefore);
+          if ("hook".equals(failedAt) && testsFailed) failedAt = "tests";
+          String error = "compile".equals(failedAt) || "protectedLibs".equals(failedAt) ? e.getMessage() : describe(e);
+          if ("tests".equals(failedAt)) error = (compileEnd != null ? "Compiled; the" : "The") + " tests failed (see tests). " + error;
+          reportTarget(key, BuildReport.FAILED, command, error, targetStart);
+          report.targets.get(report.targets.size() - 1).failedAt = failedAt;
+        }
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
           if (verbose) logger.error("Executing target failure: " + targetSpec.failure.size() + " commands found");
           commandExec.executeCommand(targetSpec.failure);
+          if (reporting()) assignTests(key, testsBefore);  // a test run in a failure hook is this target's too
         } 
 
         if (!keepGoing) throw e; // Raise
@@ -361,7 +396,11 @@ public class MasterCompiler{
       } catch (Exception e){
         compilationError = true;
         if (verbose) logger.error("Unhandled exception in Target: " + key.asString());
-        if (reporting()) reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
+        if (reporting()) {
+          assignTests(key, testsBefore);
+          reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
+          report.targets.get(report.targets.size() - 1).failedAt = stage;
+        }
 
         if (!keepGoing) throw e; // Raise
         failedTargets.add(key.asString());
@@ -390,6 +429,31 @@ public class MasterCompiler{
       dirs.append(dir.contains("/") || dir.startsWith("*") ? dir : "*LIBL/" + dir);
     }
     return (opt + " BNDDIR(" + dirs + ")").trim();
+  }
+
+  private static final String PROTECTED_REFUSAL = "Writes to a protected library";
+
+  /* The current target's compile command ran between these (null: it did not start / did not end) */
+  private Timestamp compileStart;
+  private Timestamp compileEnd;
+  /* Hooks run so far, this target's before hooks included */
+  private final List<CommandObject> priorHooks = new ArrayList<CommandObject>();
+  private final Set<BuildReport.TestRun> testsReported = java.util.Collections.newSetFromMap(
+      new java.util.IdentityHashMap<BuildReport.TestRun, Boolean>());
+
+  /* RPGUnit runs of this target's hooks into the report; true when one of them failed */
+  private boolean assignTests(TargetKey key, int from) {
+    boolean failed = false;
+    List<BuildReport.TestRun> runs = commandExec.getTestRuns();
+    for (int i = from; i < runs.size(); i++) {
+      BuildReport.TestRun run = runs.get(i);
+      if (!testsReported.add(run)) continue;
+      run.target = key.asString();
+      if (report.tests == null) report.tests = new ArrayList<BuildReport.TestRun>();
+      report.tests.add(run);
+      failed |= !"passed".equals(run.outcome);
+    }
+    return failed;
   }
 
   private final Map<TargetKey, List<String>> targetWrites = new java.util.HashMap<TargetKey, List<String>>();
@@ -422,9 +486,20 @@ public class MasterCompiler{
       String library = name.contains("/") ? name.substring(0, name.indexOf('/')) : libraryOf(name);
       String object = name.contains("/") ? name.substring(name.indexOf('/') + 1) : name;
       String line = object + " " + String.join("/", file.getValue()) + " -> " + (library != null ? library : "(not found on the library list)");
-      writes.add(line);
       final String lib = library;
-      if (lib != null && globalSpec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(lib))) forbidden.add(line);
+      if (lib != null && globalSpec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(lib))) {
+        /* A hook that copies the file into the development library runs before the compile: a plan, which runs no
+           hook, cannot tell where it will resolve; the build checks again once the hooks ran */
+        List<String> naming = hooksNaming(name.contains("/") ? null : object);
+        if (dryRun && !naming.isEmpty()) {
+          line += " now; a hook before it names the file (" + String.join("; ", naming) + "): checked again after the "
+              + "hooks when the build runs";
+        } else {
+          forbidden.add(naming.isEmpty() ? line : line + " even after the hook that names it ran (" + String.join("; ", naming)
+              + "): the copy must be in a library before " + lib + " in the library list");
+        }
+      }
+      writes.add(line);
     }
     if (!writes.isEmpty()) targetWrites.put(key, writes);
 
@@ -448,10 +523,23 @@ public class MasterCompiler{
     }
     if (!resolved.isEmpty()) targetBndDirs.put(key, resolved);
     if (!forbidden.isEmpty()) {
-      throw new CompilerException("Writes to a protected library (protectedLibs " + globalSpec.protectedLibs + "): "
+      throw new CompilerException(PROTECTED_REFUSAL + " (protectedLibs " + globalSpec.protectedLibs + "): "
           + String.join("; ", forbidden) + ". Point those files at a development library (library list, EXTFILE, "
           + "qualified SQL names) before building.");
     }
+  }
+
+  /* The hooks run before this compile whose command names the file (CRTDUPOBJ, CPYF, CREATE TABLE ... LIKE ...) */
+  private List<String> hooksNaming(String file) {
+    List<String> naming = new ArrayList<String>();
+    if (file == null) return naming;  // qualified in the source: no hook changes where it resolves
+    java.util.regex.Pattern word = java.util.regex.Pattern.compile("(?<![A-Z0-9$#@_])" + java.util.regex.Pattern.quote(file.toUpperCase())
+        + "(?![A-Z0-9$#@_])");
+    for (CommandObject hook : priorHooks) {
+      String text = CommandStringParser.toPasteable(hook.getCommandStringWithoutSummary());
+      if (word.matcher(text.toUpperCase()).find() && !naming.contains(text)) naming.add(text);
+    }
+    return naming;
   }
 
   private String libraryOf(String file) {
@@ -536,7 +624,16 @@ public class MasterCompiler{
     if (dryRun || since == null) return;
 
     try {
-      result.joblog = commandExec.getJoblogMessages(since);
+      /* The compile's messages are the target's joblog; the hooks' (a test run's runtime messages) are kept apart */
+      List<BuildReport.JoblogMessage> hooks = new ArrayList<BuildReport.JoblogMessage>();
+      if (compileStart != null) {
+        result.joblog = commandExec.getJoblogMessages(compileStart, compileEnd);
+        hooks.addAll(commandExec.getJoblogMessages(since, compileStart));
+        if (compileEnd != null) hooks.addAll(commandExec.getJoblogMessages(compileEnd, null));
+      } else {
+        hooks.addAll(commandExec.getJoblogMessages(since));
+      }
+      result.hookJoblog = hooks.isEmpty() ? null : hooks;
       if (command != null && writesEventFile(key)) {
         if (key.getCompilationCommand() == CompilationPattern.CompCmd.RUNSQLSTM) {
           /* The listing also carries warnings (e.g. SQL7905 not journaled): read it only on failure */
@@ -669,6 +766,14 @@ public class MasterCompiler{
     if (!globalSpec.warnings.isEmpty()) report.warnings = new ArrayList<String>(globalSpec.warnings);
     report.spec = specFingerprint();
     if (commandExec != null && !commandExec.getHooksRun().isEmpty()) report.hooks = new ArrayList<String>(commandExec.getHooksRun());
+    /* Test runs of the global hooks */
+    if (commandExec != null) {
+      for (BuildReport.TestRun run : commandExec.getTestRuns()) {
+        if (!testsReported.add(run)) continue;
+        if (report.tests == null) report.tests = new ArrayList<BuildReport.TestRun>();
+        report.tests.add(run);
+      }
+    }
     report.dryRun = dryRun;
 
     Set<String> reported = new HashSet<String>();

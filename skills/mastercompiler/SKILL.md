@@ -82,6 +82,7 @@ targets:             # compiled in this order: dependencies first
 curlib: DEVLIB                 # library settings for the build job (CHGLIBL / CHGCURLIB before any hook);
 libl: [DEVLIB, LIB1]         # also allowed alone in mc-base.yaml for scanned projects
 protectedLibs: [LIB4]       # a program that can write to a file resolving here fails before compiling
+uploadFolders: [/home/USER1/app]  # IFS folders upload_file may write to (none: upload_file is refused)
 before:
   - ChgLibl: { LibL: "DEVLIB LIB1" }       # also applied by plan, find_source, sql, ...
   - Cmd: CPYOBJS FROMLIB(LIB1) TOLIB(DEVLIB)   # any CL command, run as written
@@ -104,7 +105,12 @@ targets:
 - Each RPG / COBOL target lists in `writes` the database files it can change (F-specs U/O/A,
   `dcl-f usage(*update/*output/*delete)`, `EXTFILE`, SQL INSERT / UPDATE / DELETE / MERGE) and the
   library each resolves to on the library list. With `protectedLibs`, a write there fails the
-  target with the file named. Overrides (OVRDBF) and dynamic SQL are not seen.
+  target with the file named. Overrides (OVRDBF) and dynamic SQL are not seen. The check runs after
+  the target's `before` hooks (and the global ones), so a hook that copies the file into the
+  development library first (CRTDUPOBJ, CPYF) counts. A plan runs no hook: there such a write is
+  reported in `writes` with the hook that names the file, and the build checks it again after the
+  hooks. When the file still resolves to the protected library after the hook ran, the refusal names
+  the hook: the copy must be in a library ahead of it on the library list.
 - The report's `hooks` lists every hook command in order with its outcome (`ok`, `planned` in a
   plan, `ignored CPFxxxx`, `failed`). CHGLIBL / CHGCURLIB hooks also run in a plan, so a plan sees
   the spec's library list.
@@ -232,6 +238,11 @@ the spec: it would run after MC's and point the job back at the old directory.
   procedure's module or service program is missing from the spec or its binding
   directory. `joblog` names the symbol.
 - A top-level `error` means a failure outside any target (global hook, connection).
+- `failedAt` on a failed target: `compile`, `hook` (a hook before or after the compile),
+  `tests` (compiled, then its RPGUnit run failed) or `protectedLibs`. `errors` and `joblog` are
+  the compile's own; messages sent while the hooks ran (a test run's runtime messages, a CPYF)
+  are in `hookJoblog` and are never compile errors.
+- `tests`: one entry per `RUCALLTST` hook that ran, as JSON (see "Test data").
 
 ## MCP server
 
@@ -250,7 +261,9 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `copy_rows` | `connection`, `from`, `where`, `set`, `to`, `deleteWhere`, `confirm` | Copies rows from a table on a read-only connection into a table of the current library (see below). Without `confirm`: the rows, the first three and the statements; show them to the user, then call with `confirm: true` |
 | `compare` | `object`, `type`, `connection` | The object on the build system and on a read-only connection side by side (library, create / change timestamps, per module the source member, the source change timestamp its compile recorded, the module's create timestamp), `differences` and `sameRecordedSource` |
 | `status` | none | Version, IBM i user, current library and library list the tools use, project folder and spec, `protectedLibs`, `connections` (each one's `state`, e.g. `auth-failed` with why); over SSH also the host and the start-up stage. Answers even when MC could not sign on. Call it first when something looks off |
-| `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
+| `call_program` | `program`, `parameters`, `checkRows`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change. `checkRows` (up to 5 `{sql, key: [columns]}`, 1000 rows each) runs the queries before and after the call: `rowChanges` lists per query the rows `inserted`, `deleted` and `changed` (`{key, columns: {COL: [before, after]}}`), so one call checks what the program did to the data. The key must be unique and never NULL; a row whose key changes shows as deleted and inserted. The queries read like `sql` on the build system |
+| `spool` | `file`, `job`, `number`, `startLine`, `maxLines`, `list` | The signed-on user's own spooled files only. Without `file`: the newest 30 (`file`, `number`, `job`, `pages`). With `file`: its lines (300, up to 2000), the newest of that name unless `job` / `number` say which; `more` gives the next `startLine` |
+| `upload_file` | `file`, `to`, `name`, `confirm` | Uploads a file of the project folder (a built jar, test input) to an IFS folder in the spec's `uploadFolders` (or below it). Text files are tagged UTF-8 (CCSID 1208); other files' bytes are copied as they are (their CCSID tag is the system's default for a new file). A symbolic link that leads out of `uploadFolders` is refused; the file replaced is kept until the new one is in place. Without `confirm`: the file, `bytes`, `sha256`, the target path and what it `replaces`; show it to the user, then `confirm: true` only if they agree. Logged in `.mc/uploads.log`. With no `uploadFolders`, ask the user which folder before adding one |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`), `connection` | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
 | `screen_open` | `confirm`, `port` (default 992, TLS), `ccsid` (default 37), `waitSeconds` | Opens a 5250 session (green screen) on the build system and signs on as the build connection's user, one attempt, through the same sign-on guard. Without `confirm`: what it would open. Returns the first screen after sign-on (see `screen`) |
@@ -363,8 +376,26 @@ end-proc;
   `set` replacing personal data and the key (e.g. `{"COL1": "'T' || SUBSTR(COL1, 2)"}`): the
   statements in `.mc/results/` go into setUp as they are. To have real rows in the development library for a manual
   check, `copy_rows` brings them from a read-only connection.
-- Build the test with the project like any other source, then compile and run it with the commands
-  of the RPGUnit installed on that IBM i (`RUCALLTST` runs a test service program).
+- Build the test with the project like any other source and run it in a hook of its target, so
+  every build runs it:
+
+  ```yaml
+  targets:
+    curlib.TESTPGM1.srvpgm.sqlrpgle:     # the test service program (RUCRTRPG or the usual targets)
+      after:
+        - Cmd: RUCALLTST TSTPGM(*CURLIB/TESTPGM1)
+  ```
+
+  The build report's `tests` has each run as JSON: `target`, `suite`, `outcome` (`passed`,
+  `failed`, `error`), `run`, `assertions`, `failures`, `errors` and, per failing test, `failed`:
+  `{test, kind (failure | error), message, at, expected, actual}` where `at` is where it failed
+  (`test_x (TESTPGM1->TESTPGM1:31)`) and `expected` / `actual` the values an assertion compared
+  (when RPGUnit wrote them: `aEqual`, `iEqual`, ...). MC asks RUCALLTST for its XML (`XMLSTMF`, to a temporary
+  file it removes) unless the hook sets its own. With an RPGUnit too old for `XMLSTMF`, `tests` has
+  the counts only (`source: joblog`); the details are then in the RPGUNIT spooled file (`spool`
+  with `file: RPGUNIT`). A failed run fails the target with `failedAt: tests` (unless the hook has
+  `ignore: [CPF9897]`: then the target is `built` and only `tests` says they failed); the compile's
+  own `errors` stay empty.
 
 ### Quick checks
 
@@ -372,7 +403,9 @@ Loop for logic changes (after the first-build check in "Edit–compile–fix loo
 `plan` shown to the user, who agreed): edit → `build` (changed files) → `call_program` without
 `confirm`, show what it would run → `confirm: true` only if the user agrees → read the returned
 parameters and messages. A fixed-length message (a data structure) is one `char`
-parameter of its full length: build the string with the fields at their positions.
+parameter of its full length: build the string with the fields at their positions. To check
+what the program did to the data, give `checkRows` with a SELECT over the rows it works on and
+their key: the answer's `rowChanges` replaces separate before / after queries.
 
 ### Green screens (5250)
 

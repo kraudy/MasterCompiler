@@ -36,6 +36,7 @@ public class BuildReport {
   public List<String> summary;   // compact(): one line per target, before the details
   public List<String> hooks;     // hook commands that ran (or would run, in a plan), in order, with their outcome
   public List<TargetResult> targets = new ArrayList<TargetResult>();
+  public List<TestRun> tests;   // RPGUnit runs (RUCALLTST hooks), in order; target is null for a global hook
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
   public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
@@ -50,8 +51,10 @@ public class BuildReport {
     public List<String> bindingDirectories;  // BNDDIR param / ctl-opt bnddir and where each resolves: "APPDIR -> APPLIB"
     public List<String> unresolvedSymbols;   // CPD5D02 Definition not found for symbol ...
     public List<String> binderWarnings;      // CPD5D1D and alike: harmless unless a CPD5D02 follows
-    public List<CompileError> errors;
+    public String failedAt;  // compile, hook or tests: what failed when the status is failed
+    public List<CompileError> errors;    // the compile's own (EVFEVENT, its joblog messages)
     public List<JoblogMessage> joblog;
+    public List<JoblogMessage> hookJoblog;  // messages while the target's hooks ran (tests, CPYF, ...): never compile errors
 
     public TargetResult(String target, String status) {
       this.target = target;
@@ -69,6 +72,30 @@ public class BuildReport {
     public String id;
     public int severity;
     public String message;
+  }
+
+  /* One RUCALLTST run: counts and each failing test case (source: xml, or joblog when only the counts were found) */
+  public static class TestRun {
+    public String target;
+    public String suite;
+    public String command;
+    public String outcome;    // passed, failed, error, unknown
+    public Integer run;       // test cases
+    public Integer assertions;
+    public Integer failures;
+    public Integer errors;
+    public List<TestCase> failed;
+    public String source;
+    public String note;
+  }
+
+  public static class TestCase {
+    public String test;
+    public String kind;     // failure (an assertion) or error (the test ended with an exception)
+    public String message;
+    public String at;       // call stack: procedure (program->module:statement)
+    public String expected; // the values an assertion compared, when RPGUnit wrote them
+    public String actual;
   }
 
   public static class JoblogMessage {
@@ -137,8 +164,35 @@ public class BuildReport {
       }
       t.errors = errors.isEmpty() ? null : errors;
       t.joblog = joblog.isEmpty() ? null : joblog;
-      summary.add(t.target + " " + t.status + (t.errors != null ? " (" + t.errors.size() + " errors)" : "")
-          + (t.warning != null ? " WARNING" : ""));
+      /* Hook messages (a test run's own runtime messages included) stay apart from the compile's */
+      if (t.hookJoblog != null) {
+        List<JoblogMessage> hook = new ArrayList<JoblogMessage>();
+        java.util.Set<String> seenHook = new java.util.HashSet<String>();
+        for (JoblogMessage m : t.hookJoblog) {
+          if (m.severity >= Math.max(minSeverity, 20) && seenHook.add(m.id + ":" + m.text) && hook.size() < 30) hook.add(m);
+        }
+        t.hookJoblog = hook.isEmpty() ? null : hook;
+      }
+      StringBuilder line = new StringBuilder(t.target + " " + t.status);
+      if (t.failedAt != null && FAILED.equals(t.status)) line.append(" at ").append(t.failedAt);
+      if (t.errors != null) line.append(" (").append(t.errors.size()).append(" errors)");
+      if (tests != null) {
+        for (TestRun run : tests) {
+          if (!t.target.equals(run.target)) continue;
+          line.append(", tests ").append(run.outcome);
+          if (run.run != null) line.append(" (").append(run.run).append(" run, ")
+              .append((run.failures != null ? run.failures : 0) + (run.errors != null ? run.errors : 0)).append(" failed)");
+        }
+      }
+      if (t.warning != null) line.append(" WARNING");
+      summary.add(line.toString());
+    }
+    if (tests != null) {
+      for (TestRun run : tests) {
+        if (run.target != null) continue;
+        summary.add("tests " + (run.suite != null ? run.suite + " " : "") + run.outcome + (run.run != null ? " (" + run.run
+            + " run, " + ((run.failures != null ? run.failures : 0) + (run.errors != null ? run.errors : 0)) + " failed)" : ""));
+      }
     }
   }
 

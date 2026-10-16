@@ -208,6 +208,7 @@ public class SpecGenerator {
     }
 
     for (String lib : base.protectedLibs) scanned.protectedLibs.add(lib.trim().toUpperCase());
+    scanned.uploadFolders.addAll(base.uploadFolders);
 
     /* Global hooks after scan-injected CHGCURDIR */
     if (base.before != null && !base.before.isEmpty()) {

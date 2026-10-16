@@ -3,6 +3,26 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.20
+
+From a team's feedback on testing with MC
+- RPGUnit results as JSON in the build report: each `RUCALLTST` hook gives a `tests` entry with the counts and,
+  per failing test, its message, statement and the expected and actual values. MC asks RUCALLTST for its XML (a temporary file it removes) unless
+  the hook names one; with an RPGUnit too old for `XMLSTMF`, the counts from its completion message.
+- Compile errors apart from hook messages: `errors` and `joblog` are the compile's own; what hooks send (a test
+  run's runtime messages) is in `hookJoblog`. `failedAt` says what failed: `compile`, `hook`, `tests` or
+  `protectedLibs`.
+- `protectedLibs` and hooks: the check runs after the target's `before` hooks (files they create are resolved
+  again). A plan runs no hook: a write that resolves to a protected library now, with a hook naming the file,
+  is reported instead of refused and checked again by the build. A refusal names the hook.
+- `upload_file`: a project file to an IFS folder the spec allows (`uploadFolders`), with a preview (size,
+  SHA-256, what it replaces) and `confirm`. Text files are tagged UTF-8. Logged in `.mc/uploads.log`.
+- `call_program` `checkRows`: queries run before and after the call; the answer lists the rows inserted,
+  deleted and changed, column by column.
+- `spool`: list and read the user's own spooled files.
+- Fixed: with `--push` and a scanned project (only `mc-base.yaml`), the job changed to the folder on the PC
+  (CPFA0A9) instead of the pushed copy.
+
 ## v0.3.19
 
 Agent instructions, second pass of the review

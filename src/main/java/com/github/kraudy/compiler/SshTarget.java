@@ -188,8 +188,24 @@ public final class SshTarget implements AutoCloseable {
       throw new java.io.IOException(what + " is incomplete on the IBM i: " + arrived.getSize() + " of " + size
           + " bytes arrived. Start the server again to retry.");
     }
-    try { sftp().rm(remote); } catch (SftpException missing) { /* first upload */ }
-    sftp().rename(part, remote);
+    /* The old file is set aside until the new one is in place: a failed rename puts it back */
+    String old = remote + ".old";
+    boolean replacing = stat(remote) != null;
+    if (replacing) {
+      try {
+        sftp().rename(remote, old);
+      } catch (SftpException leftOver) {  // an .old from an earlier, cut upload
+        sftp().rm(old);
+        sftp().rename(remote, old);
+      }
+    }
+    try {
+      sftp().rename(part, remote);
+    } catch (SftpException e) {
+      if (replacing) sftp().rename(old, remote);
+      throw e;
+    }
+    if (replacing) try { sftp().rm(old); } catch (SftpException ignored) { /* the new file is in place */ }
     if (size >= LOG_FROM) logger.info("{}: done, {} in {} s", what, mb(size), (System.currentTimeMillis() - transfer.start) / 1000);
   }
 
@@ -246,6 +262,12 @@ public final class SshTarget implements AutoCloseable {
     } catch (Exception e) {
       return fallback;
     }
+  }
+
+  /* The path with symbolic links resolved (the server's realpath); null when it does not exist */
+  public synchronized String realPath(String path) throws Exception {
+    if (stat(path) == null) return null;
+    return sftp().realpath(path);
   }
 
   public synchronized void mkdirs(String dir) throws Exception {

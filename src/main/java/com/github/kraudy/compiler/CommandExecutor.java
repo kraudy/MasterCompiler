@@ -54,8 +54,27 @@ public class CommandExecutor {
     }
 
 
+    /* RPGUnit: MC asks RUCALLTST for its XML, so the report gets each test's result */
+    boolean testRun = !dryRun && RpgUnit.isTestRun(commandString);
+    String addedXml = testRun ? RpgUnit.temporaryXml() : null;
+    String withXml = testRun ? RpgUnit.withXml(commandString, addedXml) : null;
+    if (withXml == null) addedXml = null;
+
     try {
-      executeCommand(commandString, commandTime, isLibraryListCommand(command));
+      String removeXml = addedXml;
+      try {
+        executeCommand(withXml != null ? withXml : commandString, commandTime, isLibraryListCommand(command));
+      } catch (CompilerException e) {
+        /* An RPGUnit without XMLSTMF refuses the keyword (CPD0043) before anything runs: the command as written */
+        if (withXml == null || !keywordRefused(commandTime) || testsRan(commandTime)) throw e;
+        addedXml = null;
+        withXml = null;
+        executeCommand(commandString, getCurrentTime(), false);
+      } finally {
+        if (testRun) testRuns.add(RpgUnit.result(connection, commandString, RpgUnit.xmlPath(commandString, addedXml),
+            getJoblogMessages(commandTime)));
+        if (removeXml != null) RpgUnit.remove(connection, removeXml);
+      }
       hooksRun.add((dryRun && !isLibraryListCommand(command) ? "planned: " : "ok: ") + CommandStringParser.toPasteable(commandString));
     } catch (CompilerException e) {
       /* ignore: [CPF2105, ...] on the hook, like MONMSG */
@@ -125,6 +144,28 @@ public class CommandExecutor {
     /* Set build time */
     key.setLastBuild(commandTime);
     key.setObjectExists(true);
+  }
+
+  /* RUCALLTST hooks that ran, in order: their results go into the build report */
+  private final List<BuildReport.TestRun> testRuns = new ArrayList<BuildReport.TestRun>();
+
+  public List<BuildReport.TestRun> getTestRuns() {
+    return testRuns;
+  }
+
+  /* CPD0043 (keyword not valid) naming XMLSTMF since then: the command was refused as a whole */
+  private boolean keywordRefused(Timestamp since) {
+    for (BuildReport.JoblogMessage m : getJoblogMessages(since)) {
+      if ("CPD0043".equals(m.id) && m.text != null && m.text.toUpperCase().contains("XMLSTMF")) return true;
+    }
+    return false;
+  }
+
+  /* A test summary in the joblog since then: RUCALLTST did run, so it must not run again */
+  private boolean testsRan(Timestamp since) {
+    BuildReport.TestRun probe = new BuildReport.TestRun();
+    for (BuildReport.JoblogMessage m : getJoblogMessages(since)) if (RpgUnit.summary(m.text, probe)) return true;
+    return false;
   }
 
   /* Every hook command (and DLTOBJ) in order, with how it ended: ok, planned (dry run), ignored CPFxxxx, failed */
@@ -250,6 +291,11 @@ public class CommandExecutor {
 
   /* Joblog messages of this job since the given time */
   public List<BuildReport.JoblogMessage> getJoblogMessages(Timestamp since) {
+    return getJoblogMessages(since, null);
+  }
+
+  /* Joblog messages of this job after 'since' and up to 'until' (null: up to now) */
+  public List<BuildReport.JoblogMessage> getJoblogMessages(Timestamp since, Timestamp until) {
     List<BuildReport.JoblogMessage> joblog = new ArrayList<BuildReport.JoblogMessage>();
 
     try (Statement stmt = connection.createStatement();
@@ -258,6 +304,7 @@ public class CommandExecutor {
              "FROM TABLE(QSYS2.JOBLOG_INFO('*')) " +
              "WHERE FROM_USER = USER " +
              "AND MESSAGE_TIMESTAMP > '" + since + "' " +
+             (until != null ? "AND MESSAGE_TIMESTAMP <= '" + until + "' " : "") +
              "AND MESSAGE_ID NOT IN ('SQL0443', 'CPC0904', 'CPF2407') " +
              "ORDER BY MESSAGE_TIMESTAMP ASC"
          )) {

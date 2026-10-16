@@ -220,6 +220,10 @@ public class SshMcpProxy {
             buildTarget, project));
         return null;
       }
+      if ("upload_file".equals(params.path("name").asText())) {  // the file is on this PC: SFTP from here
+        sendResult(request.get("id"), upload(params.path("arguments")));
+        return null;
+      }
       ObjectNode args = params.has("arguments") && params.get("arguments").isObject()
           ? (ObjectNode) params.get("arguments") : params.putObject("arguments");
       ObjectNode answer = router.handle(params.path("name").asText(), args);
@@ -232,6 +236,27 @@ public class SshMcpProxy {
       sendToolError(line, "Could not prepare the call: " + e.getMessage());
       return null;
     }
+  }
+
+  /* upload_file over this server's SSH session, once it is up */
+  private ObjectNode upload(JsonNode args) {
+    ObjectNode result = mapper.createObjectNode();
+    String text;
+    boolean error = false;
+    try {
+      remoteReady.get();  // signed on (or refused) first
+      text = new ObjectMapper().enable(com.fasterxml.jackson.databind.SerializationFeature.INDENT_OUTPUT)
+          .writeValueAsString(FileUpload.handle(args, project, FileUpload.over(ssh)));
+    } catch (ExecutionException e) {
+      text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage();
+      error = true;
+    } catch (Exception e) {
+      text = e instanceof IllegalArgumentException ? e.getMessage() : "Upload failed: " + e.getMessage();
+      error = true;
+    }
+    result.putArray("content").addObject().put("type", "text").put("text", text);
+    result.put("isError", error);
+    return result;
   }
 
   /* Remote MC answers go straight back to VS Code; when it stops, so does this server */
