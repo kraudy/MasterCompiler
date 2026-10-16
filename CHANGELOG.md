@@ -3,6 +3,11 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.12
+
+- Setup guide: "Update, reinstall, or re-enter the passwords": stop the server before replacing the jar
+  (Windows keeps it open), when `--setup-vscode` helps, "MCP: Reset Cached Inputs" to type the passwords again.
+
 ## v0.3.11
 
 Sign-on safety (a wrong password never disables the profile)
@@ -16,10 +21,6 @@ Sign-on safety (a wrong password never disables the profile)
   disabled profile or expired password (`CPF22E3` / `CPF22E4`) gets no attempt until the file is removed.
 - `status` answers without a connection and lists every connection (build and read-only) with its state.
 - `--setup-vscode` password prompts say to run "MCP: Reset Cached Inputs" after a password change.
-
-Docs
-- Setup guide: "Update, reinstall, or re-enter the passwords" (stop the server before replacing the jar on
-  Windows, when to re-run `--setup-vscode`, "MCP: Reset Cached Inputs" to type the passwords again).
 
 ## v0.3.10
 
