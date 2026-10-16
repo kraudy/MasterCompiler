@@ -80,6 +80,16 @@ final class SignOnGuard {
     }
   }
 
+  /* A sign-on IBM i refused that no exception type says, e.g. the 5250 sign-on display: its code and why */
+  static final class Refused extends Exception {
+    final String code;
+
+    Refused(String code, String message) {
+      super(message);
+      this.code = code;
+    }
+  }
+
   private SignOnGuard() {}
 
   /* Where the persisted rejections live: the project's .mc folder on the PC */
@@ -144,7 +154,7 @@ final class SignOnGuard {
   }
 
   private static synchronized Blocked failed(Target target, String code, Exception e) {
-    boolean hard = code.equals("CPF22E3") || code.equals("CPF22E4");
+    boolean hard = code.equals("CPF22E3") || code.equals("CPF22E4") || code.equals("CPF1394");
     String time = OffsetDateTime.now().withNano(0).toString();
     String message = hard ? hardMessage(target, code, time)
         : "IBM i rejected the password for " + target.user + "@" + target.name + " (" + code + "). MasterCompiler "
@@ -171,9 +181,9 @@ final class SignOnGuard {
 
   private static String hardMessage(Target target, String code, String time) {
     return "IBM i says the profile " + target.user + " on " + target.name + " is "
-        + (code.equals("CPF22E3") ? "disabled" : "using an expired password") + " (" + code + ", " + time + "). "
+        + (code.equals("CPF22E4") ? "using an expired password" : "disabled") + " (" + code + ", " + time + "). "
         + "MasterCompiler will not sign on there, even with another password. Do not retry. Tell the user to ask "
-        + "their security administrator to " + (code.equals("CPF22E3") ? "enable the profile" : "reset the password")
+        + "their security administrator to " + (code.equals("CPF22E4") ? "reset the password" : "enable the profile")
         + "; then delete " + file.getPath() + " in the project, Command Palette (Ctrl+Shift+P) > \"MCP: Reset "
         + "Cached Inputs\", \"MCP: List Servers\" > mastercompiler > \"Restart Server\", and type the current "
         + "password in VS Code's prompt (never in the chat).";
@@ -211,6 +221,7 @@ final class SignOnGuard {
   static String authCode(Throwable e) {
     for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
       String text = String.valueOf(t.getMessage());
+      if (t instanceof Refused) return ((Refused) t).code;
       if (text.contains("PWS9801")) return null;  // an exit program refused the connection: not the password
       for (String code : new String[] { "CPF22E2", "CPF22E3", "CPF22E4", "CPF22E5", "CPF2204" }) {
         if (text.contains(code)) return code;

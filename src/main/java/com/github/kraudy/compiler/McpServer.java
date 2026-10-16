@@ -98,6 +98,7 @@ public class McpServer {
 
   void close() {
     if (router != null) router.close();
+    if (!readOnlyMode) ScreenTools.closeAll();
     disconnect();
   }
 
@@ -375,6 +376,8 @@ public class McpServer {
         + "members. SQL tables, views and indexes without a member get generated DDL. Returns the files written.",
         imp));
 
+    screenTools(tools);
+
     ObjectNode joblog = mapper.createObjectNode();
     joblog.put("type", "object");
     joblog.putObject("properties");
@@ -382,6 +385,60 @@ public class McpServer {
         "Joblog messages of the server's IBM i job since the previous joblog call (or since connecting).",
         joblog));
     return result;
+  }
+
+  /* A 5250 session on the build system, run from the PC (ScreenTools) */
+  private void screenTools(ArrayNode tools) {
+    ObjectNode open = mapper.createObjectNode();
+    open.put("type", "object");
+    ObjectNode openProps = open.putObject("properties");
+    openProps.putObject("confirm").put("type", "boolean")
+        .put("description", "false (default): say what would open. true: open and sign on, after the user agreed");
+    openProps.putObject("port").put("type", "integer").put("description", "Telnet port (default 992, TLS)");
+    openProps.putObject("ccsid").put("type", "integer").put("description", "EBCDIC CCSID of the screens (default 37)");
+    openProps.putObject("waitSeconds").put("type", "integer").put("description", "How long to wait for a screen (default 30)");
+    tools.add(tool("screen_open",
+        "Open an interactive 5250 session (a green screen) on the build system and sign on as the build connection's "
+        + "user, to run and check display file programs. Returns the first screen after sign-on. MasterCompiler types "
+        + "the password itself (one attempt). Every screen is also written to .mc/screen.txt, so the user can watch it in "
+        + "VS Code. First call without confirm and show the user what it would do; call again with confirm: true only "
+        + "if they agree. Ask the user before running commands or programs that change data.",
+        open));
+
+    ObjectNode view = mapper.createObjectNode();
+    view.put("type", "object");
+    view.putObject("properties").putObject("waitSeconds").put("type", "integer")
+        .put("description", "While the IBM i is busy, how long to wait for the next screen (default 30)");
+    tools.add(tool("screen",
+        "The 5250 session's current screen: numbered lines, cursor, input fields (number, row, col, length, label, "
+        + "value) and state (waiting for input, busy, input error).",
+        view));
+
+    ObjectNode send = mapper.createObjectNode();
+    send.put("type", "object");
+    ObjectNode sendProps = send.putObject("properties");
+    sendProps.putObject("fields").put("type", "object")
+        .put("description", "Values to type, by field number from 'fields' (\"1\") or \"row,col\" inside the field, e.g. "
+        + "{\"1\": \"CALL PGM1\"}. Each is a field exit: the rest of the field is cleared; numbers are right-aligned");
+    sendProps.putObject("key").put("type", "string")
+        .put("description", "Key to press after typing: Enter (default), F1-F24, PageUp, PageDown, Help, Print, Clear, Attn, Reset");
+    ObjectNode cursorProp = sendProps.putObject("cursor");
+    cursorProp.put("type", "object");
+    cursorProp.put("description", "Optional {row, col} to put the cursor before the key (e.g. on a list line for F4 or F2)");
+    sendProps.putObject("waitSeconds").put("type", "integer")
+        .put("description", "How long to wait for the next screen (default 30)");
+    tools.add(tool("screen_send",
+        "Type into the 5250 screen's input fields and press a key, as a user at the terminal; returns the next screen. "
+        + "Hidden (password) fields are never typed into. Runs as the signed-on user: ask the user before commands "
+        + "or programs that change data.",
+        send));
+
+    ObjectNode close = mapper.createObjectNode();
+    close.put("type", "object");
+    close.putObject("properties");
+    tools.add(tool("screen_close",
+        "Close the 5250 session. Sign off first (SIGNOFF on a command line, or the program's exit then SIGNOFF) so the job ends.",
+        close));
   }
 
   /* connections.readOnly in the spec: the call reads that IBM i instead */
@@ -459,7 +516,8 @@ public class McpServer {
     tool.put("description", description);
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
-    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows");
+    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows")
+        || name.equals("screen_open") || name.equals("screen_send");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
     annotations.put("readOnlyHint", !writes);
@@ -472,6 +530,7 @@ public class McpServer {
     String name = params.path("name").asText("");
     JsonNode args = params.path("arguments");
     if (readOnlyMode) return callReadOnly(name, args);
+    if (ScreenTools.TOOLS.contains(name)) return ScreenTools.handle(name, args, screenSignOn(), projectDir());
     if (router() != null) {
       ObjectNode ready = args.isObject() ? (ObjectNode) args : mapper.createObjectNode();
       ObjectNode routed = router.handle(name, ready);
@@ -1098,6 +1157,16 @@ public class McpServer {
   /* One sign-on attempt through SignOnGuard: none after IBM i rejected the password */
   private <T> T signedOn(java.util.concurrent.Callable<T> attempt) throws Exception {
     return signOn != null ? SignOnGuard.signOn(signOn, attempt) : attempt.call();
+  }
+
+  /* The 5250 session signs on as the build connection does: null on the IBM i (no password there) */
+  private SignOnGuard.Target screenSignOn() {
+    try {
+      return signOn != null ? signOn : buildSignOn();
+    } catch (Exception e) {
+      logger.warn("No sign-on for a 5250 session: {}", e.getMessage());
+      return null;
+    }
   }
 
   /* The build connection's sign-on on the PC: the Code for IBM i connection, else .env / IBMI_* */

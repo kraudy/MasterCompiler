@@ -3,6 +3,17 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.14
+
+5250 sessions (green screens)
+- `screen_open`, `screen`, `screen_send`, `screen_close`: an interactive 5250 session on the build system from the
+  PC, over TLS (port 992), MC's own client (no emulator needed). The agent reads the screen (lines, cursor, input
+  fields with their labels), types into fields and presses Enter, F1-F24, PageUp / PageDown and so on.
+- Sign-on: one attempt with the build connection's password, through the sign-on guard; a refused sign-on blocks
+  this user's builds too (same profile). Preview first, then `confirm`.
+- Hidden (password) fields are never shown and never typed into.
+- Each screen is written to `.mc/screen.txt`, which you can keep open in VS Code to watch.
+
 ## v0.3.13
 
 - A rejected password's error tells the agent to ask the user whether to type it again and lists the steps:

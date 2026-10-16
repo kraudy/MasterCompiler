@@ -139,6 +139,7 @@ public class SshMcpProxy {
       if (remote != null) remote.disconnect();
       if (ssh != null) ssh.close();
       router.close();
+      ScreenTools.closeAll();
     }
   }
 
@@ -214,6 +215,11 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       ObjectNode params = (ObjectNode) request.path("params");
+      if (ScreenTools.TOOLS.contains(params.path("name").asText())) {  // a 5250 session from this PC
+        sendResult(request.get("id"), ScreenTools.handle(params.path("name").asText(), params.path("arguments"),
+            buildTarget, project));
+        return null;
+      }
       ObjectNode args = params.has("arguments") && params.get("arguments").isObject()
           ? (ObjectNode) params.get("arguments") : params.putObject("arguments");
       ObjectNode answer = router.handle(params.path("name").asText(), args);

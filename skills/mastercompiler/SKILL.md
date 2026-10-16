@@ -248,6 +248,10 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `call_program` | `program`, `parameters`, `confirm` | Runs a program the project builds (current library only) with typed parameters; returns the parameters as the program left them, `success` and messages. Refused when its source can write to a `protectedLibs` library, or writes files and the spec has no `protectedLibs`. Without `confirm`: what it would run and the files it can change |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`), `connection` | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
+| `screen_open` | `confirm`, `port` (default 992, TLS), `ccsid` (default 37), `waitSeconds` | Opens a 5250 session (green screen) on the build system and signs on as the build connection's user, one attempt, through the same sign-on guard. Without `confirm`: what it would open. Returns the first screen after sign-on (see `screen`) |
+| `screen` | `waitSeconds` | The session's screen: numbered `screen` lines, `cursor`, input `fields` (`field` number, `row`, `col`, `length`, `label`, `value`; `hidden` for password fields, no value), `state` (`waiting for input`, `busy`, `input error`) |
+| `screen_send` | `fields` (`{"1": "text"}` by field number, or `{"row,col": "text"}`), `key` (Enter, F1-F24, PageUp, PageDown, Help, Print, Clear, Attn, Reset), `cursor` `{row, col}`, `waitSeconds` | Types the values (each a field exit), presses the key and returns the next screen. Never types into hidden fields |
+| `screen_close` | none | Closes the session; sign off first |
 | `import_source` | `objects` and/or `members` (`LIB/SRCPF/MBR*`), `into`, `dryRun`, `refresh` | Copies those sources (and their copybooks) into the project with MC's names. `into: reference` (default) writes read-only copies to `.mc/sources/<LIB>/<SRCPF>/`, git-ignored and never built; `into: repo` adds them as build targets and keeps files already there (`kept`). Every file comes back with its project-relative `path`; anything missing is in `notImported` ("member X not found in LIB/SRCPF") while the rest is still imported; `copybooks` counts the copy members found. `dryRun: true` checks what exists and lists `wouldWrite` without writing; use it first when the member list came from the user |
 
 ### Other IBM i systems (read-only connections)
@@ -358,6 +362,24 @@ end-proc;
 Loop for logic changes: edit → `build` (changed files) → `call_program` with the parameters →
 read the returned parameters and messages. A fixed-length message (a data structure) is one `char`
 parameter of its full length: build the string with the fields at their positions.
+
+### Green screens (5250)
+
+To check a display file program the way a user sees it, open a 5250 session:
+
+1. `screen_open` without `confirm`, show the user what it opens, then `confirm: true`. MC signs on
+   itself with the build connection's password: never ask for it, and if the sign-on fails, follow
+   "Sign-on failures" above.
+2. The job has the user profile's library list, not the spec's: first type
+   `CHGLIBL LIBL(...) CURLIB(...)` (the spec's, see `status`) on the command line (the field labelled
+   `===>`), then `CALL PGM1`.
+3. Read each screen from `screen_send`'s answer, fill fields by number, press keys. `busy` means the
+   program is still working: call `screen` to wait. `input error` shows the message on the bottom
+   line; the next `screen_send` resets it.
+4. End the program, type `SIGNOFF`, then `screen_close`.
+
+Every key runs as the user: ask them before options or commands that change or delete data. Tell the
+user they can open `.mc/screen.txt` in VS Code to watch the screens as you go.
 
 ### Db2 queries and objects
 

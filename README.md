@@ -227,6 +227,10 @@ Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/Mas
 Then, in any repository, ask Copilot in **Agent mode**: *"set up MasterCompiler for this repository"*. It checks Java,
 downloads MC, previews the setup with you and writes `.vscode/mcp.json`. See [docs/Copilot.md](./docs/Copilot.md).
 
+The agent can also open a 5250 session (green screen) to run and check display file programs: MC signs on over TLS
+(port 992), reads the screens, fills fields and presses keys, and writes each screen to `.mc/screen.txt` so you can
+watch it in VS Code.
+
 ## Agent skills
 
 Skills for AI coding agents live in [`skills/`](./skills):
