@@ -368,8 +368,10 @@ end-proc;
 
 ### Quick checks
 
-Loop for logic changes: edit → `build` (changed files) → `call_program` with the parameters →
-read the returned parameters and messages. A fixed-length message (a data structure) is one `char`
+Loop for logic changes (after the first-build check in "Edit–compile–fix loop": `status` and
+`plan` shown to the user, who agreed): edit → `build` (changed files) → `call_program` without
+`confirm`, show what it would run → `confirm: true` only if the user agrees → read the returned
+parameters and messages. A fixed-length message (a data structure) is one `char`
 parameter of its full length: build the string with the fields at their positions.
 
 ### Green screens (5250)
@@ -399,8 +401,10 @@ Big results, or ones the user wants to open or share (a spreadsheet, a report), 
 
 Use MC's `sql` tool for data and catalog questions (columns of a table, rows, which objects use a
 file): one `SELECT` / `VALUES` / `WITH` per call on a connection the driver opens read only, with
-the spec's library list, so unqualified names resolve the way the programs see them. Results are
-capped (`maxRows`, default 100; `maxColumns`, default 40). It cannot change data; never try to work
+the spec's library list, so unqualified names resolve the way the programs see them. Without
+`format`, results are capped (`maxRows` default 100, at most 1000; `maxColumns` default 40). With
+`format`, the file has every column and exact values (`maxColumns` does not apply; `maxRows` default
+1000, at most 10000); a read-only connection's `maxRows` caps both. It cannot change data; never try to work
 around that. Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.SYSTABLES`, `QSYS2.SYSTABLEDEP`,
 `QSYS2.OBJECT_STATISTICS`, `QSYS2.PROGRAM_INFO`, `QSYS2.SYSPARTITIONSTAT` (source members).
 
@@ -415,8 +419,9 @@ counts toward disabling the profile (`QMAXSIGN`) too.
 
 With the MCP server: edit, then `build` with `files` (or `since`), read each failed target's errors,
 fix, repeat. Before the first `build` of a session, call `status` and `plan` and show the user the
-current library and the targets; build only once they agree. A build never writes to a
-`protectedLibs` library.
+current library and the targets; build only once they agree. A build creates the objects in the
+current library; it fails a target before compiling when that program can change a file that
+resolves to a `protectedLibs` library. `call_program` and `copy_rows` refuse those libraries.
 
 From the command line (a person's terminal or CI, with `.env`):
 

@@ -3,6 +3,18 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.19
+
+Agent instructions, second pass of the review
+- Quick checks and the demo follow the first-build rule (`status` and `plan` with the user); `call_program` with
+  its preview and `confirm`.
+- `protectedLibs` described as it works: a build creates objects in the current library and fails a target that can
+  change a file in a protected library; `call_program` and `copy_rows` refuse those libraries.
+- `sql` limits with and without `format` in the skill and in `maxColumns`.
+- Setup guide: the "own Java" block is not run after the Windows zip (it would reset `$java` / `$jar`);
+  `docs/Copilot.md` sets both; the read-only password prompt template has the Reset Cached Inputs note.
+- The "no credentials" error no longer suggests a `.env`; `docs/Cli.md` states the SSH key rule.
+
 ## v0.3.18
 
 Agent instructions, from a review of what agents read

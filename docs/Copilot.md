@@ -38,7 +38,7 @@ Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/Mas
 (With MC already downloaded, `java -jar MasterCompiler.jar --install-skills` installs all of MC's skills there.)
 
 Then open the repository, switch Copilot Chat to **Agent mode** (other modes cannot run commands) and ask:
-*"set up MasterCompiler for this repository"*. Copilot follows the skill: it finds Java, downloads MC, shows you the
+*"set up MasterCompiler for this repository"*. Copilot follows the skill: it downloads MC (on 64-bit Windows the zip with its own Java; elsewhere it finds a Java), shows you the
 `--print` preview (target library, library list, IBM i folder) and, once you agree, writes `.vscode/mcp.json`. You
 then start the server and type your password; nobody types the steps below by hand.
 
@@ -47,7 +47,12 @@ then start the server and type your password; nobody types the steps below by ha
 1. Download MC at the latest release tag, as in step 2 of the
    [setup guide](../skills/mastercompiler-vscode/SKILL.md): on 64-bit Windows the zip
    `MasterCompiler-windows-x64.zip`, which brings its own Java (`runtime\`); elsewhere `MasterCompiler.jar` and a Java 8
-   or newer. Check that `--version` prints that tag. The commands below use `$java` and `$jar` as set there.
+   or newer. Check that `--version` prints that tag. Then, in the terminal you run the next step in (Windows zip):
+   ```powershell
+   $java = "$env:USERPROFILE\tools\MasterCompiler\runtime\bin\java.exe"
+   $jar = "$env:USERPROFILE\tools\MasterCompiler\MasterCompiler.jar"
+   ```
+   With your own Java, `$java` is that `java` and `$jar` the jar's path.
 2. In the repository root, preview what setup would do (it writes nothing):
    ```powershell
    & $java -jar $jar --setup-vscode --project . --print

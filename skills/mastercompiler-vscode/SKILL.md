@@ -122,8 +122,9 @@ exactly that tag.
 
 macOS / Linux: `curl -L -o ~/tools/MasterCompiler.jar <same URL>`.
 
-Check the version, and set `$java` (the `java` from step 1, its full path when it is not on PATH)
-and `$jar` for the commands below:
+Not after the Windows zip above: this block would set `$java` and `$jar` to a `java` on PATH and to
+`tools\MasterCompiler.jar`, which the zip does not create. Check the version, and set `$java` (the
+`java` from step 1, its full path when it is not on PATH) and `$jar` for the commands below:
 
 ```powershell
 $java = "java"
@@ -191,7 +192,8 @@ foreach ($f in 'MCDITEM.table.sql','MCDCALC.srvpgm.rpgle','mcdcalc_p.include.rpg
 code $demo
 ```
 
-Continue in that window. Suggest `plan` first (compiles nothing), then `build`. When the user is
+Continue in that window. Suggest `status` and `plan` first (they compile nothing), show the
+current library, and `build` only once the user agrees. When the user is
 done, offer the `clean` tool to delete the five `MCD*` objects from their library: call it once
 to list them, show the list, and only after the user agrees call it again with `confirm: true`.
 
@@ -339,7 +341,7 @@ Paths are the Windows zip's (step 2); with your own Java, `command` is its `java
 jar's path. With a single connection, drop the `ibmiConnection` input and put its name after `--connection`.
 
 Read-only connections (`connections.readOnly` in the spec) get a password prompt each, like the
-build connection: an input `{ "id": "ibmiPassword_SYS2", "type": "promptString", "password": true }`
+build connection: an input `{ "id": "ibmiPassword_SYS2", "type": "promptString", "description": "IBM i password for SYS2. If your password changed, run \"MCP: Reset Cached Inputs\" first: MasterCompiler does not sign on again with a password IBM i rejected", "password": true }`
 and `"IBMI_PASSWORD_SYS2": "${input:ibmiPassword_SYS2}"` in `env` (the name upper case, characters
 other than letters and digits as `_`). Running `--setup-vscode` again after adding one to the spec
 adds them.

@@ -274,7 +274,7 @@ public class McpServer {
         .put("description", "Rows to return. Without format: default " + SqlTools.DEFAULT_ROWS + ", at most " + SqlTools.MAX_ROWS
         + ". With format: at most " + SqlTools.FILE_MAX_ROWS + ". A read-only connection's maxRows caps both");
     sqlProps.putObject("maxColumns").put("type", "integer")
-        .put("description", "Columns to return (default " + SqlTools.DEFAULT_COLUMNS + ")");
+        .put("description", "Columns to return without format (default " + SqlTools.DEFAULT_COLUMNS + "); with format the file has them all");
     ObjectNode format = sqlProps.putObject("format");
     format.put("type", "string");
     format.putArray("enum").add("csv").add("json").add("md").add("inserts");
@@ -1178,9 +1178,10 @@ public class McpServer {
     }
     /* An MCP server cannot prompt: without credentials, say how to provide them */
     if (!parser.isCode4i() && !IBMiDotEnv.isIBMi() && System.getenv("IBMI_PASSWORD") == null && !new File(".env").isFile()) {
-      throw new IllegalArgumentException("No IBM i credentials: start MC with --code4i and IBMI_PASSWORD from a password "
-          + "input in .vscode/mcp.json (java -jar MasterCompiler.jar --setup-vscode writes it), or set "
-          + "IBMI_HOSTNAME / IBMI_USERNAME / IBMI_PASSWORD, or put them in a .env file.");
+      throw new IllegalArgumentException("No IBM i credentials. In VS Code the password comes from the password prompt "
+          + "in .vscode/mcp.json (--setup-vscode writes it): ask the user to run MasterCompiler's setup or start the server "
+          + "from VS Code; never ask for the password in the chat or put it in a file. A .env (IBMI_HOSTNAME, "
+          + "IBMI_USERNAME, IBMI_PASSWORD) is only for a person running the jar in a terminal or CI.");
     }
     if (signOn == null) signOn = buildSignOn();
     connection = signedOn(() -> {
