@@ -280,6 +280,11 @@ public class McpServer {
         .put("description", "With format: the file name in .mc/results (default: the table or 'result', and the time)");
     sqlProps.putObject("table").put("type", "string")
         .put("description", "format inserts: the table the statements insert into (default: the query's only FROM table, unqualified)");
+    ObjectNode generated = sqlProps.putObject("generated");
+    generated.put("type", "string");
+    generated.putArray("enum").add("omit").add("keep");
+    generated.put("description", "format inserts: columns Db2 generates (identity, row change timestamp, ROWID, row begin / "
+        + "end, generated expressions) are left out (omit, default); keep: identity values kept, with OVERRIDING SYSTEM VALUE");
     sqlProps.putObject("set").put("type", "object")
         .put("description", "With format: columns replaced on the system read, by SQL expressions over the row, e.g. "
         + "{\"COL2\": \"'TEST'\"} (quote strings); for inserts, masked columns must be");
