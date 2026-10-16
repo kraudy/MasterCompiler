@@ -270,6 +270,19 @@ public class McpServer {
         .put("description", "Rows to return (default " + SqlTools.DEFAULT_ROWS + ", at most " + SqlTools.MAX_ROWS + ")");
     sqlProps.putObject("maxColumns").put("type", "integer")
         .put("description", "Columns to return (default " + SqlTools.DEFAULT_COLUMNS + ")");
+    ObjectNode format = sqlProps.putObject("format");
+    format.put("type", "string");
+    format.putArray("enum").add("csv").add("json").add("md").add("inserts");
+    format.put("description", "Write the whole result to .mc/results/<file> instead of the chat (every column, exact values, "
+        + "maxRows up to " + SqlTools.FILE_MAX_ROWS + "): csv, json, md (a table), or inserts (INSERT statements with typed "
+        + "literals, e.g. for a test's setUp). The answer gives the file and the first rows");
+    sqlProps.putObject("file").put("type", "string")
+        .put("description", "With format: the file name in .mc/results (default: the table or 'result', and the time)");
+    sqlProps.putObject("table").put("type", "string")
+        .put("description", "format inserts: the table the statements insert into (default: the query's only FROM table, unqualified)");
+    sqlProps.putObject("set").put("type", "object")
+        .put("description", "With format: columns replaced on the system read, by SQL expressions over the row, e.g. "
+        + "{\"COL2\": \"'TEST'\"} (quote strings); for inserts, masked columns must be");
     connectionProperty(sqlProps);
     sqlSchema.putArray("required").add("statement");
     tools.add(tool("sql",
@@ -457,6 +470,8 @@ public class McpServer {
     sqlProps.putObject("statement").put("type", "string");
     sqlProps.putObject("maxRows").put("type", "integer");
     sqlProps.putObject("maxColumns").put("type", "integer");
+    sqlProps.putObject("format").put("type", "string");
+    sqlProps.putObject("set").put("type", "object");
     tools.add(tool("sql", "Read-only query on " + readLibs, sqlSchema));
     ObjectNode findObj = mapper.createObjectNode();
     findObj.put("type", "object");
@@ -798,6 +813,19 @@ public class McpServer {
       readOnlyLibl = String.join(" ", libl);
     }
     try {
+      if (ResultFiles.wanted(args)) {
+        java.util.Map<String, String> set = new java.util.LinkedHashMap<String, String>();
+        for (java.util.Iterator<java.util.Map.Entry<String, JsonNode>> it = args.path("set").fields(); it.hasNext();) {
+          java.util.Map.Entry<String, JsonNode> e = it.next();
+          set.put(e.getKey(), e.getValue().asText());
+          if (readOnlyMode) SqlTools.checkLibraries(e.getValue().asText(), readLibs);  // a subquery reads only these too
+        }
+        ObjectNode full = new SqlTools(maxRows, mask).queryForFile(readOnly, statement, args.path("maxRows").asInt(0), set,
+            "inserts".equalsIgnoreCase(args.path("format").asText()));
+        ObjectNode result = toolResult(pretty.writeValueAsString(full), false);
+        /* MC on the PC writes the file here; on the IBM i (behind SSH) or as a read-only server, the PC side does */
+        return readOnlyMode || IBMiDotEnv.isIBMi() ? result : ResultFiles.finish(args, result, projectDir());
+      }
       ObjectNode result = new SqlTools(maxRows, mask).query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
       return toolResult(pretty.writeValueAsString(result), false);
     } catch (java.sql.SQLException e) {

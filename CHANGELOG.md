@@ -3,6 +3,20 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.16
+
+Query results to a file
+- `sql` with `format`: `csv`, `json`, `md` or `inserts` writes the whole result to `.mc/results/<file>` on the PC
+  (every column, exact values, up to 10000 rows; a read-only connection's `maxRows` still caps it). The chat gets
+  the file, the counts and the first rows. Also over SSH and on read-only connections.
+- CSV: every value quoted, `"` doubled, NULL empty, UTF-8 with a BOM so Excel reads it. JSON: objects by column
+  name, values as text (exact), a repeated name gets `_2`. Markdown: a table.
+- `inserts`: INSERT statements for `table` (default: the query's only FROM table, unqualified) with typed
+  literals: numbers exact, `DATE` / `TIME` / `TIMESTAMP '...'`, `X'...'` for binary, `'` doubled; 100 rows per
+  statement. Made for RPGUnit setUp.
+- `set` replaces columns on the system read (SQL expressions over the row), so replaced values never leave it;
+  for `inserts` on a read-only connection, its `maskColumns` must be replaced.
+
 ## v0.3.15
 
 - Windows download with its own Java: `MasterCompiler-windows-x64.zip` holds `MasterCompiler.jar` and a trimmed

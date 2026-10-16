@@ -240,6 +240,7 @@ public class SshMcpProxy {
       String line;
       while ((line = reader.readLine()) != null) {
         if (!pendingStatus.isEmpty()) line = afterStatus(line);
+        if (!pendingResults.isEmpty()) line = afterResults(line);
         send(pendingImports.isEmpty() ? line : afterImport(line));
       }
     } catch (Exception e) {
@@ -268,6 +269,10 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
+      if (tool.equals("sql") && ResultFiles.wanted(request.path("params").path("arguments"))) {
+        pendingResults.put(request.path("id").toString(), request.path("params").path("arguments"));  // the file is written here
+        return line;
+      }
       if (tool.equals("call_program") || tool.equals("find_export")) {
         sync(projectFiles(), true);  // they read the sources in the IBM i copy
         return line;
@@ -311,6 +316,21 @@ public class SshMcpProxy {
   }
 
   private final Set<String> pendingStatus = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final Map<String, JsonNode> pendingResults = new java.util.concurrent.ConcurrentHashMap<String, JsonNode>();  // sql with format, by call id
+
+  /* sql with format: the IBM i sent the whole result; the file goes into the project on this PC */
+  String afterResults(String line) {
+    try {
+      JsonNode response = mapper.readTree(line);
+      JsonNode args = pendingResults.remove(response.path("id").toString());
+      if (args == null || !response.path("result").isObject()) return line;
+      ((ObjectNode) response).set("result", ResultFiles.finish(args, (ObjectNode) response.get("result"), project));
+      return mapper.writeValueAsString(response);
+    } catch (Exception e) {
+      logger.error("Could not write the results file", e);
+      return line;
+    }
+  }
 
   /* The PC side of status: version, host, folders, start-up stage */
   private ObjectNode statusFields(ObjectNode into) {

@@ -200,6 +200,99 @@ final class SqlTools {
     return result;
   }
 
+  static final int FILE_MAX_ROWS = 10000;
+
+  /*
+   * The query for a results file (ResultFiles writes it on the PC): every column with its type, exact values (no
+   * cut, CHAR without trailing blanks, binary as hex), up to FILE_MAX_ROWS (a read-only connection's maxRows still
+   * caps it). 'set' replaces columns here, on the system read, by SQL expressions over the query's row; for INSERT
+   * statements a masked column must be replaced, so its real values never leave this system.
+   */
+  ObjectNode queryForFile(Connection readOnly, String sql, int maxRows, java.util.Map<String, String> set, boolean inserts)
+      throws SQLException {
+    String statement = checkReadOnly(sql);
+    int cap = rowCap > 0 ? Math.min(rowCap, FILE_MAX_ROWS) : FILE_MAX_ROWS;
+    int rows = Math.max(1, Math.min(maxRows <= 0 ? Math.min(MAX_ROWS, cap) : maxRows, cap));
+    List<String> labels = new ArrayList<String>();  // upper case, for matching
+    List<String> exact = new ArrayList<String>();   // as Db2 names them, for the wrapping SELECT
+    try (PreparedStatement prepared = readOnly.prepareStatement(statement)) {
+      ResultSetMetaData meta = prepared.getMetaData();
+      if (meta == null) throw new IllegalArgumentException("The statement returns no rows");
+      for (int c = 1; c <= meta.getColumnCount(); c++) {
+        exact.add(meta.getColumnLabel(c));
+        labels.add(meta.getColumnLabel(c).toUpperCase(Locale.ROOT));
+      }
+    }
+    java.util.Map<String, String> replace = new java.util.LinkedHashMap<String, String>();
+    for (java.util.Map.Entry<String, String> e : set.entrySet()) {
+      String col = e.getKey().trim().toUpperCase(Locale.ROOT);
+      if (!labels.contains(col)) throw new IllegalArgumentException("set: the query has no column " + col + " (it has " + labels + ")");
+      replace.put(col, e.getValue());
+    }
+    List<String> unmasked = new ArrayList<String>();
+    for (String col : labels) if (mask.contains(col) && !replace.containsKey(col)) unmasked.add(col);
+    if (inserts && !unmasked.isEmpty()) {
+      throw new IllegalArgumentException("This connection masks " + unmasked + ": give each a replacement in set "
+          + "(e.g. " + unmasked.get(0) + ": \"'TEST'\"), so the INSERT statements do not carry the real values");
+    }
+    if (!replace.isEmpty()) {
+      List<String> select = new ArrayList<String>();
+      for (int c = 0; c < labels.size(); c++) {
+        String quoted = "\"" + exact.get(c).replace("\"", "\"\"") + "\"";
+        select.add(replace.containsKey(labels.get(c)) ? "(" + replace.get(labels.get(c)) + ") AS " + quoted : "MC_ROW." + quoted);
+      }
+      statement = checkReadOnly("SELECT " + String.join(", ", select) + " FROM (" + statement + ") AS MC_ROW");
+    }
+
+    ObjectNode result = mapper.createObjectNode();
+    result.put("statement", statement);
+    try (Statement stmt = readOnly.createStatement()) {
+      stmt.setMaxRows(rows + 1);
+      stmt.setQueryTimeout(TIMEOUT_SECONDS);
+      try (ResultSet rs = stmt.executeQuery(statement)) {
+        ResultSetMetaData meta = rs.getMetaData();
+        int n = meta.getColumnCount();
+        boolean[] masked = new boolean[n + 1];
+        ArrayNode cols = result.putArray("columns");
+        for (int c = 1; c <= n; c++) {
+          ObjectNode col = cols.addObject();
+          col.put("name", meta.getColumnLabel(c));
+          col.put("jdbcType", meta.getColumnType(c));
+          col.put("typeName", meta.getColumnTypeName(c));
+          String label = meta.getColumnLabel(c).toUpperCase(Locale.ROOT);
+          masked[c] = mask.contains(label) && !replace.containsKey(label);
+          if (masked[c]) result.withArray("maskedColumns").add(meta.getColumnLabel(c));
+        }
+        ArrayNode data = result.putArray("rows");
+        boolean more = false;
+        while (rs.next()) {
+          if (data.size() == rows) {
+            more = true;
+            break;
+          }
+          ArrayNode row = data.addArray();
+          for (int c = 1; c <= n; c++) {
+            int t = meta.getColumnType(c);
+            if (t == java.sql.Types.BINARY || t == java.sql.Types.VARBINARY || t == java.sql.Types.LONGVARBINARY || t == java.sql.Types.BLOB) {
+              byte[] bytes = rs.getBytes(c);
+              if (bytes == null) row.addNull();
+              else row.add(masked[c] ? MASKED : hex(bytes));
+              continue;
+            }
+            String value = rs.getString(c);
+            if (value == null) row.addNull();
+            else if (masked[c]) row.add(MASKED);
+            else row.add(t == java.sql.Types.CHAR || t == java.sql.Types.NCHAR ? value.replaceAll("\\s+$", "") : value);
+          }
+        }
+        result.put("rowCount", data.size());
+        if (more) result.put("moreRows", "Only the first " + rows + " rows were read: add a WHERE or raise maxRows (up to " + cap + ")");
+      }
+    }
+    if (!replace.isEmpty()) result.set("replaced", mapper.valueToTree(replace.keySet()));
+    return result;
+  }
+
   /* Libraries holding the object, the one the library list resolves to, and authority to use it */
   ObjectNode findObject(Connection connection, String name, String type) throws SQLException {
     String object = name.trim().toUpperCase(Locale.ROOT);

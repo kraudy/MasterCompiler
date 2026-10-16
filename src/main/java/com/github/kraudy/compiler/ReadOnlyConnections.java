@@ -152,7 +152,8 @@ final class ReadOnlyConnections {
         if (!ROUTED.contains(tool)) {
           return error(target + " is a read-only connection: only sql, find_object, find_source and compare run there");
         }
-        return (ObjectNode) backend(ro).call(tool, args);
+        ObjectNode answer = (ObjectNode) backend(ro).call(tool, args);
+        return tool.equals("sql") ? ResultFiles.finish(args, answer, project) : answer;  // format: the file goes here, on the PC
       } catch (Exception e) {
         logger.error("Read-only connection call failed", e);
         return error((target.isEmpty() ? "" : target + ": ") + e.getMessage());

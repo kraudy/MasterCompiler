@@ -240,7 +240,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
 | `joblog` | none | The job's messages since the previous `joblog` call |
-| `sql` | `statement`, `maxRows`, `maxColumns`, `connection` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped |
+| `sql` | `statement`, `maxRows`, `maxColumns`, `connection`; `format`, `file`, `table`, `set` | Read-only query results: `columns`, `rows`, `rowCount`, `moreRows` when capped. With `format` (`csv`, `json`, `md`, `inserts`) the whole result goes to `.mc/results/<file>` on the PC (every column, exact values, up to 10000 rows); the answer gives the `file` and `firstRows`. `inserts` writes INSERT statements into `table` (default: the query's only FROM table) with typed literals; `set` replaces columns on the system read (masked ones must be) |
 | `find_object` | `name`, `type`, `connection` | Libraries holding the object, `resolvesTo` on the library list, `authorized` per library |
 | `copy_rows` | `connection`, `from`, `where`, `set`, `to`, `deleteWhere`, `confirm` | Copies rows from a table on a read-only connection into a table of the current library (see below). Without `confirm`: the rows, the first three and the statements; show them to the user, then call with `confirm: true` |
 | `compare` | `object`, `type`, `connection` | The object on the build system and on a read-only connection side by side (library, create / change timestamps, per module the source member, the source change timestamp its compile recorded, the module's create timestamp), `differences` and `sameRecordedSource` |
@@ -351,8 +351,9 @@ end-proc;
 - Keep test keys apart from real ones (a prefix such as `T`), and delete by those keys only, never a
   whole table.
 - Insert every column the program reads, with literal values written in the test. To start from
-  real rows, read them with the `sql` tool (also on a read-only connection) and write their values
-  into the test, replacing personal data. To have real rows in the development library for a manual
+  real rows, read them with `sql` and `format: "inserts"` (also on a read-only connection), with
+  `set` replacing personal data and the key (e.g. `{"COL1": "'T' || SUBSTR(COL1, 2)"}`): the
+  statements in `.mc/results/` go into setUp as they are. To have real rows in the development library for a manual
   check, `copy_rows` brings them from a read-only connection.
 - Build the test with the project like any other source, then compile and run it with the commands
   of the RPGUnit installed on that IBM i (`RUCALLTST` runs a test service program).
@@ -382,6 +383,10 @@ Every key runs as the user: ask them before options or commands that change or d
 user they can open `.mc/screen.txt` in VS Code to watch the screens as you go.
 
 ### Db2 queries and objects
+
+Big results, or ones the user wants to open or share (a spreadsheet, a report), go to a file:
+`sql` with `format: "csv"` (or `json`, `md`), optionally `file: "name"`. Tell the user the path in
+`.mc/results/`; read that file instead of running the query again.
 
 Use MC's `sql` tool for data and catalog questions (columns of a table, rows, which objects use a
 file): one `SELECT` / `VALUES` / `WITH` per call on a connection the driver opens read only, with
