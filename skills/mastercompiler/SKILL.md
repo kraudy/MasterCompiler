@@ -291,10 +291,18 @@ IBM i rejects a password it stops signing on to that system: every tool returns 
 `error`).
 
 After any authentication error (`rejected the password`, `Auth fail`, `CPF22E2`, `CPF22E3`, ...),
-do not call another tool on that connection and do not retry: tell the user to run
-**MCP: Reset Cached Inputs**, restart the `mastercompiler` server and type the current password in
-VS Code's prompt. A disabled profile (`CPF22E3`) or expired password (`CPF22E4`) needs their security
-administrator first.
+do not call another tool on that connection and do not retry. Show the user the error and ask whether
+they want to type the password again. If they do, give them these steps (the error lists them too):
+
+1. Command Palette (Ctrl+Shift+P) → **MCP: Reset Cached Inputs**.
+2. Command Palette → **MCP: List Servers** → `mastercompiler` → **Restart Server**. VS Code shows its
+   password prompts again.
+3. They type the current password in that prompt. Never ask for it in the chat.
+
+Then call `status` to see the connection's `state`. If they don't know the current password, it is
+changed on the IBM i (`CHGPWD`, ACS, or the security administrator). A disabled profile (`CPF22E3`) or
+an expired password (`CPF22E4`) needs the security administrator first, then deleting
+`.mc/auth-blocked.json` before those steps.
 
 ### Sources the project does not have
 

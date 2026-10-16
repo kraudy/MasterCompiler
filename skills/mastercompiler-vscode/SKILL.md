@@ -94,7 +94,7 @@ Check the version:
 java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
 ```
 
-It must print `MasterCompiler <tag>` with the tag from above (v0.3.11 or newer).
+It must print `MasterCompiler <tag>` with the tag from above (v0.3.13 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
 Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
@@ -256,7 +256,8 @@ typed a wrong one, or wants to type them again:
 
 1. Command Palette → **MCP: Reset Cached Inputs**. VS Code forgets the stored inputs: the build
    connection's password, each read-only connection's password, and the connection picked at start.
-2. **MCP: List Servers** → `mastercompiler` → **Restart** (or Stop, then Start).
+2. **MCP: List Servers** → `mastercompiler` → **Restart Server** (or Stop, then Start). VS Code shows
+   the password prompts again.
 3. The user types the current passwords in VS Code's prompts: never in the chat or a terminal.
 
 If IBM i rejected a password before, `.mc/auth-blocked.json` in the project remembers it (a salted
@@ -320,7 +321,7 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | Connection refused / timeouts | Over SSH: the IBM i's SSH port must be reachable (Code for IBM i working from this PC proves it). With `--host-servers`: ports 449, 8470-8476 (or 9470-9476 with TLS), as for ACS. |
 | `--ssh`: host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator. |
 | `IBMI_PASSWORD_<NAME> is not set` | A read-only connection without its password prompt: rerun `--setup-vscode`, restart the server, type that system's password in its prompt. |
-| `rejected the password`, `Auth fail`, `CPF22E2` | IBM i rejected the password (often: it changed, and VS Code resent the old one it keeps). MC stops signing on there so the profile is not disabled, also after a restart with the same password. The user runs **MCP: Reset Cached Inputs**, restarts the server and types the current password. Do not call more tools on that connection meanwhile. |
+| `rejected the password`, `Auth fail`, `CPF22E2` | IBM i rejected the password (often: it changed, and VS Code resent the old one it keeps). MC stops signing on there so the profile is not disabled, also after a restart with the same password. Do not retry or call more tools on that connection. Ask the user whether they want to type the password again; if so, give them the steps in "Re-enter the passwords" (Reset Cached Inputs, Restart Server, type it in VS Code's prompt, never in the chat). |
 | `disabled` (`CPF22E3`) / `expired` (`CPF22E4`) | The profile is disabled or its password expired: the user asks their security administrator, then deletes `.mc/auth-blocked.json` in the project, resets the cached inputs and restarts the server. |
 | `--ssh`: no key and no password | Enter the password when the server starts, or create an SSH key the IBM i accepts. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |

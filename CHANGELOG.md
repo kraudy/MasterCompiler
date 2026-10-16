@@ -3,6 +3,12 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.13
+
+- A rejected password's error tells the agent to ask the user whether to type it again and lists the steps:
+  "MCP: Reset Cached Inputs", "MCP: List Servers" > mastercompiler > "Restart Server", type it in VS Code's
+  prompt (never in the chat). Same steps in both skills.
+
 ## v0.3.12
 
 - Setup guide: "Update, reinstall, or re-enter the passwords": stop the server before replacing the jar

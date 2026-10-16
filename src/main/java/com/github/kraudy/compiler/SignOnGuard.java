@@ -39,8 +39,16 @@ import com.ibm.as400.access.AS400SecurityException;
 final class SignOnGuard {
   private static final Logger logger = LoggerFactory.getLogger(SignOnGuard.class);
   private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
-  private static final String RESET = "Run \"MCP: Reset Cached Inputs\" in VS Code (Ctrl+Shift+P), then restart the "
-      + "mastercompiler server and type the current password.";
+  /* What the agent does next: ask the user, who types the password only in VS Code's prompt */
+  private static String reset(Target target) {
+    return "Do not retry and do not call other tools on " + target.name + ". Ask the user whether they want to type "
+        + "the password for " + target.user + "@" + target.name + " again (never in the chat). If they do: "
+        + "1. Command Palette (Ctrl+Shift+P) > \"MCP: Reset Cached Inputs\"; "
+        + "2. Command Palette > \"MCP: List Servers\" > mastercompiler > \"Restart Server\": VS Code shows its "
+        + "password prompts again; "
+        + "3. type the current password there. If they do not know it, it is changed on the IBM i (CHGPWD, ACS, "
+        + "or the security administrator).";
+  }
 
   private static File file = new File(".mc/auth-blocked.json");
   private static final Map<String, String> failedHere = new LinkedHashMap<String, String>();  // host user: the message
@@ -114,8 +122,8 @@ final class SignOnGuard {
       message = hardMessage(target, entry.path("code").asText(), entry.path("time").asText());
     } else if (hash(target.password, entry.path("salt").asText()).equals(entry.path("hash").asText())) {
       message = "This is the same password " + target.name + " rejected on " + entry.path("time").asText() + " ("
-          + entry.path("code").asText() + "). " + RESET + " MasterCompiler did not sign on, so the profile was not "
-          + "disabled.";
+          + entry.path("code").asText() + "): MasterCompiler did not sign on, so the profile was not disabled. "
+          + reset(target);
     }
     if (message == null) {
       logger.info("{}: a different password than the one rejected on {}: one sign-on attempt", target.name,
@@ -140,7 +148,7 @@ final class SignOnGuard {
     String time = OffsetDateTime.now().withNano(0).toString();
     String message = hard ? hardMessage(target, code, time)
         : "IBM i rejected the password for " + target.user + "@" + target.name + " (" + code + "). MasterCompiler "
-          + "stopped signing on to " + target.name + " so the profile is not disabled (QMAXSIGN). " + RESET;
+          + "stopped signing on to " + target.name + " so the profile is not disabled (QMAXSIGN). " + reset(target);
     logger.error("{} ({})", message, e.getMessage());
     failedHere.put(target.key(), message);
     state(target, "auth-failed", message);
@@ -164,9 +172,11 @@ final class SignOnGuard {
   private static String hardMessage(Target target, String code, String time) {
     return "IBM i says the profile " + target.user + " on " + target.name + " is "
         + (code.equals("CPF22E3") ? "disabled" : "using an expired password") + " (" + code + ", " + time + "). "
-        + "MasterCompiler will not sign on there, even with another password: ask your security administrator to "
-        + (code.equals("CPF22E3") ? "enable the profile" : "reset the password") + ", then delete " + file.getPath()
-        + " in the project, run \"MCP: Reset Cached Inputs\" and restart the mastercompiler server.";
+        + "MasterCompiler will not sign on there, even with another password. Do not retry. Tell the user to ask "
+        + "their security administrator to " + (code.equals("CPF22E3") ? "enable the profile" : "reset the password")
+        + "; then delete " + file.getPath() + " in the project, Command Palette (Ctrl+Shift+P) > \"MCP: Reset "
+        + "Cached Inputs\", \"MCP: List Servers\" > mastercompiler > \"Restart Server\", and type the current "
+        + "password in VS Code's prompt (never in the chat).";
   }
 
   private static synchronized void succeeded(Target target) {
