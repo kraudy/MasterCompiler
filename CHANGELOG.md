@@ -17,6 +17,10 @@ Sign-on safety (a wrong password never disables the profile)
 - `status` answers without a connection and lists every connection (build and read-only) with its state.
 - `--setup-vscode` password prompts say to run "MCP: Reset Cached Inputs" after a password change.
 
+Docs
+- Setup guide: "Update, reinstall, or re-enter the passwords" (stop the server before replacing the jar on
+  Windows, when to re-run `--setup-vscode`, "MCP: Reset Cached Inputs" to type the passwords again).
+
 ## v0.3.10
 
 - `copy_rows`, data from one system to another without `seeds.yaml`: rows of a table on a read-only connection

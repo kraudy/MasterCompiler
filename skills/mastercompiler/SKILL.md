@@ -29,6 +29,8 @@ Get the jar from the latest release,
 `https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
 (`curl -LO` works in PASE too), or build it with `./mvnw clean package`
 (`target/MasterCompiler-1.0-SNAPSHOT.jar`). The examples below call it `MC.jar`.
+To update or reinstall MC in VS Code, or have the user re-enter its passwords, follow "Update,
+reinstall, or re-enter the passwords" in the `mastercompiler-vscode` skill.
 Running on the IBM i is the simplest agent path: copy the jar next to the sources and
 run it over SSH. No password ever lands in a file.
 

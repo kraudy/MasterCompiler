@@ -5,7 +5,8 @@ description: >-
   VS Code, reusing the developer's Code for IBM i connection, on Windows, macOS or
   Linux. Use when the user wants Copilot (or another agent) to build IBM i code,
   asks to connect or configure MasterCompiler / MC / the IBM i build tool, or MC's
-  MCP tools (build, plan, impact, find_source, import_source, joblog) are missing. Triggers: set up MC,
+  MCP tools (build, plan, impact, find_source, import_source, joblog) are missing, or wants to update or
+  reinstall MC or re-enter its passwords. Triggers: set up MC, update MC, reinstall MC, reset MC password,
   MasterCompiler MCP, mcp.json, Code for IBM i, Code4i, Copilot IBM i build.
 ---
 
@@ -215,6 +216,56 @@ IBM i and understood the project.
 
 For SQL (table columns, data, the catalog), use MC's read-only `sql` tool; `find_object` tells
 which library an object resolves to.
+
+## Update, reinstall, or re-enter the passwords
+
+### Update MC
+
+1. Read `CHANGELOG.md` at the new tag
+   (`https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/CHANGELOG.md`): it says what
+   changed and whether `mcp.json` needs something new.
+2. Stop the server first: Command Palette → **MCP: List Servers** → `mastercompiler` → **Stop**.
+   On Windows the running server keeps the jar open and the download over it fails.
+3. Run the download in step 2 above (look up `tag_name` again, download that tag's jar over the
+   existing `MasterCompiler.jar`) and check `--version` prints that tag.
+4. Run `--setup-vscode` again (step 3) when the spec gained `connections.readOnly`: it adds the
+   missing password prompts and keeps the rest of the `mastercompiler` entry as it is. For any other
+   `mcp.json` change the changelog mentions, edit the entry (or remove it, with the user's agreement,
+   and run setup again).
+5. Start the server again. Nothing to copy to the IBM i: on its first start over SSH the new
+   version uploads itself to `<home>/mc/.mc/` and the older jars there are removed.
+
+### Reinstall MC
+
+When MC will not start or behaves oddly after the steps above:
+
+1. Stop the server, delete `MasterCompiler.jar`, download it again (step 2) and check `--version`.
+2. Check the `command` in `mcp.json` still points at a working Java (step 1; it breaks when a Java
+   folder it named was removed or updated). Setup does not change an existing `mastercompiler`
+   entry: fix the path in it, or, with the user's agreement, remove the entry and run
+   `--setup-vscode` again (step 3) to write a new one.
+3. Start the server.
+
+A jar on the IBM i that an earlier upload left broken is detected and uploaded again by itself.
+Do not delete the project's `.mc/` folder: it holds the sources imported for reference.
+
+### Re-enter the passwords
+
+VS Code keeps the passwords typed in its prompts across restarts. When the user changed a password,
+typed a wrong one, or wants to type them again:
+
+1. Command Palette → **MCP: Reset Cached Inputs**. VS Code forgets the stored inputs: the build
+   connection's password, each read-only connection's password, and the connection picked at start.
+2. **MCP: List Servers** → `mastercompiler` → **Restart** (or Stop, then Start).
+3. The user types the current passwords in VS Code's prompts: never in the chat or a terminal.
+
+If IBM i rejected a password before, `.mc/auth-blocked.json` in the project remembers it (a salted
+hash, never the password): a new password gets one attempt and, when it works, the entry goes away by
+itself. Only after a disabled profile or expired password (`CPF22E3` / `CPF22E4`), once the security
+administrator fixed it, delete that file before restarting.
+
+This only changes what VS Code passes to MC. The IBM i password itself is changed on the IBM i
+(`CHGPWD`, ACS, or the administrator).
 
 ## Manual configuration (when setup cannot run)
 
