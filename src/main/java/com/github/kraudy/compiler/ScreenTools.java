@@ -103,7 +103,7 @@ final class ScreenTools {
         fillHidden(screen, passwordField, target.password);
         screen.press(Screen5250.AID_ENTER);
         screen.waitForInput(wait);
-        refusedSignOn(screen);
+        refusedSignOn(screen, new SignOnDisplay(userField.start, passwordField.start));
         return screen;
       });
     } catch (Exception e) {
@@ -119,6 +119,17 @@ final class ScreenTools {
     return result(mapper.writeValueAsString(answer), false);
   }
 
+  /* Where the sign-on display had its user and password fields */
+  private static final class SignOnDisplay {
+    final int userStart;
+    final int passwordStart;
+
+    SignOnDisplay(int userStart, int passwordStart) {
+      this.userStart = userStart;
+      this.passwordStart = passwordStart;
+    }
+  }
+
   /* The password goes only into the sign-on display's hidden field, typed by MasterCompiler itself */
   private static void fillHidden(Screen5250 screen, Screen5250.Field field, String password) {
     if (password.length() > field.length) {
@@ -128,7 +139,7 @@ final class ScreenTools {
   }
 
   /* Still on the sign-on display (the password field again): IBM i refused it */
-  private static void refusedSignOn(Screen5250 screen) throws Exception {
+  private static void refusedSignOn(Screen5250 screen, SignOnDisplay signOn) throws Exception {
     if (screen.closed()) {
       /* the IBM i itself closed it (it does after too many tries, or varies the device off): count it as refused */
       if (Screen5250.CLOSED_BY_IBMI.equals(screen.closedBy())) {
@@ -136,11 +147,20 @@ final class ScreenTools {
       }
       throw new java.io.IOException("The connection ended at sign-on: " + screen.closedBy());
     }
-    /* a hidden field still there, wherever it is: the sign-on display again (or a changed one), not signed on */
-    boolean signOnAgain = false;
+    /*
+     * The sign-on display again: a hidden field where the password was, or the user field still in its place with a
+     * hidden field anywhere (a sign-on display drawn a little differently). Another display with a hidden field (an
+     * application's own) means signed on.
+     */
+    boolean hiddenAtPassword = false;
+    boolean hiddenAnywhere = false;
+    boolean userFieldThere = false;
     for (Screen5250.Field f : screen.inputFields()) {
-      if (f.hidden()) signOnAgain = true;
+      if (f.hidden()) hiddenAnywhere = true;
+      if (f.hidden() && f.start == signOn.passwordStart) hiddenAtPassword = true;
+      if (!f.hidden() && f.start == signOn.userStart) userFieldThere = true;
     }
+    boolean signOnAgain = hiddenAtPassword || (userFieldThere && hiddenAnywhere);
     String lines = String.join("\n", screen.lines());
     String lower = lines.toLowerCase(Locale.ROOT);
     if (lower.contains("password has expired") || lower.contains("contraseña ha caducado")) {

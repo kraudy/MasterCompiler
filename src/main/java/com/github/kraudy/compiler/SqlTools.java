@@ -66,7 +66,7 @@ final class SqlTools {
    * IBM i is what really limits it.
    */
   static void checkLibraries(String sql, List<String> allowed) {
-    String text = outsideQuotes(sql);
+    String text = namesOnly(sql);
     List<String> refused = new ArrayList<String>();
     for (Pattern p : new Pattern[] { SLASH_QUALIFIED, DOT_QUALIFIED }) {
       java.util.regex.Matcher m = p.matcher(text);
@@ -102,12 +102,14 @@ final class SqlTools {
       stmt = connection.prepareStatement(
           "SELECT NAME_TYPE, SCHEMA, NAME, USAGE_TYPE, SQL_STATEMENT_TYPE FROM TABLE(QSYS2.PARSE_STATEMENT(?, '*SYS'))");
     } catch (SQLException noParser) {
-      return;  // a release without PARSE_STATEMENT: the text checks above are what is left
+      return;  // a release without PARSE_STATEMENT: the text checks above (comments and quotes seen through) are left
     }
     try {
       stmt.setString(1, statement);
       try (ResultSet rs = stmt.executeQuery()) {
+        boolean parsed = false;
         while (rs.next()) {
+          parsed = true;
           String usage = String.valueOf(rs.getString(4)).trim();
           String type = String.valueOf(rs.getString(5)).trim();
           if (usage.equals("TARGET TABLE") || WRITES.matcher(type).find()) {
@@ -117,6 +119,10 @@ final class SqlTools {
           if (allowed == null || schema == null) continue;  // unqualified: the connection's library list, its libraries
           schema = schema.trim().toUpperCase(Locale.ROOT);
           if (!allowed.contains(schema) && !CATALOGS.contains(schema) && !refused.contains(schema)) refused.add(schema);
+        }
+        if (!parsed && allowed != null && Pattern.compile("\\bFROM\\b", Pattern.CASE_INSENSITIVE).matcher(namesOnly(statement)).find()) {
+          throw new IllegalArgumentException("Db2 could not check which libraries this query reads (QSYS2.PARSE_STATEMENT "
+              + "returned nothing: usually a syntax error), so it does not run on a read-only connection. Check the statement");
         }
       }
     } finally {
@@ -137,7 +143,7 @@ final class SqlTools {
       if (c == ')' && --depth < 0) break;
     }
     if (depth != 0 || text.contains("--") || text.contains("/*") || text.contains(";")) {
-      throw new IllegalArgumentException("set " + column + ": one SQL expression, without comments, ';' or unbalanced "
+      throw new IllegalArgumentException(column + ": one SQL expression, without comments, ';' or unbalanced "
           + "parentheses, not: " + expression);
     }
   }
@@ -165,6 +171,39 @@ final class SqlTools {
       throw new IllegalArgumentException("One statement per call");
     }
     return text;
+  }
+
+  /* For the library check: comments and string literals blanked, quoted names kept without their quotes */
+  static String namesOnly(String sql) {
+    StringBuilder out = new StringBuilder();
+    int i = 0;
+    while (i < sql.length()) {
+      char c = sql.charAt(i);
+      if (c == '\'') {
+        int end = i + 1;
+        while (end < sql.length() && !(sql.charAt(end) == '\'' && (end + 1 >= sql.length() || sql.charAt(end + 1) != '\''))) {
+          end += sql.charAt(end) == '\'' ? 2 : 1;
+        }
+        for (; i <= end && i < sql.length(); i++) out.append(' ');
+      } else if (c == '"') {
+        int end = sql.indexOf('"', i + 1);
+        if (end < 0) end = sql.length();
+        out.append(' ').append(sql, i + 1, end).append(' ');
+        i = end + 1;
+      } else if (sql.startsWith("--", i)) {
+        int end = sql.indexOf('\n', i);
+        if (end < 0) end = sql.length();
+        for (; i < end; i++) out.append(' ');
+      } else if (sql.startsWith("/*", i)) {
+        int end = sql.indexOf("*/", i + 2);
+        end = end < 0 ? sql.length() : end + 2;
+        for (; i < end; i++) out.append(' ');
+      } else {
+        out.append(c);
+        i++;
+      }
+    }
+    return out.toString().replaceAll("\\s*\\.\\s*", ".");  // "LIB"."NAME" as LIB.NAME (A / B stays a division)
   }
 
   /* The statement with string literals and quoted names blanked, to look for ';' */
@@ -291,7 +330,7 @@ final class SqlTools {
     for (java.util.Map.Entry<String, String> e : set.entrySet()) {
       String col = e.getKey().trim().toUpperCase(Locale.ROOT);
       if (!labels.contains(col)) throw new IllegalArgumentException("set: the query has no column " + col + " (it has " + labels + ")");
-      checkExpression(col, e.getValue());
+      checkExpression("set " + col, e.getValue());
       replace.put(col, e.getValue());
     }
     List<String> unmasked = new ArrayList<String>();
@@ -757,7 +796,7 @@ final class SqlTools {
     for (java.util.Map.Entry<String, String> e : set.entrySet()) {
       String col = e.getKey().trim().toUpperCase(Locale.ROOT);
       if (!columns.contains(col)) throw new IllegalArgumentException("set: " + lib + "/" + name + " has no column " + col);
-      checkExpression(col, e.getValue());
+      checkExpression("set " + col, e.getValue());
       replace.put(col, e.getValue());
     }
     List<String> unmasked = new ArrayList<String>();
@@ -768,6 +807,7 @@ final class SqlTools {
     }
     List<String> select = new ArrayList<String>();
     for (String col : columns) select.add(replace.containsKey(col) ? "(" + replace.get(col) + ") AS " + col : col);
+    if (where != null && !where.trim().isEmpty()) checkExpression("where", where);
     String statement = "SELECT " + String.join(", ", select) + " FROM " + lib + "/" + name
         + (where != null && !where.trim().isEmpty() ? " WHERE " + where : "");
     checkReadOnly(statement);

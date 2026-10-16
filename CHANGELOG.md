@@ -15,12 +15,14 @@ Fixes from a review
   the same profile) during the SSH start-up cannot send the same wrong password alongside it.
 - `SSH_MSG_DISCONNECT: 2` counts as a rejected password only when it is about authentication (code 2 is also a
   protocol error); a failed sign-on with no password (key only) is not recorded as one.
-- 5250 sign-on: any hidden field left after Enter means not signed on; the IBM i ending the session right after the
-  password counts as a refusal.
+- 5250 sign-on: the sign-on display again (a hidden field where the password was, or the user field in its place and a
+  hidden field anywhere) means refused; another display, even with a hidden field of its own, means signed on. The IBM i
+  ending the session right after the password counts as a refusal.
 - `sql`: before a query runs, Db2's own parse of it (`QSYS2.PARSE_STATEMENT`) must show no table it would change and,
   on a read-only connection, nothing outside its libraries and the catalogs (comments and quoted names no longer slip
   past the text check); `FINAL` / `NEW` / `OLD TABLE (` is refused; each `set` value must be one expression (no
-  comments, no `;`, balanced parentheses), also in `copy_rows`; `table` must be a table name.
+  comments, no `;`, balanced parentheses), also `copy_rows`' `set` and `where`; `table` must be a table name. The
+  text check sees through comments and quoted names; on a read-only connection a query Db2 cannot parse does not run.
 
 ## v0.3.16
 
