@@ -102,22 +102,30 @@ final class SignOnGuard {
     if (!states.containsKey(target.name)) state(target, "not connected", null);
   }
 
-  /* Sign on once with 'attempt' unless that is known to fail; an IBM i rejection blocks every later try */
+  private static final Map<String, Object> attempts = new java.util.concurrent.ConcurrentHashMap<String, Object>();
+
+  /*
+   * Sign on once with 'attempt' unless that is known to fail; an IBM i rejection blocks every later try. Attempts for
+   * one host and user run one at a time (SSH start-up, a 5250 session, a read-only connection to the same profile), so
+   * a second one checks again after the first was rejected instead of sending the same password with it.
+   */
   static <T> T signOn(Target target, Callable<T> attempt) throws Exception {
-    check(target);
-    try {
-      T connected = attempt.call();
-      succeeded(target);
-      return connected;
-    } catch (Exception e) {
-      String code = authCode(e);
-      if (code == null) {
-        synchronized (SignOnGuard.class) {
-          state(target, "error", e.getMessage());
+    synchronized (attempts.computeIfAbsent(target.key(), k -> new Object())) {
+      check(target);
+      try {
+        T connected = attempt.call();
+        succeeded(target);
+        return connected;
+      } catch (Exception e) {
+        String code = target.password.isEmpty() ? null : authCode(e);  // no password sent: a key failed, nothing to block
+        if (code == null) {
+          synchronized (SignOnGuard.class) {
+            state(target, "error", e.getMessage());
+          }
+          throw e;
         }
-        throw e;
+        throw failed(target, code, e);
       }
-      throw failed(target, code, e);
     }
   }
 
@@ -147,7 +155,7 @@ final class SignOnGuard {
 
   /* After a tool failed: a rejected password blocks further tries; true when it was one */
   static boolean failed(Target target, Exception e) {
-    String code = authCode(e);
+    String code = target.password.isEmpty() ? null : authCode(e);
     if (code == null) return false;
     failed(target, code, e);
     return true;
@@ -243,7 +251,10 @@ final class SignOnGuard {
       if (t instanceof com.jcraft.jsch.JSchException) {
         if (text.startsWith("Auth fail")) return "SSH Auth fail";
         if (text.contains("Too many authentication failures")) return "SSH Too many authentication failures";
-        if (text.contains("SSH_MSG_DISCONNECT: 2 ")) return "SSH_MSG_DISCONNECT 2";
+        /* code 2 is also a plain protocol error: only an authentication one counts */
+        if (text.contains("SSH_MSG_DISCONNECT: 2 ") && text.toLowerCase(Locale.ROOT).contains("authentication")) {
+          return "SSH_MSG_DISCONNECT 2";
+        }
       }
       if (t instanceof SQLException && ("08004".equals(((SQLException) t).getSQLState())
           || "28000".equals(((SQLException) t).getSQLState()))) {

@@ -226,7 +226,14 @@ final class ResultFiles {
   /* 'table', else the query's only FROM table (unqualified: the test's library list finds it) */
   private static String table(JsonNode args) {
     String given = args.path("table").asText("").trim();
-    if (!given.isEmpty()) return given;
+    if (!given.isEmpty()) {
+      /* a name, LIB/NAME or LIB.NAME (quoted parts allowed): nothing else ends up in the statements */
+      String part = "(?:[A-Za-z$#@_][A-Za-z0-9$#@_]*|\"[^\"]+\")";
+      if (!given.matches(part + "(?:\\s*[./]\\s*" + part + ")?")) {
+        throw new IllegalArgumentException("table must be a table name (TABLE1, LIB1/TABLE1 or LIB1.TABLE1), not: " + given);
+      }
+      return given;
+    }
     String only = onlyTable(args.path("statement").asText(""));
     if (only == null) {
       throw new IllegalArgumentException("format inserts needs 'table': the table the statements insert into "

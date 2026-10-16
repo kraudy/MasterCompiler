@@ -33,6 +33,7 @@ final class Screen5250 implements AutoCloseable {
   private static final int IAC = 255, DONT = 254, DO = 253, WONT = 252, WILL = 251, SB = 250, SE = 240, EOR = 239;
   private static final int BINARY = 0, TIMING_MARK = 6, TERMINAL_TYPE = 24, END_OF_RECORD = 25;
   private static final String TERMINAL = "IBM-3179-2";
+  static final String CLOSED_BY_IBMI = "the IBM i closed the connection";  // an orderly end, not a network error
 
   /* 5250 header opcodes and commands */
   private static final int OP_PUT_GET = 3, OP_SAVE = 4;
@@ -321,7 +322,7 @@ final class Screen5250 implements AutoCloseable {
 
   private void readLoop() {
     ByteArrayOutputStream record = new ByteArrayOutputStream();
-    String why = "the IBM i closed the connection";
+    String why = CLOSED_BY_IBMI;
     try {
       int b;
       while ((b = in.read()) >= 0) {

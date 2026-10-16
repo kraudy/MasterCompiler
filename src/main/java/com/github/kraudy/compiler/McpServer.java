@@ -625,7 +625,7 @@ public class McpServer {
             java.util.Map.Entry<String, JsonNode> f = fields.next();
             set.put(f.getKey(), f.getValue().asText());
           }
-          return toolResult(mapper.writeValueAsString(new SqlTools(maxRows, mask).exportRows(connection,
+          return toolResult(mapper.writeValueAsString(new SqlTools(maxRows, mask, readLibs).exportRows(connection,
               args.path("from").asText(""), args.path("where").asText(null), set, args.path("maxRows").asInt(0), readLibs)), false);
         }
         default: return toolResult(name + " does not run on a read-only connection (it reads only " + readLibs + ")", true);
@@ -823,15 +823,14 @@ public class McpServer {
         for (java.util.Iterator<java.util.Map.Entry<String, JsonNode>> it = args.path("set").fields(); it.hasNext();) {
           java.util.Map.Entry<String, JsonNode> e = it.next();
           set.put(e.getKey(), e.getValue().asText());
-          if (readOnlyMode) SqlTools.checkLibraries(e.getValue().asText(), readLibs);  // a subquery reads only these too
         }
-        ObjectNode full = new SqlTools(maxRows, mask).queryForFile(readOnly, statement, args.path("maxRows").asInt(0), set,
+        ObjectNode full = new SqlTools(maxRows, mask, readOnlyMode ? readLibs : null).queryForFile(readOnly, statement, args.path("maxRows").asInt(0), set,
             "inserts".equalsIgnoreCase(args.path("format").asText()));
         ObjectNode result = toolResult(pretty.writeValueAsString(full), false);
         /* MC on the PC writes the file here; on the IBM i (behind SSH) or as a read-only server, the PC side does */
         return readOnlyMode || IBMiDotEnv.isIBMi() ? result : ResultFiles.finish(args, result, projectDir());
       }
-      ObjectNode result = new SqlTools(maxRows, mask).query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
+      ObjectNode result = new SqlTools(maxRows, mask, readOnlyMode ? readLibs : null).query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
       return toolResult(pretty.writeValueAsString(result), false);
     } catch (java.sql.SQLException e) {
       return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage(), true);

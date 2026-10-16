@@ -103,7 +103,7 @@ final class ScreenTools {
         fillHidden(screen, passwordField, target.password);
         screen.press(Screen5250.AID_ENTER);
         screen.waitForInput(wait);
-        refusedSignOn(screen, passwordField);
+        refusedSignOn(screen);
         return screen;
       });
     } catch (Exception e) {
@@ -128,12 +128,18 @@ final class ScreenTools {
   }
 
   /* Still on the sign-on display (the password field again): IBM i refused it */
-  private static void refusedSignOn(Screen5250 screen, Screen5250.Field passwordField) throws Exception {
-    if (screen.closed()) throw new java.io.IOException("The IBM i ended the session at sign-on: " + screen.closedBy());
-    List<Screen5250.Field> now = screen.inputFields();
+  private static void refusedSignOn(Screen5250 screen) throws Exception {
+    if (screen.closed()) {
+      /* the IBM i itself closed it (it does after too many tries, or varies the device off): count it as refused */
+      if (Screen5250.CLOSED_BY_IBMI.equals(screen.closedBy())) {
+        throw new SignOnGuard.Refused("5250 sign-on refused", "5250 sign-on: the IBM i ended the session right after the password");
+      }
+      throw new java.io.IOException("The connection ended at sign-on: " + screen.closedBy());
+    }
+    /* a hidden field still there, wherever it is: the sign-on display again (or a changed one), not signed on */
     boolean signOnAgain = false;
-    for (Screen5250.Field f : now) {
-      if (f.hidden() && f.start == passwordField.start) signOnAgain = true;
+    for (Screen5250.Field f : screen.inputFields()) {
+      if (f.hidden()) signOnAgain = true;
     }
     String lines = String.join("\n", screen.lines());
     String lower = lines.toLowerCase(Locale.ROOT);

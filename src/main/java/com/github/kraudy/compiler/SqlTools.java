@@ -39,14 +39,16 @@ final class SqlTools {
   private final ObjectMapper mapper = new ObjectMapper();
   private final int rowCap;            // a read-only connection's maxRows (0: MAX_ROWS)
   private final List<String> mask;     // its maskColumns: values shown as MASKED
+  private final List<String> allowed;  // its libraries: the only ones read (null: the build system, any)
 
   SqlTools() {
-    this(0, new ArrayList<String>());
+    this(0, new ArrayList<String>(), null);
   }
 
-  SqlTools(int rowCap, List<String> mask) {
+  SqlTools(int rowCap, List<String> mask, List<String> allowed) {
     this.rowCap = rowCap;
     this.mask = mask;
+    this.allowed = allowed;
   }
 
   static final String MASKED = "(masked)";
@@ -79,6 +81,67 @@ final class SqlTools {
     }
   }
 
+  private static final Pattern WRITES = Pattern.compile(
+      "\\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CREATE|DROP|ALTER|CALL|GRANT|REVOKE|RENAME|COMMENT|LABEL|SET|REFRESH|LOCK)\\b");
+  private static final Pattern DATA_CHANGE = Pattern.compile("\\b(FINAL|NEW|OLD)\\s+TABLE\\s*\\(", Pattern.CASE_INSENSITIVE);
+
+  /*
+   * Right before a query runs: Db2's own parse of it (QSYS2.PARSE_STATEMENT, which sees through comments, quoted names
+   * and both namings) must show no table it would change (an INSERT inside FINAL TABLE) and, on a read-only
+   * connection, no object outside its libraries and the catalogs. When Db2 cannot parse it (no rows: a syntax error, or
+   * no names at all) the text checks above still apply.
+   */
+  void checkWithDb2(Connection connection, String statement) throws SQLException {
+    if (DATA_CHANGE.matcher(outsideQuotes(statement)).find()) {
+      throw new IllegalArgumentException("The query changes data (FINAL / NEW / OLD TABLE): the sql tool only reads");
+    }
+    if (allowed != null) checkLibraries(statement, allowed);
+    List<String> refused = new ArrayList<String>();
+    PreparedStatement stmt;
+    try {
+      stmt = connection.prepareStatement(
+          "SELECT NAME_TYPE, SCHEMA, NAME, USAGE_TYPE, SQL_STATEMENT_TYPE FROM TABLE(QSYS2.PARSE_STATEMENT(?, '*SYS'))");
+    } catch (SQLException noParser) {
+      return;  // a release without PARSE_STATEMENT: the text checks above are what is left
+    }
+    try {
+      stmt.setString(1, statement);
+      try (ResultSet rs = stmt.executeQuery()) {
+        while (rs.next()) {
+          String usage = String.valueOf(rs.getString(4)).trim();
+          String type = String.valueOf(rs.getString(5)).trim();
+          if (usage.equals("TARGET TABLE") || WRITES.matcher(type).find()) {
+            throw new IllegalArgumentException("The query changes data (" + type + " " + rs.getString(3) + "): the sql tool only reads");
+          }
+          String schema = rs.getString(2);
+          if (allowed == null || schema == null) continue;  // unqualified: the connection's library list, its libraries
+          schema = schema.trim().toUpperCase(Locale.ROOT);
+          if (!allowed.contains(schema) && !CATALOGS.contains(schema) && !refused.contains(schema)) refused.add(schema);
+        }
+      }
+    } finally {
+      stmt.close();
+    }
+    if (!refused.isEmpty()) {
+      throw new IllegalArgumentException("This connection reads only " + allowed + " (and the catalogs " + CATALOGS
+          + "), not " + refused);
+    }
+  }
+
+  /* A set expression is one expression: no comments, no ';', its parentheses closed inside it */
+  static void checkExpression(String column, String expression) {
+    String text = outsideQuotes(expression);
+    int depth = 0;
+    for (char c : text.toCharArray()) {
+      if (c == '(') depth++;
+      if (c == ')' && --depth < 0) break;
+    }
+    if (depth != 0 || text.contains("--") || text.contains("/*") || text.contains(";")) {
+      throw new IllegalArgumentException("set " + column + ": one SQL expression, without comments, ';' or unbalanced "
+          + "parentheses, not: " + expression);
+    }
+  }
+
   /* Leading comments removed, then it must start with SELECT, VALUES or WITH and be one statement */
   static String checkReadOnly(String sql) {
     String text = sql.trim();
@@ -105,7 +168,7 @@ final class SqlTools {
   }
 
   /* The statement with string literals and quoted names blanked, to look for ';' */
-  private static String outsideQuotes(String sql) {
+  static String outsideQuotes(String sql) {
     StringBuilder out = new StringBuilder();
     char quote = 0;
     for (char c : sql.toCharArray()) {
@@ -155,6 +218,7 @@ final class SqlTools {
     int cap = rowCap > 0 ? Math.min(rowCap, MAX_ROWS) : MAX_ROWS;
     int rows = Math.max(1, Math.min(maxRows <= 0 ? Math.min(DEFAULT_ROWS, cap) : maxRows, cap));
     int columns = Math.max(1, maxColumns <= 0 ? DEFAULT_COLUMNS : maxColumns);
+    checkWithDb2(readOnly, statement);
     ObjectNode result = mapper.createObjectNode();
     try (Statement stmt = readOnly.createStatement()) {
       stmt.setMaxRows(rows + 1);  // one more tells whether there were more
@@ -227,6 +291,7 @@ final class SqlTools {
     for (java.util.Map.Entry<String, String> e : set.entrySet()) {
       String col = e.getKey().trim().toUpperCase(Locale.ROOT);
       if (!labels.contains(col)) throw new IllegalArgumentException("set: the query has no column " + col + " (it has " + labels + ")");
+      checkExpression(col, e.getValue());
       replace.put(col, e.getValue());
     }
     List<String> unmasked = new ArrayList<String>();
@@ -244,6 +309,7 @@ final class SqlTools {
       statement = checkReadOnly("SELECT " + String.join(", ", select) + " FROM (" + statement + ") AS MC_ROW");
     }
 
+    checkWithDb2(readOnly, statement);  // the final one, with the set expressions in it
     ObjectNode result = mapper.createObjectNode();
     result.put("statement", statement);
     java.util.Map<String, String> generated = inserts ? generatedColumns(readOnly, sql, result)
@@ -691,6 +757,7 @@ final class SqlTools {
     for (java.util.Map.Entry<String, String> e : set.entrySet()) {
       String col = e.getKey().trim().toUpperCase(Locale.ROOT);
       if (!columns.contains(col)) throw new IllegalArgumentException("set: " + lib + "/" + name + " has no column " + col);
+      checkExpression(col, e.getValue());
       replace.put(col, e.getValue());
     }
     List<String> unmasked = new ArrayList<String>();
@@ -704,7 +771,7 @@ final class SqlTools {
     String statement = "SELECT " + String.join(", ", select) + " FROM " + lib + "/" + name
         + (where != null && !where.trim().isEmpty() ? " WHERE " + where : "");
     checkReadOnly(statement);
-    checkLibraries(statement, allowed);
+    new SqlTools(rowCap, mask, allowed).checkWithDb2(connection, statement);
 
     int cap = Math.max(1, Math.min(maxRows > 0 ? maxRows : MAX_ROWS, rowCap > 0 ? rowCap : MAX_ROWS));
     ObjectNode result = mapper.createObjectNode();
