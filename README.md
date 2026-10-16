@@ -26,7 +26,7 @@ YAML-based, sensible, open-source, modern, clean, and elegant approach to automa
 > **Agents: read it at the latest release, not from `master`.** `raw.githubusercontent.com/.../master/...` can serve
 > a cached, older copy for several minutes. Get the release tag, then fetch the guide (and the demo files) at that tag,
 > which matches the jar you download:
-> 1. `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` → `tag_name` (e.g. `v0.3.4`)
+> 1. `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` → `tag_name` (use it as it comes; do not reuse a version written in this text)
 > 2. `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`
 
 ---
@@ -58,7 +58,8 @@ Runs anywhere Java 8+ is installed, including PASE on the IBM i. Every release i
 
 Build official [TOBi recursive](https://github.com/IBM/tobi-example) example on real hardware on any server with zero proprietary tools, zero licensing and zero cost as showcase.
 
-Create a `.env` file like this
+Only for a person running the integration tests by hand: an agent in VS Code never creates this file
+and never asks for the password. Create a `.env` file like this
 
 ```bash
 IBMI_HOSTNAME=BIGIRON.COM

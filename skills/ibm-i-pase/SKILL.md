@@ -14,7 +14,8 @@ description: >-
 SSH into an IBM i lands in **PASE**, an AIX-compatible Unix environment. Native
 objects (libraries, programs, files, jobs) are reached from there with bridges:
 `system` for CL, `qsh -c 'db2 ...'` for SQL, and `/QSYS.LIB/...` paths for objects.
-Agents should use this path, not a 5250 green screen.
+Use this path for CL and SQL from a shell. For a display file program (a screen), use
+MasterCompiler's `screen_open` / `screen_send` tools instead.
 
 | Layer | What it is | Agent access |
 |-------|------------|--------------|

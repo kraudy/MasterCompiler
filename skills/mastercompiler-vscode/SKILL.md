@@ -81,6 +81,10 @@ system-wide without asking.
 One zip with `MasterCompiler.jar` and a Java runtime made for it (`runtime\`), unpacked to
 `%USERPROFILE%\tools\MasterCompiler`, outside the repository:
 
+If the `mastercompiler` server is running, stop it first (Command Palette → **MCP: List Servers** →
+`mastercompiler` → **Stop**): Windows keeps the jar and `runtime\bin\java.exe` open and the folder
+cannot be replaced.
+
 ```powershell
 # Windows PowerShell 5.1 needs TLS 1.2; hiding the progress bar makes the download much faster
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -90,12 +94,13 @@ $tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/M
 Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/kraudy/MasterCompiler/releases/download/$tag/MasterCompiler-windows-x64.zip" -OutFile "$env:TEMP\MasterCompiler-windows-x64.zip"
 if (Test-Path "$env:USERPROFILE\tools\MasterCompiler") { Remove-Item -Recurse -Force "$env:USERPROFILE\tools\MasterCompiler" }
 Expand-Archive "$env:TEMP\MasterCompiler-windows-x64.zip" -DestinationPath "$env:USERPROFILE\tools"
-& "$env:USERPROFILE\tools\MasterCompiler\runtime\bin\java.exe" -jar "$env:USERPROFILE\tools\MasterCompiler\MasterCompiler.jar" --version
+$java = "$env:USERPROFILE\tools\MasterCompiler\runtime\bin\java.exe"
+$jar = "$env:USERPROFILE\tools\MasterCompiler\MasterCompiler.jar"
+& $java -jar $jar --version
 ```
 
-The last line must print `MasterCompiler <tag>` with the tag from above. With this download, every
-`java -jar "$env:USERPROFILE\tools\MasterCompiler.jar"` below is
-`& "$env:USERPROFILE\tools\MasterCompiler\runtime\bin\java.exe" -jar "$env:USERPROFILE\tools\MasterCompiler\MasterCompiler.jar"`.
+The last line must print `MasterCompiler <tag>` with the tag from above. Every command below runs
+MC as `& $java -jar $jar`; in a new terminal, set `$java` and `$jar` again (the two lines above).
 Setup writes that Java into `mcp.json` by itself (the preview shows it as "Java for the server").
 Releases before v0.3.15 have no zip: use the jar below.
 
@@ -117,17 +122,20 @@ exactly that tag.
 
 macOS / Linux: `curl -L -o ~/tools/MasterCompiler.jar <same URL>`.
 
-Check the version:
+Check the version, and set `$java` (the `java` from step 1, its full path when it is not on PATH)
+and `$jar` for the commands below:
 
 ```powershell
-java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version
+$java = "java"
+$jar = "$env:USERPROFILE\tools\MasterCompiler.jar"
+& $java -jar $jar --version
 ```
 
 It must print `MasterCompiler <tag>` with the tag from above (v0.3.15 or newer).
 An error (`Unknown option: --version`) means a very old jar.
 
-Always look up the tag again and run the download above, even when `MasterCompiler.jar` is
-already there: the URL is fixed to that tag, so a new release only arrives through a new lookup.
+Always look up the tag again and run the download above (with the server stopped), even when
+`MasterCompiler.jar` is already there: the URL is fixed to that tag, so a new release only arrives through a new lookup.
 Replacing the file is how MC is updated (the `mcp.json` entry points at this path, so nothing
 else changes; restart the `mastercompiler` server afterwards).
 
@@ -191,7 +199,7 @@ to list them, show the list, and only after the user agrees call it again with `
 the same `--next-file` / `--connection` options). From the repository root; it writes nothing:
 
 ```powershell
-java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --print
+& $java -jar $jar --setup-vscode --project . --print
 ```
 
 Show the user the preview and get their OK. It lists, per Code for IBM i connection, the
@@ -211,8 +219,9 @@ host and user.
 
 **SSH or host servers.** By default the server reaches the IBM i over SSH, the port Code for
 IBM i already uses: MC uploads itself and the sources and runs on the IBM i. It logs in with the
-user's SSH key (`~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`, or the Code for IBM i connection's key)
-or the password (empty when a key is used). The first start uploads MC (about 10 MB), so it takes
+Code for IBM i connection's SSH key, or with the password. When a password is typed and the
+connection has no key of its own, MC does not try the keys in `~/.ssh` (each would count as a failed
+sign-on); to sign on with one of those keys, leave the password prompt empty. The first start uploads MC (about 10 MB), so it takes
 longer. `--host-servers` makes MC run on the PC and connect through the host servers instead
 (ports 449, 8470–8476, like ACS).
 
@@ -237,11 +246,13 @@ Tell the user:
    starting the server again.
 3. Back in Copilot Chat (Agent mode), MC's tools are available.
 
-After any authentication error, do not call another MC tool on that connection and do not retry:
-ask the user to reset the cached inputs and restart the server (Troubleshooting below).
-
 Then check it works: call `plan` without arguments. A list of targets means MC reached the
 IBM i and understood the project.
+
+After an authentication error (from `plan` or any tool), do not call another MC tool on that
+connection, `plan` included, and do not retry: ask the user whether they want to type the password
+again and give them the steps in "Re-enter the passwords" below. For `CPF22E3` / `CPF22E4` the
+security administrator comes first (Troubleshooting).
 
 For SQL (table columns, data, the catalog), use MC's read-only `sql` tool; `find_object` tells
 which library an object resolves to.
@@ -310,7 +321,7 @@ This only changes what VS Code passes to MC. The IBM i password itself is change
   "inputs": [
     { "id": "ibmiConnection", "type": "pickString", "description": "Code for IBM i connection to build on",
       "options": ["CONNECTION 1", "CONNECTION 2"], "default": "CONNECTION 1" },
-    { "id": "ibmiPassword", "type": "promptString", "description": "IBM i password", "password": true }
+    { "id": "ibmiPassword", "type": "promptString", "description": "IBM i password. If your password changed, run \"MCP: Reset Cached Inputs\" first: MasterCompiler does not sign on again with a password IBM i rejected", "password": true }
   ],
   "servers": {
     "mastercompiler": {
@@ -373,7 +384,7 @@ save it as a personal skill, so future chats in any repository already know it. 
 OK, run:
 
 ```powershell
-java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --install-skills
+& $java -jar $jar --install-skills
 ```
 
 It copies MC's skills (this setup guide, the build loop, IBM i over SSH) into

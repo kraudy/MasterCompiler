@@ -3,6 +3,20 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.18
+
+Agent instructions, from a review of what agents read
+- In VS Code, MC's tools only: never a `.env`, the jar in a terminal, or the password in the chat. Queries go
+  through `sql`, not the Db2 for IBM i extension (it signs on outside MC's guard).
+- Before the first `build` of a session, `status` and `plan` with the user; tools that write only with `confirm`
+  after the user agreed (also in the server's own instructions).
+- After an authentication error no tool on that connection, `plan` included: ask, then the re-enter steps.
+- Setup guide: `$java` / `$jar` set once (the Windows zip's paths), stop the server before replacing MC, the SSH
+  key rule (with a password typed, keys in `~/.ssh` are not tried), the manual template's password prompt text.
+- `maskColumns` and personal data: never another way around the mask; replace in `set` before `confirm`.
+- 5250 only for display files; `sql` limits with and without `format`; `keepGoing` differs from the command line.
+- `docs/Copilot.md` matches the guide (the zip, SSH by default, `import_source` instead of `--import`).
+
 ## v0.3.17
 
 - `sql` `format: "inserts"`: columns Db2 generates in the query's table (`HAS_DEFAULT` in `QSYS2.SYSCOLUMNS2`:

@@ -25,6 +25,11 @@ build is a real build. For shell access to the IBM i itself see the
 | **Remote** (laptop, CI, container) | JT400 host servers | `.env` with `IBMI_HOSTNAME`, `IBMI_USERNAME`, `IBMI_PASSWORD` in the working directory |
 | **Offline** (`--generate-only`) | none | Nothing; scan and spec writing only |
 
+**In VS Code, with the `mastercompiler` MCP server, use its tools** (`build`, `plan`, `sql`, ...): the
+server already has the password from VS Code's prompt. Do not run the jar from a terminal for that
+work, never create a `.env`, and never ask for the password in the chat, a terminal or a file. A `.env`
+is something a person sets up for command-line or CI use.
+
 Get the jar from the latest release,
 `https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
 (`curl -LO` works in PASE too), or build it with `./mvnw clean package`
@@ -235,7 +240,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 
 | Tool | Arguments | Returns |
 |------|-----------|---------|
-| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true`), `minSeverity` (default 20) | The build report above, compacted: `summary` per target first, messages below `minSeverity` and duplicates dropped, joblog severity 30+ in `errors`; `warnings` (e.g. two sources for one object); `isError` when the build failed |
+| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true` in this tool; the command line stops at the first failure unless `-k`), `minSeverity` (default 20) | The build report above, compacted: `summary` per target first, messages below `minSeverity` and duplicates dropped, joblog severity 30+ in `errors`; `warnings` (e.g. two sources for one object); `isError` when the build failed |
 | `plan` | same as `build` | The report with `planned` targets; compiles nothing |
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
@@ -272,7 +277,9 @@ connections:
 - `sql`, `find_object` and `find_source` take `connection: SYS2` to read that system instead. Only
   its `libraries` (and the catalogs `QSYS2`, `SYSIBM`, ...) are read; the JDBC connection is read
   only. `build`, `call_program`, `clean` and `import_source` never run there. `maskColumns`
-  hides those values in `sql` results (best effort: a column inside an expression is not masked).
+  hides those values in `sql` results. Do not ask for a masked column another way (inside an
+  expression, renamed, or through another query): to take its rows elsewhere, replace it in `set`.
+  Never copy its values into the chat or the repository.
 - `compare` with `object` shows the object on both systems: whether the other system runs the
   source you changed (same source member and recorded source change timestamp per module).
 - `copy_rows` reads rows there (`from`, `where`) and inserts them into a table of the current library on
@@ -281,8 +288,9 @@ connections:
   strings), so replaced values never leave it; `maskColumns` must be replaced. `deleteWhere` clears
   those rows in the target first, so copying again gives the same rows. Never into a `protectedLibs`
   library or outside the current library. More rows than `maxRows` fail instead of copying part.
-  Preview first, then `confirm: true`; confirmed copies are logged in `.mc/copies.log`. When the
-  other system holds personal data, the user's company rules may require replacing it.
+  Preview first, then `confirm: true`; confirmed copies are logged in `.mc/copies.log`. Replace personal or
+  company data columns in `set` before `confirm`: without that `set`, do not confirm the copy, and never
+  bring those values into the chat or the repository.
 - MC opens a read-only connection on first use. Its password comes from its own VS Code password
   prompt (`--setup-vscode` adds one per read-only connection in the spec); never ask for it in chat.
 
@@ -366,7 +374,8 @@ parameter of its full length: build the string with the fields at their position
 
 ### Green screens (5250)
 
-To check a display file program the way a user sees it, open a 5250 session:
+Only for a display file program. Rows and the catalog: `sql`. A program's logic: `call_program`.
+Do not open a 5250 session for those. To check a display file program the way a user sees it:
 
 1. `screen_open` without `confirm`, show the user what it opens, then `confirm: true`. MC signs on
    itself with the build connection's password: never ask for it, and if the sign-on fails, follow
@@ -398,9 +407,18 @@ around that. Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.SYSTABLES`, `QSYS2
 `find_object NAME *TYPE` lists every library holding an object, the one the library list resolves to
 (`resolvesTo`) and your authority to each: check it before relying on an unqualified name.
 
-The Db2 for IBM i VS Code extension (`#result`, `@db2i`) works too when it is installed.
+Queries go through MC's `sql` tool. Do not use the Db2 for IBM i extension's tools or `db2` over
+SSH for this work: they sign on separately, outside MC's sign-on guard, and a rejected password there
+counts toward disabling the profile (`QMAXSIGN`) too.
 
 ## Edit–compile–fix loop
+
+With the MCP server: edit, then `build` with `files` (or `since`), read each failed target's errors,
+fix, repeat. Before the first `build` of a session, call `status` and `plan` and show the user the
+current library and the targets; build only once they agree. A build never writes to a
+`protectedLibs` library.
+
+From the command line (a person's terminal or CI, with `.env`):
 
 1. Edit sources in a local checkout.
 2. Build with the sources where the IBM i compiles from:

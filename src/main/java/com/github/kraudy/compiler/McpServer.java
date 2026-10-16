@@ -172,7 +172,11 @@ public class McpServer {
         "Builds IBM i objects from the MasterCompiler spec " + specName() + ". " +
         "Call plan to see what would compile, build to compile (errors come back with file, line, " +
         "column, message id and severity; severity 20 and up stop a compile), impact to see what " +
-        "depends on an object, and joblog for the IBM i job's recent messages." + pendingRequest());
+        "depends on an object, and joblog for the IBM i job's recent messages. Before the first build of a session, " +
+        "call status and plan and show the user the current library and the targets; build once they agree. Tools that " +
+        "write (clean, call_program, copy_rows, screen_open) first show a preview: call them with confirm: true only " +
+        "after the user agreed. The IBM i password is typed only in VS Code's prompt, never in the chat; after an " +
+        "authentication error, do not retry: follow the error's steps." + pendingRequest());
     return result;
   }
 
@@ -267,7 +271,8 @@ public class McpServer {
     sqlProps.putObject("statement").put("type", "string")
         .put("description", "One SELECT, VALUES or WITH query. Unqualified names resolve through the spec's library list");
     sqlProps.putObject("maxRows").put("type", "integer")
-        .put("description", "Rows to return (default " + SqlTools.DEFAULT_ROWS + ", at most " + SqlTools.MAX_ROWS + ")");
+        .put("description", "Rows to return. Without format: default " + SqlTools.DEFAULT_ROWS + ", at most " + SqlTools.MAX_ROWS
+        + ". With format: at most " + SqlTools.FILE_MAX_ROWS + ". A read-only connection's maxRows caps both");
     sqlProps.putObject("maxColumns").put("type", "integer")
         .put("description", "Columns to return (default " + SqlTools.DEFAULT_COLUMNS + ")");
     ObjectNode format = sqlProps.putObject("format");
@@ -293,8 +298,8 @@ public class McpServer {
     tools.add(tool("sql",
         "Read-only Db2 for i query on the IBM i: table rows, catalog views (QSYS2.SYSCOLUMNS2, SYSTABLES, "
         + "OBJECT_STATISTICS, PROGRAM_INFO, ...). The connection is opened read only, so only SELECT / VALUES / WITH "
-        + "run; it has the spec's library list (system naming: LIB/TABLE or LIB.TABLE). Long values are cut at "
-        + SqlTools.MAX_VALUE_CHARS + " characters.",
+        + "run; it has the spec's library list (system naming: LIB/TABLE or LIB.TABLE). Without format, long values are "
+        + "cut at " + SqlTools.MAX_VALUE_CHARS + " characters; with format, the file has every column and exact values.",
         sqlSchema));
 
     ObjectNode findObj = mapper.createObjectNode();

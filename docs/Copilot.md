@@ -44,25 +44,19 @@ then start the server and type your password; nobody types the steps below by ha
 
 ## Setup by hand (once per repository)
 
-1. Java 8 or newer on the PC. A portable JDK zip works without admin rights.
-2. Download the jar (Windows PowerShell 5.1 included):
+1. Download MC at the latest release tag, as in step 2 of the
+   [setup guide](../skills/mastercompiler-vscode/SKILL.md): on 64-bit Windows the zip
+   `MasterCompiler-windows-x64.zip`, which brings its own Java (`runtime\`); elsewhere `MasterCompiler.jar` and a Java 8
+   or newer. Check that `--version` prints that tag. The commands below use `$java` and `$jar` as set there.
+2. In the repository root, preview what setup would do (it writes nothing):
    ```powershell
-   # Windows PowerShell 5.1 needs TLS 1.2; hiding the progress bar makes the download much faster
-   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-   $ProgressPreference = 'SilentlyContinue'
-   New-Item -ItemType Directory -Force "$env:USERPROFILE\tools" | Out-Null
-   Invoke-WebRequest -UseBasicParsing -Uri https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar -OutFile "$env:USERPROFILE\tools\MasterCompiler.jar"
-   ```
-   `java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --version` must print `v0.3.0` or newer.
-3. In the repository root, preview what setup would do (it writes nothing):
-   ```powershell
-   java -jar "$env:USERPROFILE\tools\MasterCompiler.jar" --setup-vscode --project . --print
+   & $java -jar $jar --setup-vscode --project . --print
    ```
    Check, for each Code for IBM i connection, the library objects go into (builds replace objects there) and the
    IBM i folder sources go to. Then run it without `--print`: it adds the `mastercompiler` server to
    `.vscode/mcp.json` (other servers are kept; a file with comments is left alone and the entry to paste is printed)
    and installs MC's agent skills into `.github/skills/`.
-4. In VS Code: Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, pick the connection when you
+3. In VS Code: Command Palette → **MCP: List Servers** → `mastercompiler` → **Start**, pick the connection when you
    have several, and enter the IBM i password in the box VS Code shows (the only place to type it).
 
 Or ask Copilot: *"set up MasterCompiler for this repository"*. The `mastercompiler-vscode` skill tells it how, and
@@ -72,9 +66,10 @@ what to ask you when it cannot do a step itself. To make that skill available be
 ## SSH or host servers
 
 MC reaches the IBM i over SSH, the same port Code for IBM i uses: it uploads itself (once per version, to
-`<home>/mc/.mc/`) and the project's changed sources, and runs on the IBM i as your own job. It logs in with your SSH
-key (`%USERPROFILE%\.ssh\id_ed25519`, `id_ecdsa` or `id_rsa`, or the key of the Code for IBM i connection) or the
-password you enter when the server starts (leave it empty when you use a key). The first start uploads MC itself
+`<home>/mc/.mc/`) and the project's changed sources, and runs on the IBM i as your own job. It logs in with the
+Code for IBM i connection's SSH key, or with the password you enter when the server starts. When you type a password
+and the connection has no key of its own, MC does not try the keys in `%USERPROFILE%\.ssh` (each would count as a
+failed sign-on); to use one of them, leave the password empty. The first start uploads MC itself
 (about 10 MB); later starts only send changed sources.
 
 If your network allows the host servers (ports 449, 8470–8476, the ones ACS uses) and you prefer them, set up with
@@ -92,8 +87,9 @@ If your network allows the host servers (ports 449, 8470–8476, the ones ACS us
 | `find_source` | Where programs, service programs and files the project only uses were compiled from, with their copybooks. |
 | `import_source` | Copy those sources into `.mc/sources/` to read them (or into the project, to change them). |
 
-For SQL queries (table columns, data, catalog), Copilot uses the **Db2 for IBM i** extension's "Run SQL
-statement" tool over the same Code for IBM i connection.
+For SQL queries (table columns, data, catalog), Copilot uses MC's read-only `sql` tool. Not the Db2 for IBM i
+extension's tools: they sign on separately, outside MC's sign-on guard, and a rejected password there also counts
+toward disabling the profile.
 
 The server runs with `--project ${workspaceFolder}`: a `build.yaml` is used when present, a TOBi / Bob project
 (`Rules.mk`) is converted, anything else is scanned.
@@ -107,6 +103,7 @@ The server runs with `--project ${workspaceFolder}`: a `build.yaml` is used when
 ## Requirements to check
 
 - Your organization's Copilot policy must allow MCP servers in VS Code.
-- The PC must reach the IBM i host servers (as ACS does).
-- The sources must be in a git repository. If they are still in source members,
-  `java -jar MasterCompiler.jar --import MYLIB -o <folder>` exports them with MC's naming and a `build.yaml`.
+- The PC reaches the IBM i over SSH, as Code for IBM i does. The host servers (ports 449, 8470–8476) are needed
+  only when setup used `--host-servers`.
+- The sources must be in a git repository. If they are still in source members, ask Copilot to bring them in with
+  MC's `import_source` tool (`into: "repo"`). Do not run `--import` in a terminal: it asks for the password there.
