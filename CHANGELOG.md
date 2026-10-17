@@ -3,6 +3,14 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.23
+
+- `debug_program`: run a program like `call_program` with breakpoints on source lines; at each stop MC reads the
+  variables you name (data structures subfield by subfield) and the program goes on by itself. The answer lists every
+  stop with its line, hit and values. Same preview and refusals as `call_program`; a breakpoint inside a loop stops at
+  most `maxHits` times. The first run creates MC's helper program MCDBG (C, IBM i source debugger APIs) in the current
+  library; refused when that library is in `protectedLibs`. A call that times out loses its stops.
+
 ## v0.3.22
 
 From a team's feedback on deploying and testing with MC

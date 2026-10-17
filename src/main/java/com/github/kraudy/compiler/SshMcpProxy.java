@@ -460,7 +460,7 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
-      if ((tool.equals("call_program") || tool.equals("find_export") || tool.equals("import_source") || tool.equals("build")
+      if ((tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export") || tool.equals("import_source") || tool.equals("build")
           || tool.equals("plan") || tool.equals("impact")) && remoteBuildRunning()) {
         sendToolError(line, "Build " + remoteBuild + " is running on the IBM i (or did not say within 60 s that it ended): "
             + tool + " would upload the sources under it. Follow it with build_status, see what the job does with "
@@ -471,7 +471,7 @@ public class SshMcpProxy {
         pendingResults.put(request.path("id").toString(), request.path("params").path("arguments"));  // the file is written here
         return line;
       }
-      if (tool.equals("call_program") || tool.equals("find_export")) {
+      if (tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export")) {
         sync(projectFiles(), true);  // they read the sources in the IBM i copy
         return line;
       }

@@ -68,8 +68,23 @@ final class ProgramCaller {
     return (int) n;
   }
 
+  /* Steps around the program, in its job (debug_program: start debug before, collect the stops after) */
+  /* in the result after() gets when the call timed out and its job was ended */
+  static final String JOB_ENDED = "jobEnded";
+
+  /* before() runs in the call's job before it, after() always runs once it is over (failed and timed out too) */
+  interface Around {
+    void before() throws Exception;
+    void after(ObjectNode result) throws Exception;
+  }
+
   static ObjectNode call(AS400 system, String library, String program, JsonNode parameters, List<String> libraryList,
       String currentLibrary) throws Exception {
+    return call(system, library, program, parameters, libraryList, currentLibrary, null);
+  }
+
+  static ObjectNode call(AS400 system, String library, String program, JsonNode parameters, List<String> libraryList,
+      String currentLibrary, Around around) throws Exception {
     ObjectMapper mapper = new ObjectMapper();
     AS400DataType[] types = new AS400DataType[parameters.size()];
     ProgramParameter[] params = new ProgramParameter[parameters.size()];
@@ -94,12 +109,17 @@ final class ProgramCaller {
     result.put("program", library + "/" + program);
     long start = System.currentTimeMillis();
     try {
+      if (around != null) {
+        around.before();
+        start = System.currentTimeMillis();
+      }
       Future<Boolean> ran = runner.submit((java.util.concurrent.Callable<Boolean>) call::run);
       boolean ok;
       try {
         ok = ran.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
       } catch (TimeoutException e) {
         system.disconnectService(AS400.COMMAND);  // ends the job the program hangs in
+        result.put(JOB_ENDED, true);
         throw new IllegalStateException("The call did not end in " + TIMEOUT_SECONDS + " s: its job was ended "
             + "(waiting for a record lock, a message reply or an endless loop?)");
       }
@@ -118,6 +138,7 @@ final class ProgramCaller {
       }
     } finally {
       runner.shutdownNow();
+      if (around != null) around.after(result);
     }
     return result;
   }

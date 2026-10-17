@@ -220,7 +220,7 @@ public class McpServer {
         "it with cancel (after the user agreed). Before a call that can take long, say what it runs and about how long. " +
         "Call joblog for the IBM i job's recent messages. Before the first build of a session, " +
         "call status and plan and show the user the current library and the targets; build once they agree. Tools that " +
-        "write or stop (clean, call_program, run_command, copy_rows, upload_file, screen_open, cancel) first show a preview: call them with confirm: true only " +
+        "write or stop (clean, call_program, debug_program, run_command, copy_rows, upload_file, screen_open, cancel) first show a preview: call them with confirm: true only " +
         "after the user agreed. The IBM i password is typed only in VS Code's prompt, never in the chat; after an " +
         "authentication error, do not retry: follow the error's steps." + pendingRequest());
     return result;
@@ -458,6 +458,31 @@ public class McpServer {
         + "write to a file in a protectedLibs library (or when it writes files and the spec sets no protectedLibs). First "
         + "call without confirm and show the user what it would do; call again with confirm: true only if they agree.",
         callSchema));
+
+    ObjectNode debugSchema = callSchema.deepCopy();
+    ObjectNode debugProps = (ObjectNode) debugSchema.get("properties");
+    ObjectNode breakpoints = debugProps.putObject("breakpoints");
+    breakpoints.put("type", "array");
+    breakpoints.put("description", "Up to " + ProgramDebugger.MAX_BREAKS + " lines of the program's source file to stop at: "
+        + "[12, 40], or [{\"line\": 12, \"module\": \"MOD1\"}] for a program of several modules. A line without a "
+        + "statement (blank, comment) is reported as not set");
+    ObjectNode debugVars = debugProps.putObject("variables");
+    debugVars.put("type", "array");
+    debugVars.putObject("items").put("type", "string");
+    debugVars.put("description", "Up to " + ProgramDebugger.MAX_VARS + " variable names to show at each stop (DS.SUBFIELD and "
+        + "ARR(3) too; a data structure shows each subfield)");
+    debugProps.putObject("maxHits").put("type", "integer").put("description",
+        "Stops per breakpoint (default 10, up to 50); after that the program runs on without stopping there");
+    debugSchema.withArray("required").add("breakpoints").add("variables");
+    tools.add(tool("debug_program",
+        "Run a program this project builds like call_program, stopping at source lines: at each stop the variables are read "
+        + "and the program goes on by itself; returns call_program's answer plus stops [{module, line, hit, variables}]. "
+        + "Same refusals and preview as call_program; display file programs are refused (debug those with STRDBG in "
+        + "screen_open). The program needs a debug view (DBGVIEW *SOURCE or *ALL, MC's default). The values are the "
+        + "program's memory, production data too. First call without confirm and show the user; confirm: true only if "
+        + "they agree. The first run creates the helper program MCDBG in the current library (refused when it is in "
+        + "protectedLibs). A call that times out ends its job and loses its stops.",
+        debugSchema));
 
     ObjectNode spoolSchema = mapper.createObjectNode();
     spoolSchema.put("type", "object");
@@ -712,7 +737,7 @@ public class McpServer {
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
     boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows")
-        || name.equals("upload_file") || name.equals("cancel") || name.equals("run_command")
+        || name.equals("upload_file") || name.equals("cancel") || name.equals("run_command") || name.equals("debug_program")
         || name.equals("screen_open") || name.equals("screen_send");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
@@ -819,7 +844,8 @@ public class McpServer {
         case "find_object":   return findObject(args);
         case "find_export":   return findExport(args);
         case "status":        return status();
-        case "call_program":  return callProgram(args);
+        case "call_program":  return callProgram(args, false);
+        case "debug_program": return callProgram(args, true);
         case "import_source": return importSource(args);
         case "spool":         return spool(args);
         case "upload_file":   return uploadFile(args);
@@ -1400,7 +1426,8 @@ public class McpServer {
     }
   }
 
-  private ObjectNode callProgram(JsonNode args) throws Exception {
+  private ObjectNode callProgram(JsonNode args, boolean debug) throws Exception {
+    String tool = debug ? "debug_program" : "call_program";
     String requested = args.path("program").asText("").trim().toUpperCase();
     if (requested.isEmpty()) return toolResult("Give the 'program'", true);
     connectWithLibraryList();
@@ -1408,7 +1435,7 @@ public class McpServer {
     String library = requested.contains("/") ? requested.substring(0, requested.indexOf('/')) : curlib;
     String program = requested.substring(requested.indexOf('/') + 1);
     if (!library.equalsIgnoreCase(curlib)) {
-      return toolResult("call_program runs only programs in the current library (" + curlib + "), not " + library + ".", true);
+      return toolResult(tool + " runs only programs in the current library (" + curlib + "), not " + library + ".", true);
     }
 
     /* A program the project builds, so its source can be checked */
@@ -1418,7 +1445,7 @@ public class McpServer {
       if (key.getObjectName().equalsIgnoreCase(program) && key.getObjectTypeEnum() == CompilationPattern.ObjectType.PGM) target = key;
     }
     if (target == null || !target.containsStreamFile()) {
-      return toolResult(program + " is not a program this project builds from a source file: call_program only runs those "
+      return toolResult(program + " is not a program this project builds from a source file: " + tool + " only runs those "
           + "(their source is checked for writes to protected libraries first).", true);
     }
     File source = new File(target.getStreamFile());
@@ -1448,6 +1475,30 @@ public class McpServer {
     }
     /* Database writes are checked; other effects (jobs, the IFS, commands run by text) are only listed */
     List<String> sourceLines = java.nio.file.Files.readAllLines(source.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+    String debugLines = null;
+    List<String> debugVariables = null;
+    int maxHits = Math.max(1, Math.min(args.path("maxHits").asInt(10), 50));
+    if (debug) {
+      if (spec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(curlib))) {
+        return toolResult("Refused: debug_program creates its helper " + ProgramDebugger.HELPER + " in the current library "
+            + curlib + ", which is in protectedLibs.", true);
+      }
+      if (ProgramDebugger.usesDisplay(sourceLines)) {
+        return toolResult(program + " uses a display file: at a screen it waits for a key, so it cannot be debugged without "
+            + "a terminal. Use screen_open (STRDBG in that session).", true);
+      }
+      try {
+        debugLines = ProgramDebugger.lines(args.path("breakpoints"));
+        debugVariables = ProgramDebugger.variables(args.path("variables"));
+      } catch (IllegalArgumentException e) {
+        return toolResult(e.getMessage(), true);
+      }
+      result.put("breakpoints", debugLines);
+      result.set("variables", mapper.valueToTree(debugVariables));
+      result.put("maxHits", maxHits);
+      result.put("debugNote", ProgramDebugger.note() + " The debug helper " + ProgramDebugger.HELPER + " is created in "
+          + curlib + " the first time.");
+    }
     ArrayNode effects = result.putArray("otherEffects");
     for (String effect : FileWrites.otherEffects(sourceLines)) effects.add(effect);
     result.put("notChecked", "Only database file writes are checked against protectedLibs. otherEffects lists what the "
@@ -1480,8 +1531,15 @@ public class McpServer {
       result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
       return toolResult(pretty.writeValueAsString(result), false);
     }
+    ProgramCaller.Around around = null;
+    if (debug) {
+      String helper = ProgramDebugger.ensureHelper(system, connection, curlib);
+      around = ProgramDebugger.around(system, curlib, program, debugLines, debugVariables, maxHits);
+      result.put("debugHelper", helper);
+    }
     ObjectNode ran = ProgramCaller.call(system, curlib, program, args.path("parameters").isArray()
-        ? args.path("parameters") : mapper.createArrayNode(), SqlTools.libraryList(connection), curlib);
+        ? args.path("parameters") : mapper.createArrayNode(), SqlTools.libraryList(connection), curlib, around);
+    if (debug) ran.put("debugHelper", result.path("debugHelper").asText());
     ran.set("writes", writes);
     ran.set("otherEffects", effects);
     if (!checks.isEmpty()) {
