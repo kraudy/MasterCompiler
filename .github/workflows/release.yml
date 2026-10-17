@@ -71,8 +71,8 @@ jobs:
       - name: Build the runtime and the zip
         shell: pwsh
         run: |
-          # jdeps on the classes, plus what is loaded by name at run time (TLS / SSH EC crypto, charsets, Unsafe, JMX)
-          $modules = 'java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.security.jgss,java.sql,java.transaction.xa,java.xml,jdk.charsets,jdk.crypto.ec,jdk.unsupported'
+          # jdeps on the classes, plus what is loaded by name at run time (TLS / SSH EC crypto, the Windows certificate store, charsets, Unsafe, JMX)
+          $modules = 'java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.security.jgss,java.sql,java.transaction.xa,java.xml,jdk.charsets,jdk.crypto.ec,jdk.crypto.mscapi,jdk.unsupported'
           New-Item -ItemType Directory -Force MasterCompiler | Out-Null
           jlink --add-modules $modules --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output MasterCompiler/runtime
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -80,6 +80,9 @@ jobs:
           $version = & MasterCompiler/runtime/bin/java.exe -jar MasterCompiler/MasterCompiler.jar --version
           Write-Output $version
           if ($version -ne "MasterCompiler $env:GITHUB_REF_NAME") { Write-Error "Unexpected version: $version"; exit 1 }
+          # screen_open trusts the Windows certificate store: the runtime must have its provider
+          $mods = & MasterCompiler/runtime/bin/java.exe --list-modules
+          if (-not ($mods -match 'jdk.crypto.mscapi')) { Write-Error "The runtime has no jdk.crypto.mscapi"; exit 1 }
           Compress-Archive -Path MasterCompiler -DestinationPath MasterCompiler-windows-x64.zip
 
       - name: Add it to the release

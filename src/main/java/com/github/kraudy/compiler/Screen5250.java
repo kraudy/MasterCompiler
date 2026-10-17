@@ -13,7 +13,6 @@ import java.util.Locale;
 import java.util.TreeMap;
 
 import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -103,11 +102,24 @@ final class Screen5250 implements AutoCloseable {
     plain.connect(new InetSocketAddress(host, port), 15_000);
     Socket socket = plain;
     if (tls) {
-      SSLSocket ssl = (SSLSocket) ((SSLSocketFactory) SSLSocketFactory.getDefault()).createSocket(plain, host, port, true);
+      SSLSocket ssl = (SSLSocket) TrustStores.socketFactory().createSocket(plain, host, port, true);
       javax.net.ssl.SSLParameters params = ssl.getSSLParameters();
       params.setEndpointIdentificationAlgorithm("HTTPS");  // the certificate must name the host
       ssl.setSSLParameters(params);
-      ssl.startHandshake();
+      try {
+        ssl.startHandshake();
+      } catch (javax.net.ssl.SSLHandshakeException e) {
+        plain.close();
+        String why = String.valueOf(e.getMessage());
+        if (why.contains("PKIX") || why.contains("certification path") || why.contains("No subject alternative")
+            || why.contains("No name matching")) {
+          throw new IOException("The IBM i's TLS certificate (" + host + ":" + port + ") is not trusted: " + why + ". MC trusts "
+              + TrustStores.describe() + ". Set MC_TRUSTSTORE (in .vscode/mcp.json's env) to the CA certificate that "
+              + "signed it (.pem / .cer, or a .jks / .p12 with MC_TRUSTSTORE_PASSWORD), or connect with the host name the "
+              + "certificate names", e);
+        }
+        throw e;
+      }
       socket = ssl;
     }
     Screen5250 screen = new Screen5250(socket, ccsid, onScreen);

@@ -58,15 +58,21 @@ public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>
       else for (String id : ignoreNode.asText().split("[,\\s]+")) if (!id.isEmpty()) ignore.add(id);
     }
 
+    /* timeout: 300 (seconds): the hook's job is looked at and stopped when it runs longer */
+    int timeout = 0;
+    JsonNode timeoutNode = objectNode.get("timeout");
+    if (timeoutNode == null) timeoutNode = objectNode.get("Timeout");
+    if (timeoutNode != null) timeout = timeoutSeconds(timeoutNode);
+
     /* Get before or after commands hooks */
     Iterator<Map.Entry<String, JsonNode>> fields = objectNode.fields();
     while (fields.hasNext()) {
       Map.Entry<String, JsonNode> entry = fields.next();
-      if (entry.getKey().equalsIgnoreCase("ignore")) continue;
+      if (entry.getKey().equalsIgnoreCase("ignore") || entry.getKey().equalsIgnoreCase("timeout")) continue;
 
       if (entry.getKey().equalsIgnoreCase("cmd")) {
         if (!entry.getValue().isTextual()) throw new IllegalArgumentException("Cmd takes the CL command as text");
-        paramList.add(CommandObject.raw(entry.getValue().asText()).ignore(ignore));
+        paramList.add(CommandObject.raw(entry.getValue().asText()).ignore(ignore).timeout(timeout));
         continue;
       }
 
@@ -74,10 +80,10 @@ public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>
       try {
         sysCmd = SysCmd.fromString(entry.getKey());
       } catch (IllegalArgumentException unknown) {
-        paramList.add(CommandObject.raw(rawCommand(entry.getKey(), entry.getValue())).ignore(ignore));
+        paramList.add(CommandObject.raw(rawCommand(entry.getKey(), entry.getValue())).ignore(ignore).timeout(timeout));
         continue;
       }
-      CommandObject commandObject = new CommandObject(sysCmd).ignore(ignore);
+      CommandObject commandObject = new CommandObject(sysCmd).ignore(ignore).timeout(timeout);
 
       JsonNode paramsNode = entry.getValue();
       if (!paramsNode.isObject()) {
@@ -94,6 +100,15 @@ public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>
 
       paramList.add(commandObject);
     }
+  }
+
+  /* Seconds, from 300 or "300" */
+  static int timeoutSeconds(JsonNode node) {
+    String text = node.asText("").trim();
+    if (!text.matches("\\d{1,6}") || Integer.parseInt(text) == 0) {
+      throw new IllegalArgumentException("timeout takes the seconds a hook may run, e.g. timeout: 300 (got: " + text + ")");
+    }
+    return Integer.parseInt(text);
   }
 
   /* A command MC does not model, written as param: value: NAME PARAM(value) ... (values as given) */

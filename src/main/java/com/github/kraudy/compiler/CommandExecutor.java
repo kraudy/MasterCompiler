@@ -28,6 +28,19 @@ public class CommandExecutor {
   private final boolean dryRun;
   private final StringBuilder CmdExecutionChain = new StringBuilder();
 
+  /* Live state for build_status / whats_running / cancel, and the watch that stops a hook past its timeout */
+  private BuildProgress progress;
+  private JobWatch watch;
+  private int hookTimeout;  // seconds, for hooks without their own timeout; 0: none
+  private volatile boolean timedOut;  // the last command ran out of time
+  private volatile boolean stopping;  // outOfTime is looking at / stopping the job
+  private static final java.util.concurrent.ScheduledExecutorService timer =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "mc-hook-timeout");
+        t.setDaemon(true);
+        return t;
+      });
+
   public CommandExecutor(Connection connection, boolean debug, boolean verbose, boolean dryRun){
     this.connection = connection;
     this.debug = debug;
@@ -36,6 +49,19 @@ public class CommandExecutor {
 
   }
  
+  public void watch(BuildProgress progress, JobWatch watch, Integer hookTimeout) {
+    this.progress = progress;
+    this.watch = watch;
+    this.hookTimeout = hookTimeout != null ? hookTimeout : 0;
+  }
+
+  /* Hooks that ran out of time: what their job was doing, and how it was stopped */
+  private final List<BuildReport.Timeout> timeouts = new ArrayList<BuildReport.Timeout>();
+
+  public List<BuildReport.Timeout> getTimeouts() {
+    return timeouts;
+  }
+
   public void executeCommand(List<CommandObject> commandList) throws Exception, SQLException{
     for(CommandObject command: commandList){
       executeCommand(command);
@@ -44,6 +70,12 @@ public class CommandExecutor {
 
   /* Executes system commands */
   public void executeCommand(CommandObject command) throws Exception{
+    if (stopped()) {  // after a cancel or an ENDJOB nothing more runs
+      String text = CommandStringParser.toPasteable(command.getCommandStringWithoutSummary());
+      hooksRun.add((progress.jobEnded ? "not run (job ended): " : "not run (cancelled): ") + text);
+      throw new CompilerException(progress.jobEnded ? "The build job was ended: not run: " + text
+          : "Cancelled by the user (" + progress.cancelSteps + "): not run: " + text);
+    }
     Timestamp commandTime = getCurrentTime();
     String commandString = "";
     if (debug) {
@@ -59,27 +91,28 @@ public class CommandExecutor {
     String addedXml = testRun ? RpgUnit.temporaryXml() : null;
     String withXml = testRun ? RpgUnit.withXml(commandString, addedXml) : null;
     if (withXml == null) addedXml = null;
+    int timeout = command.getTimeoutSeconds() > 0 ? command.getTimeoutSeconds() : hookTimeout;
 
     try {
       String removeXml = addedXml;
       try {
-        executeCommand(withXml != null ? withXml : commandString, commandTime, isLibraryListCommand(command));
+        executeCommand(withXml != null ? withXml : commandString, commandTime, isLibraryListCommand(command), "hook", timeout);
       } catch (CompilerException e) {
         /* An RPGUnit without XMLSTMF refuses the keyword (CPD0043) before anything runs: the command as written */
         if (withXml == null || !keywordRefused(commandTime) || testsRan(commandTime)) throw e;
         addedXml = null;
         withXml = null;
-        executeCommand(commandString, getCurrentTime(), false);
+        executeCommand(commandString, getCurrentTime(), false, "hook", timeout);
       } finally {
-        if (testRun) testRuns.add(RpgUnit.result(connection, commandString, RpgUnit.xmlPath(commandString, addedXml),
+        if (testRun && !jobEnded()) testRuns.add(RpgUnit.result(connection, commandString, RpgUnit.xmlPath(commandString, addedXml),
             getJoblogMessages(commandTime)));
-        if (removeXml != null) RpgUnit.remove(connection, removeXml);
+        if (removeXml != null && !jobEnded()) RpgUnit.remove(connection, removeXml);
       }
       hooksRun.add((dryRun && !isLibraryListCommand(command) ? "planned: " : "ok: ") + CommandStringParser.toPasteable(commandString));
     } catch (CompilerException e) {
       /* ignore: [CPF2105, ...] on the hook, like MONMSG */
       String text = e.getFullContext() + " " + (e.getCause() != null ? e.getCause().toString() : "");
-      for (String id : command.getIgnore()) {
+      for (String id : timedOut || stopped() ? new ArrayList<String>() : command.getIgnore()) {
         if (text.contains(id)) {
           logger.info("Ignored {} from: {}", id, CommandStringParser.toPasteable(commandString));
           hooksRun.add("ignored " + id + ": " + CommandStringParser.toPasteable(commandString));
@@ -104,6 +137,7 @@ public class CommandExecutor {
 
   /* Executes targets compilation commands */
   public void executeCommand(TargetKey key) throws Exception{
+    if (stopped()) throw new CompilerException(progress.jobEnded ? "The build job was ended: not compiled" : "Cancelled by the user: not compiled");
     if (key.objectExists()) {
       /* A binding directory is kept as it is (other entries stay); its ADDBNDDIRE hooks still run */
       if (key.getObjectTypeEnum() == ObjectType.BNDDIR && key.isRecreate()) {
@@ -132,9 +166,9 @@ public class CommandExecutor {
 
 
     try {
-      executeCommand(commandString, commandTime);
+      executeCommand(commandString, commandTime, false, "compile", 0);
     } catch (CompilerException e) {
-      if(verbose) logger.info(showCompilationSpool(commandTime));
+      if(verbose && !jobEnded()) logger.info(showCompilationSpool(commandTime));
       throw new CompilerException("Target compilation failed", e, key);
       
     } catch (Exception e) {
@@ -182,10 +216,20 @@ public class CommandExecutor {
 
   /* Executes system commands */
   public void executeCommand(String commandString, Timestamp commandTime) throws CompilerException {
-    executeCommand(commandString, commandTime, false);
+    executeCommand(commandString, commandTime, false, "command", 0);
   }
 
-  private void executeCommand(String commandString, Timestamp commandTime, boolean evenInDryRun) throws CompilerException {
+  /* A cancel or ENDJOB happened: nothing more runs on this job */
+  private boolean stopped() {
+    return progress != null && (progress.cancelRequested || progress.jobEnded);
+  }
+
+  private boolean jobEnded() {
+    return progress != null && progress.jobEnded;
+  }
+
+  private void executeCommand(String commandString, Timestamp commandTime, boolean evenInDryRun, String kind, int timeout)
+      throws CompilerException {
 
     if (this.CmdExecutionChain.length() > 0) {
       this.CmdExecutionChain.append(" => ");
@@ -197,17 +241,96 @@ public class CommandExecutor {
       return;
     }
 
+    if (stopped()) {
+      throw new CompilerException((progress.jobEnded ? "The build job was ended" : "The build was cancelled")
+          + ": not run: " + CommandStringParser.toPasteable(commandString));
+    }
+    timedOut = false;
+    java.util.concurrent.ScheduledFuture<?> limit = null;
     try (Statement cmdStmt = connection.createStatement()) {
-      cmdStmt.execute("CALL QSYS2.QCMDEXC('" + commandString + "')");
+      if (progress != null) progress.running(CommandStringParser.toPasteable(commandString), kind, cmdStmt, timeout);
+      if (timeout > 0) limit = timer.schedule(() -> outOfTime(commandString, timeout, cmdStmt), timeout, java.util.concurrent.TimeUnit.SECONDS);
+      try {
+        cmdStmt.execute("CALL QSYS2.QCMDEXC('" + commandString + "')");
+      } finally {
+        synchronized (claim) {  // either it ended in time, or the timeout claimed it first
+          if (limit != null) limit.cancel(false);
+          if (progress != null) progress.ended(cmdStmt);
+        }
+      }
+      if (timedOut) {  // the timeout fired just as it ended: keep it only if the job was stopped meanwhile
+        waitWhileStopping();
+        if (jobEnded()) throw new SQLException("The job was ended by the timeout as the command ended");
+        synchronized (timeouts) {
+          if (!timeouts.isEmpty()) timeouts.remove(timeouts.size() - 1);
+        }
+        timedOut = false;
+      }
     } catch (SQLException e) {
       logger.error("Command failed: " + CommandStringParser.toPasteable(commandString));
+      /* Stopped by its timeout or a cancel: wait until the record (and whether the job was ended) is complete */
+      waitWhileStopping();
 
-      String joblog = buildJoblogMessagesString(commandTime);
-      throw new CompilerException("Command execution failed", e, commandString, commandTime, joblog);  // No target here
+      String joblog;
+      try {
+        joblog = jobEnded() ? "" : buildJoblogMessagesString(commandTime);
+      } catch (CompilerException gone) {  // the job is not answering any more
+        joblog = "";
+      }
+      String why = timedOut ? "Timed out after " + timeout + " s (timeout: " + timeout + "); the job's call stack, locks "
+          + "and messages are in the report's timeouts"
+          : progress != null && progress.cancelRequested ? "Cancelled by the user (" + progress.cancelSteps + ")"
+          : "Command execution failed";
+      throw new CompilerException(why, e, commandString, commandTime, joblog);  // No target here
     }
 
     logger.info("Command successful: " + CommandStringParser.toPasteable(commandString));  // copy-pasteable form
     if(verbose) logger.info(buildJoblogMessagesString(commandTime));
+  }
+
+  private final Object claim = new Object();
+
+  /* Up to 5 minutes: looking at the job (a few queries) and stopping it (cancel, CANCEL_SQL, ENDJOB) */
+  private void waitWhileStopping() {
+    for (int i = 0; i < 1200 && (stopping || (progress != null && progress.stopping)); i++) {
+      try { Thread.sleep(250); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+    }
+  }
+
+  /* The last command was stopped by its timeout */
+  public boolean timedOut() {
+    return timedOut;
+  }
+
+  /* The timeout ran out: look at the job, then stop the command (cancel, ENDJOB if that is not enough) */
+  private void outOfTime(String commandString, int seconds, Statement running) {
+    synchronized (claim) {
+      if (progress == null || progress.statement != running) return;  // it ended meanwhile
+      timedOut = true;
+      stopping = true;
+    }
+    try {
+      stopJob(commandString, seconds, running);
+    } finally {
+      stopping = false;
+    }
+  }
+
+  private void stopJob(String commandString, int seconds, Statement running) {
+    if (progress.jobName == null) progress.jobName = JobWatch.jobName(connection);  // not reachable now: known at the start
+    logger.error("Timed out after {} s: {}", seconds, CommandStringParser.toPasteable(commandString));
+    BuildReport.Timeout record = new BuildReport.Timeout();
+    record.target = progress.target;
+    record.command = CommandStringParser.toPasteable(commandString);
+    record.seconds = seconds;
+    record.job = watch != null ? watch.inspect(progress.jobName) : null;
+    record.stopped = watch != null ? watch.stop(progress.jobName, running, () -> progress.statement == running)
+        : "not stopped: no job watch";
+    if (JobWatch.jobEnded(record.stopped)) progress.jobEnded = true;
+    synchronized (timeouts) {
+      timeouts.add(record);
+    }
+    progress.stopped.add(record.command + ": " + record.stopped);
   }
 
   /* Executes sql statements */
@@ -321,6 +444,7 @@ public class CommandExecutor {
         }
 
     } catch (SQLException e) {
+      if (jobEnded()) return joblog;  // the job is gone: its joblog with it
       throw new CompilerException("Error retrieving joblog", e);
     }
 

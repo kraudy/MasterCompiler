@@ -3,6 +3,29 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.21
+
+From a team's feedback on long builds
+- `build` no longer keeps the agent waiting: it waits up to `wait` seconds (20) and, if the build is still running,
+  returns a `buildId` with the stage, target, command and seconds so far. `build_status` follows it (or returns the
+  report once it ends). Tool calls run on threads of their own: `build_status`, `whats_running` and `cancel` are
+  never queued behind a build; other tools that use the build job are refused while it runs (reads on a
+  read-only connection still answer).
+- `whats_running`: the build job seen from another connection: its status (RUN, MSGW, LCKW, DEQW, ...), call stack,
+  the locks it waits for and the jobs holding them, the message it waits on and its last joblog lines.
+- Hook `timeout: <seconds>` (and the spec's `hookTimeout`): past it, the job is looked at (the report's `timeouts`)
+  and stopped (cancel, then ENDJOB *IMMED if needed); the target fails with `failedAt: timeout`.
+- Inquiry messages in the build job get their default reply (`inquiryReply: "*DFT"`, CHGJOB INQMSGRPY), so a
+  hook fails instead of waiting in MSGW. `*SYSRPYL` and `*RQD` can be chosen.
+- `cancel`: with a preview and `confirm`, stops the running build on the IBM i (cancel, then ENDJOB *IMMED);
+  nothing more of it runs. Stopping the call in VS Code did not stop the job.
+- `screen_open` over TLS trusts the Windows trusted roots on Windows (the Windows zip's Java now has
+  `jdk.crypto.mscapi`) and `MC_TRUSTSTORE` (a CA certificate or a key store).
+- Agent instructions: say what a long call runs and how long it may take, report while a build runs, and say
+  when something does not respond.
+- Fixed: a `Cmd:` hook (or a command MC does not model) with a quoted value, e.g. `SNDMSG MSG('...')`, failed with
+  SQL0104: its quotes are now doubled for QCMDEXC.
+
 ## v0.3.20
 
 From a team's feedback on testing with MC

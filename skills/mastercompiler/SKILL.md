@@ -83,12 +83,16 @@ curlib: DEVLIB                 # library settings for the build job (CHGLIBL / C
 libl: [DEVLIB, LIB1]         # also allowed alone in mc-base.yaml for scanned projects
 protectedLibs: [LIB4]       # a program that can write to a file resolving here fails before compiling
 uploadFolders: [/home/USER1/app]  # IFS folders upload_file may write to (none: upload_file is refused)
+hookTimeout: 600             # seconds any hook may run (default: no limit); a hook's own timeout wins
+inquiryReply: "*DFT"         # default: inquiry messages get their default reply, so a hook fails instead of waiting
 before:
   - ChgLibl: { LibL: "DEVLIB LIB1" }       # also applied by plan, find_source, sql, ...
-  - Cmd: CPYOBJS FROMLIB(LIB1) TOLIB(DEVLIB)   # any CL command, run as written
+  - Cmd: CPYOBJS FROMLIB(LIB1) TOLIB(DEVLIB)   # any CL command, run as written (quotes as in CL: MC doubles them)
     ignore: [CPF2105]                        # like MONMSG: these messages do not fail the hook
   - DltObj: { Obj: "*CURLIB/WORK", ObjType: "*FILE" }
     ignore: [CPF2105]
+  - Cmd: CALL PGM(LIB1/PGM1)
+    timeout: 300               # past 300 s: its job is looked at (timeouts), then stopped; the target fails
 targets:
   curlib.APPDIR.bnddir.bnddir:
     recreate: true               # delete and create it: only the spec's ADDBNDDIRE entries remain
@@ -111,6 +115,13 @@ targets:
   reported in `writes` with the hook that names the file, and the build checks it again after the
   hooks. When the file still resolves to the protected library after the hook ran, the refusal names
   the hook: the copy must be in a library ahead of it on the library list.
+- **Hooks that hang.** The build job's inquiry messages get their default reply (`inquiryReply: "*DFT"`,
+  CHGJOB INQMSGRPY), so a hook that would wait in MSGW fails instead (`*SYSRPYL`: the system reply
+  list; `*RQD`: wait for a reply); the job keeps it after the build. A hook with `timeout: N` (or the spec's `hookTimeout`) that runs
+  longer is looked at from another connection (status, call stack, the locks it waits for and who
+  holds them, the message it waits on, its last joblog lines: the report's `timeouts`), then stopped:
+  the running command is cancelled, and if it still runs after 10 s its job is ended (ENDJOB *IMMED).
+  The target fails with `failedAt: timeout`; after an ENDJOB nothing else of the build runs.
 - The report's `hooks` lists every hook command in order with its outcome (`ok`, `planned` in a
   plan, `ignored CPFxxxx`, `failed`). CHGLIBL / CHGCURLIB hooks also run in a plan, so a plan sees
   the spec's library list.
@@ -239,10 +250,14 @@ the spec: it would run after MC's and point the job back at the old directory.
   directory. `joblog` names the symbol.
 - A top-level `error` means a failure outside any target (global hook, connection).
 - `failedAt` on a failed target: `compile`, `hook` (a hook before or after the compile),
-  `tests` (compiled, then its RPGUnit run failed) or `protectedLibs`. `errors` and `joblog` are
+  `tests` (compiled, then its RPGUnit run failed), `timeout` (a hook ran past its timeout),
+  `cancelled` (the `cancel` tool) or `protectedLibs`. `errors` and `joblog` are
   the compile's own; messages sent while the hooks ran (a test run's runtime messages, a CPYF)
   are in `hookJoblog` and are never compile errors.
 - `tests`: one entry per `RUCALLTST` hook that ran, as JSON (see "Test data").
+- `timeouts`: per hook past its timeout, its `target`, `command`, `seconds`, the `job` as it was
+  (`status`, `callStack` newest call first, `locksWaitedFor` with `heldBy`, `waitingFor`,
+  `joblogTail`) and how it was `stopped`. `cancelled`: how the `cancel` tool stopped the build.
 
 ## MCP server
 
@@ -251,7 +266,10 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 
 | Tool | Arguments | Returns |
 |------|-----------|---------|
-| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true` in this tool; the command line stops at the first failure unless `-k`), `minSeverity` (default 20) | The build report above, compacted: `summary` per target first, messages below `minSeverity` and duplicates dropped, joblog severity 30+ in `errors`; `warnings` (e.g. two sources for one object); `isError` when the build failed |
+| `build` | `files` (changed sources, relative to the spec) or `since` (git ref); neither = everything. `keepGoing` (default `true` in this tool; the command line stops at the first failure unless `-k`), `minSeverity` (default 20), `wait` (seconds, default 20, up to 120) | The build report above, compacted: `summary` per target first, messages below `minSeverity` and duplicates dropped, joblog severity 30+ in `errors`; `warnings` (e.g. two sources for one object); `isError` when the build failed. A build still running after `wait` keeps running and returns its `buildId`, `stage`, `target`, the command `running` (`kind`, `forSeconds`, `timeoutSeconds`) and the job's last joblog lines: follow it with `build_status`. One build at a time: while it runs, tools that use the build job are refused (`sql`, `find_object` and `find_source` with a read-only `connection` still answer) |
+| `build_status` | `buildId` (default: the latest), `wait` (seconds, default 0, up to 120) | Running: where it is, as above. Ended: the whole report, as `build` returns it. Never queued behind the build |
+| `whats_running` | none | From a connection of its own, never queued: the build's stage and command, the tool call using the build job, and the job: `status` (`RUN`, `MSGW` waits for a reply, `LCKW` waits for a lock, `DEQW`, `TIMW`, ...), `callStack` (newest first, QSYS / QSQL left out), `locksWaitedFor` with the jobs holding them (`heldBy`), `waitingFor` (the inquiry message, in MSGW), `joblogTail`. Reads only |
+| `cancel` | `buildId`, `confirm` | Without `confirm`: what runs and the job's status; show it to the user. With `confirm: true`: cancels the running command and, if it still runs after 10 s, ends the job (ENDJOB *IMMED; MC reconnects at the next call; a CL command such as DLYJOB, or a job in MSGW / LCKW, usually needs the ENDJOB). Between commands (e.g. while the sources are pushed) it stops at the next command. Nothing more of the build runs, failure hooks included; the report says `cancelled`. Stopping the call in VS Code does not stop the build on the IBM i: this does |
 | `plan` | same as `build` | The report with `planned` targets; compiles nothing |
 | `impact` | `object` (name or target key) | The object's targets and every dependent, in build order |
 | `clean` | `confirm` | Without `confirm`: lists the target objects that exist in the current library (`wouldDelete`) and deletes nothing. Show that list to the user; only after they agree call it again with `confirm: true`, which deletes them (dependents first) and their EVFEVENT members |
@@ -266,7 +284,7 @@ Protocol). One IBM i job stays open across calls, and the spec is re-read on eac
 | `upload_file` | `file`, `to`, `name`, `confirm` | Uploads a file of the project folder (a built jar, test input) to an IFS folder in the spec's `uploadFolders` (or below it). Text files are tagged UTF-8 (CCSID 1208); other files' bytes are copied as they are (their CCSID tag is the system's default for a new file). A symbolic link that leads out of `uploadFolders` is refused; the file replaced is kept until the new one is in place. Without `confirm`: the file, `bytes`, `sha256`, the target path and what it `replaces`; show it to the user, then `confirm: true` only if they agree. Logged in `.mc/uploads.log`. With no `uploadFolders`, ask the user which folder before adding one |
 | `find_export` | `symbol` | Service programs on the library list exporting it, binding directories that list them, project sources exporting it. First stop for `CPD5D02 Definition not found` |
 | `find_source` | `objects` (`NAME`, `LIB/NAME`, optionally `NAME *TYPE`), `connection` | Where each object was compiled from (members per ILE module, stream files, binder source), its `/COPY` members, and a `status` per source: `ok`, `changed_since_compile` (may not match the object), `missing`. Reads only |
-| `screen_open` | `confirm`, `port` (default 992, TLS), `ccsid` (default 37), `waitSeconds` | Opens a 5250 session (green screen) on the build system and signs on as the build connection's user, one attempt, through the same sign-on guard. Without `confirm`: what it would open. Returns the first screen after sign-on (see `screen`) |
+| `screen_open` | `confirm`, `port` (default 992, TLS), `ccsid` (default 37), `waitSeconds` | Opens a 5250 session (green screen) on the build system and signs on as the build connection's user, one attempt, through the same sign-on guard. Without `confirm`: what it would open. Returns the first screen after sign-on (see `screen`). TLS trusts Java's certificates, on Windows also the Windows trusted roots (where a company CA usually is), and `MC_TRUSTSTORE` (a `.pem` / `.cer` CA certificate, or a `.jks` / `.p12` with `MC_TRUSTSTORE_PASSWORD`) set in `.vscode/mcp.json`'s `env`; the certificate must name the host |
 | `screen` | `waitSeconds` | The session's screen: numbered `screen` lines, `cursor`, input `fields` (`field` number, `row`, `col`, `length`, `label`, `value`; `hidden` for password fields, no value), `state` (`waiting for input`, `busy`, `input error`) |
 | `screen_send` | `fields` (`{"1": "text"}` by field number, or `{"row,col": "text"}`), `key` (Enter, F1-F24, PageUp, PageDown, Help, Print, Clear, Attn, Reset), `cursor` `{row, col}`, `waitSeconds` | Types the values (each a field exit), presses the key and returns the next screen. Never types into hidden fields |
 | `screen_close` | none | Closes the session; sign off first |
@@ -447,6 +465,19 @@ around that. Handy catalog views: `QSYS2.SYSCOLUMNS2`, `QSYS2.SYSTABLES`, `QSYS2
 Queries go through MC's `sql` tool. Do not use the Db2 for IBM i extension's tools or `db2` over
 SSH for this work: they sign on separately, outside MC's sign-on guard, and a rejected password there
 counts toward disabling the profile (`QMAXSIGN`) too.
+
+## Long calls: keep the user informed
+
+- Before a call that can take long (a `build` of many targets or with test hooks, `call_program`,
+  `import_source` of a library, `copy_rows`), say what it runs and about how long it may take.
+- A `build` that has not ended within its `wait` returns a `buildId`: tell the user the stage, the
+  target and the command running and for how long, then call `build_status` with `wait` (up to
+  120 s) and report again after each call. Do not go silent.
+- When `forSeconds` keeps growing and the joblog does not move, call `whats_running` and tell the
+  user what the job waits on (`MSGW` and the message, `LCKW` and who holds the lock). Offer `cancel`;
+  stop it only after they agree. Stopping the call in VS Code leaves the build running on the IBM i.
+- Hooks that may hang (a test run, a CALL, a CPYF on a busy file) get a `timeout:`; see "Hooks that
+  hang" above.
 
 ## Edit–compile–fix loop
 

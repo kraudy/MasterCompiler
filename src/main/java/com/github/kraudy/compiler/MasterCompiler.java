@@ -64,6 +64,9 @@ public class MasterCompiler{
   private int skippedCount = 0;
   private Set<TargetKey> rebuildSet = new HashSet<TargetKey>();
   private BuildReport report = new BuildReport();
+  private BuildProgress progress;  // where the build is now (build_status, whats_running, cancel)
+  private JobWatch watch;          // looks at / stops the build job from another connection
+  private boolean ownWatch;
 
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
@@ -125,6 +128,12 @@ public class MasterCompiler{
     this.keepGoing = keepGoing;
   }
 
+  /* MCP: the progress other threads read, and the watch the server shares with whats_running */
+  public void setProgress(BuildProgress progress, JobWatch watch) {
+    this.progress = progress;
+    this.watch = watch;
+  }
+
   public BuildReport getReport() {
     return report;
   }
@@ -142,6 +151,13 @@ public class MasterCompiler{
 
     /* Init command executor */
     commandExec = new CommandExecutor(connection, debug, verbose, dryRun);
+    if (progress == null) progress = new BuildProgress("cli");
+    if (watch == null) {
+      watch = new JobWatch(system);  // opens its connection only if a hook times out
+      ownWatch = true;
+    }
+    progress.jobName = JobWatch.jobName(connection);
+    commandExec.watch(progress, watch, globalSpec != null ? globalSpec.hookTimeout : null);
 
     /* Init migrator */
     if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
@@ -167,6 +183,7 @@ public class MasterCompiler{
 
       /* Push local sources to the IFS; the job then compiles from that copy */
       if (push != null) {
+        progress.stage("pushing the sources to " + push);
         compileBaseDir = SourcePusher.push(system, baseDir, push, since, changedFiles, dryRun, verbose);
         /* A scanned spec's CHGCURDIR names the folder on this PC: the job works in the pushed copy instead */
         for (CommandObject hook : globalSpec.before) {
@@ -179,7 +196,11 @@ public class MasterCompiler{
         globalSpec.before.add(0, new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, compileBaseDir));
       }
 
+      /* Inquiry messages get their default reply (*DFT): a hook fails instead of waiting in MSGW */
+      if (!dryRun) commandExec.executeCommand("CHGJOB INQMSGRPY(" + globalSpec.inquiryReply() + ")", commandExec.getCurrentTime());
+
       /* Global before */
+      progress.stage("global before hooks");
       if(!globalSpec.before.isEmpty()){
         if (verbose) logger.info("Executing global before: " + globalSpec.before.size() + " commands found");
         commandExec.executeCommand(globalSpec.before);
@@ -202,6 +223,8 @@ public class MasterCompiler{
       buildTargets(globalSpec.targets);
 
       /* Execute global success */
+      progress.target = null;
+      progress.stage("global after hooks");
       if(!globalSpec.success.isEmpty()){
         if (verbose) logger.info("Executing global success: " + globalSpec.success.size() + " commands found");
         commandExec.executeCommand(globalSpec.success);
@@ -221,9 +244,9 @@ public class MasterCompiler{
       logger.error(e.getFullContext());
       if (report.failed == 0 && report.error == null) report.error = describe(e);
 
-      /* Global compiler failure */
+      /* Global compiler failure: not after a cancel or an ENDJOB (they are meant to stop everything) */
       try{
-        if(!globalSpec.failure.isEmpty()){
+        if(!globalSpec.failure.isEmpty() && !progress.cancelRequested && !progress.jobEnded){
           if (verbose) logger.error("Executing global failure");
           commandExec.executeCommand(globalSpec.failure);
         }
@@ -246,6 +269,7 @@ public class MasterCompiler{
       if (verbose) logger.info("Chain of commands: {}", commandExec.getExecutionChain());
 
       if (reporting()) finishReport();
+      if (ownWatch) watch.close();
     }
 
   }
@@ -257,10 +281,18 @@ public class MasterCompiler{
     /* Hooks that run before each target's compile, in order: a protectedLibs refusal names the ones that touch the file */
     priorHooks.clear();
     priorHooks.addAll(globalSpec.before);
+    progress.targetsTotal = targets.size();
+    int position = 0;
 
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : targets.entrySet()) {
       TargetKey key = entry.getKey();
       BuildSpec.TargetSpec targetSpec = entry.getValue();
+      progress.targetsDone = position++;
+      if (progress.cancelRequested || progress.jobEnded) {
+        throw new CompilerException(progress.cancelRequested ? "Cancelled by the user: the rest was not built"
+            : "The build job was ended after a timeout: the rest was not built");
+      }
+      progress.target = key.asString();
 
       /* Skip target if incremental and not in the rebuild set (seed + fathers) */
       if (isIncremental()) {
@@ -300,15 +332,18 @@ public class MasterCompiler{
         if(key.isCurLib()){
           if (verbose) logger.info("Resolving curlib");
           key.setLibrary(getCurLIb());
+          progress.target = key.asString();
         }
 
         /* Per target before */
+        progress.stage("target before hooks");
         if(!targetSpec.before.isEmpty()){
           if (verbose) logger.info("Executing target before: " + targetSpec.before.size() + " commands found");
           commandExec.executeCommand(targetSpec.before);
         }
         priorHooks.addAll(targetSpec.before);
         stage = "compile";
+        progress.stage("compile");
         /* Hooks so far (this target's before, earlier targets' after) may have created, copied or deleted files */
         if (!dryRun) fileLibrary.clear();
 
@@ -350,6 +385,7 @@ public class MasterCompiler{
         commandExec.executeCommand(key);
         if (reporting() && !dryRun) compileEnd = commandExec.getCurrentTime();
         stage = "hook";
+        progress.stage("target after hooks");
 
         /* Per target success */
         if(!targetSpec.success.isEmpty()){
@@ -376,11 +412,16 @@ public class MasterCompiler{
           String failedAt = String.valueOf(e.getMessage()).startsWith(PROTECTED_REFUSAL) ? "protectedLibs" : stage;
           boolean testsFailed = assignTests(key, testsBefore);
           if ("hook".equals(failedAt) && testsFailed) failedAt = "tests";
+          if (commandExec.timedOut()) failedAt = "timeout";
+          if (progress.cancelRequested) failedAt = "cancelled";
           String error = "compile".equals(failedAt) || "protectedLibs".equals(failedAt) ? e.getMessage() : describe(e);
           if ("tests".equals(failedAt)) error = (compileEnd != null ? "Compiled; the" : "The") + " tests failed (see tests). " + error;
           reportTarget(key, BuildReport.FAILED, command, error, targetStart);
           report.targets.get(report.targets.size() - 1).failedAt = failedAt;
         }
+
+        /* After a cancel or an ENDJOB nothing more runs: no failure hooks, no other targets */
+        if (progress.cancelRequested || progress.jobEnded) throw e;
 
         /* Per target failure */
         if(!targetSpec.failure.isEmpty()){
@@ -399,8 +440,9 @@ public class MasterCompiler{
         if (reporting()) {
           assignTests(key, testsBefore);
           reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
-          report.targets.get(report.targets.size() - 1).failedAt = stage;
+          report.targets.get(report.targets.size() - 1).failedAt = progress.cancelRequested ? "cancelled" : stage;
         }
+        if (progress.cancelRequested || progress.jobEnded) throw e;
 
         if (!keepGoing) throw e; // Raise
         failedTargets.add(key.asString());
@@ -411,6 +453,8 @@ public class MasterCompiler{
       }
     }
 
+
+    progress.targetsDone = targets.size();
 
     /* Keep-going ran every buildable target; the build still fails (global failure hooks, exit 1) */
     if (!failedTargets.isEmpty()) {
@@ -592,7 +636,15 @@ public class MasterCompiler{
       if (command == null && c.getFailedCommand() != null) command = c.getFailedCommand();
       if (joblog == null && c.getExtraContext() != null) joblog = c.getExtraContext();
     }
+    /* Why it stopped, when MC stopped it (timeout, cancel) */
+    String stopped = null;
+    for (Throwable t = e; t != null && stopped == null; t = t.getCause()) {
+      String why = t instanceof CompilerException ? t.getMessage() : null;
+      if (why != null && (why.startsWith("Timed out") || why.startsWith("Cancelled") || why.startsWith("The build"))) stopped = why;
+    }
+    if (command == null && stopped != null) return stopped;
     StringBuilder text = new StringBuilder(command != null ? "Hook failed: " + CommandStringParser.toPasteable(command) : e.getMessage());
+    if (stopped != null) text.append(" | ").append(stopped);
     if (joblog != null) {
       for (String line : joblog.split("\\R")) {
         String[] cols = line.split("\\|");
@@ -766,6 +818,8 @@ public class MasterCompiler{
     if (!globalSpec.warnings.isEmpty()) report.warnings = new ArrayList<String>(globalSpec.warnings);
     report.spec = specFingerprint();
     if (commandExec != null && !commandExec.getHooksRun().isEmpty()) report.hooks = new ArrayList<String>(commandExec.getHooksRun());
+    if (commandExec != null && !commandExec.getTimeouts().isEmpty()) report.timeouts = new ArrayList<BuildReport.Timeout>(commandExec.getTimeouts());
+    if (progress != null && progress.cancelRequested) report.cancelled = progress.cancelSteps != null ? progress.cancelSteps : "requested";
     /* Test runs of the global hooks */
     if (commandExec != null) {
       for (BuildReport.TestRun run : commandExec.getTestRuns()) {

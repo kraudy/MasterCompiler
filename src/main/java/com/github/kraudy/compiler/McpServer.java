@@ -58,6 +58,33 @@ public class McpServer {
   private ReadOnlyConnections.Router router;  // MC on the PC: calls for read-only connections
   private SignOnGuard.Target signOn;  // the password sign-on this server makes (null on the IBM i: its own job)
 
+  /*
+   * Tool calls run on threads of their own, so build_status, whats_running and cancel answer at once, even while a
+   * build or another call is busy. Calls that use the build connection take turns (the lane); while a build runs
+   * they are refused instead of waiting behind it.
+   */
+  static final Set<String> NEVER_QUEUED = new HashSet<String>(java.util.Arrays.asList("build_status", "whats_running", "cancel"));
+  static final Set<String> READS_ELSEWHERE = new HashSet<String>(java.util.Arrays.asList("sql", "find_object", "find_source"));
+  static final int DEFAULT_BUILD_WAIT = 20;
+  static final int MAX_WAIT = 120;
+  private final java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newCachedThreadPool(r -> {
+    Thread t = new Thread(r, "mc-call");
+    t.setDaemon(true);
+    return t;
+  });
+  private final java.util.concurrent.Semaphore lane = new java.util.concurrent.Semaphore(1, true);
+  private final Object screenLock = new Object();
+  private volatile String laneCall;  // the call using the build connection now, and since when
+  private volatile long laneSince;
+  private volatile BuildProgress lastBuild;
+  private final java.util.Map<String, BuildProgress> builds = java.util.Collections.synchronizedMap(
+      new java.util.LinkedHashMap<String, BuildProgress>() {
+        @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, BuildProgress> eldest) { return size() > 10; }
+      });
+  private volatile JobWatch jobWatch;     // looks at the build job from a connection of its own
+  private volatile String buildJob;       // the build connection's job
+  private volatile boolean connectionGone; // ENDJOB ended the build job: reconnect at the next call
+
   public McpServer(ArgParser parser) {
     this.parser = parser;
     this.readOnlyMode = parser != null && parser.isReadOnly();
@@ -137,6 +164,18 @@ public class McpServer {
 
     if (id == null) return;  // notification (notifications/initialized, cancelled, ...)
 
+    /* Each tool call on its own thread: the next request is read at once */
+    if ("tools/call".equals(method) && !readOnlyMode) {
+      workers.execute(() -> {
+        try {
+          sendResult(id, callTool(params));
+        } catch (Exception e) {
+          logger.error("Request failed: " + method, e);
+          sendError(id, -32603, e.toString());
+        }
+      });
+      return;
+    }
     try {
       switch (method) {
         case "initialize":   sendResult(id, initialize(params)); break;
@@ -172,9 +211,12 @@ public class McpServer {
         "Builds IBM i objects from the MasterCompiler spec " + specName() + ". " +
         "Call plan to see what would compile, build to compile (errors come back with file, line, " +
         "column, message id and severity; severity 20 and up stop a compile), impact to see what " +
-        "depends on an object, and joblog for the IBM i job's recent messages. Before the first build of a session, " +
+        "depends on an object. A build that takes longer than its 'wait' returns a buildId: tell the user what runs " +
+        "and for how long, follow it with build_status, look at a job that does not move with whats_running, and stop " +
+        "it with cancel (after the user agreed). Before a call that can take long, say what it runs and about how long. " +
+        "Call joblog for the IBM i job's recent messages. Before the first build of a session, " +
         "call status and plan and show the user the current library and the targets; build once they agree. Tools that " +
-        "write (clean, call_program, copy_rows, upload_file, screen_open) first show a preview: call them with confirm: true only " +
+        "write or stop (clean, call_program, copy_rows, upload_file, screen_open, cancel) first show a preview: call them with confirm: true only " +
         "after the user agreed. The IBM i password is typed only in VS Code's prompt, never in the chat; after an " +
         "authentication error, do not retry: follow the error's steps." + pendingRequest());
     return result;
@@ -202,10 +244,14 @@ public class McpServer {
         "(or /copy members) changed are built, plus everything that depends on them; with neither, " +
         "every target is built. Returns the build report: per target status, command, compile errors " +
         "(file, line, column, id, severity, message) and joblog; hook messages apart (hookJoblog), failedAt " +
-        "(compile, hook, tests, protectedLibs), and tests: each RUCALLTST hook's RPGUnit result as JSON (counts, " +
-        "each failing test with its message and statement). A failed target does not stop the build: " +
-        "everything that does not depend on it is still built, its dependents are reported as blocked.",
-        selectionSchema()));
+        "(compile, hook, tests, timeout, cancelled, protectedLibs), tests: each RUCALLTST hook's RPGUnit result as JSON " +
+        "(counts, each failing test with its message and statement), and timeouts: hooks past their timeout with their " +
+        "job's status, call stack, locks and messages. A failed target does not stop the build: everything that does " +
+        "not depend on it is still built, its dependents are reported as blocked. Waits up to 'wait' seconds (20): a " +
+        "build still running then returns its buildId and where it is (stage, target, command, seconds); follow it with " +
+        "build_status. One build at a time; while it runs, other tools that use the build job are refused (sql, find_object and find_source " +
+        "on a read-only 'connection' still answer).",
+        buildSchema()));
     tools.add(tool("plan",
         "Dry run of build: which targets would compile, in order, and with which commands. " +
         "Nothing is compiled. Same 'files' / 'since' selection as build.",
@@ -444,6 +490,7 @@ public class McpServer {
         imp));
 
     screenTools(tools);
+    buildTools(tools);
 
     ObjectNode joblog = mapper.createObjectNode();
     joblog.put("type", "object");
@@ -558,6 +605,52 @@ public class McpServer {
         + "by the type, e.g. \"CUSTSRV *SRVPGM\" as the build report's external list names them");
   }
 
+  private ObjectNode buildSchema() {
+    ObjectNode schema = selectionSchema();
+    ((ObjectNode) schema.get("properties")).putObject("wait").put("type", "integer").put("description",
+        "Seconds to wait for the build to end (default " + DEFAULT_BUILD_WAIT + ", up to " + MAX_WAIT + "; 0 returns the "
+        + "buildId at once). A build still running after that keeps running: follow it with build_status");
+    return schema;
+  }
+
+  /* build_status, whats_running, cancel: never queued behind a build */
+  private void buildTools(ArrayNode tools) {
+    ObjectNode status = mapper.createObjectNode();
+    status.put("type", "object");
+    ObjectNode statusProps = status.putObject("properties");
+    statusProps.putObject("buildId").put("type", "string").put("description", "From build (default: the latest build)");
+    statusProps.putObject("wait").put("type", "integer").put("description", "Seconds to wait for it to end (default 0, up to "
+        + MAX_WAIT + ")");
+    tools.add(tool("build_status",
+        "Where a build is: running (stage, target, the command running and for how many seconds, its timeout, the job's "
+        + "last joblog lines) or ended (the whole build report, as build returns it). Answers at once, even during a build. "
+        + "Between calls tell the user what runs; a command whose seconds keep growing with the same joblog may be stuck: "
+        + "look with whats_running.",
+        status));
+    ObjectNode running = mapper.createObjectNode();
+    running.put("type", "object");
+    running.putObject("properties");
+    tools.add(tool("whats_running",
+        "What the build job is doing now, from a connection of its own (never queued): the build's stage and command, the "
+        + "job's status (RUN, MSGW: waits for a reply, LCKW: waits for a lock, DEQW, TIMW, ...), its call stack (newest "
+        + "first), the locks it waits for and the jobs holding them, the message it waits on, and its last joblog lines. "
+        + "Also says which tool call is using the build job. Reads only.",
+        running));
+    ObjectNode cancel = mapper.createObjectNode();
+    cancel.put("type", "object");
+    ObjectNode cancelProps = cancel.putObject("properties");
+    cancelProps.putObject("buildId").put("type", "string").put("description", "The build to stop (default: the running one)");
+    cancelProps.putObject("confirm").put("type", "boolean").put("description",
+        "false (default): show what would be stopped. true: stop it, after the user agreed");
+    tools.add(tool("cancel",
+        "Stop the running build on the IBM i: the running command is cancelled, and if it is still running after "
+        + JobWatch.CANCEL_GRACE_SECONDS + " s its job is ended (ENDJOB *IMMED; MC reconnects at the next call). Nothing "
+        + "else of the build runs (no failure hooks); the report says cancelled. First call without confirm and show the user "
+        + "what runs; call again with confirm: true only if they agree. Stopping the call in VS Code does not stop the "
+        + "build on the IBM i: this does.",
+        cancel));
+  }
+
   private ObjectNode selectionSchema() {
     ObjectNode schema = mapper.createObjectNode();
     schema.put("type", "object");
@@ -586,7 +679,7 @@ public class McpServer {
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
     boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows")
-        || name.equals("upload_file")
+        || name.equals("upload_file") || name.equals("cancel")
         || name.equals("screen_open") || name.equals("screen_send");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
@@ -600,10 +693,82 @@ public class McpServer {
     String name = params.path("name").asText("");
     JsonNode args = params.path("arguments");
     if (readOnlyMode) return callReadOnly(name, args);
-    if (ScreenTools.TOOLS.contains(name)) return ScreenTools.handle(name, args, screenSignOn(), projectDir());
+    if (ScreenTools.TOOLS.contains(name)) {
+      synchronized (screenLock) {
+        return ScreenTools.handle(name, args, screenSignOn(), projectDir());
+      }
+    }
+    try {
+      switch (name) {
+        case "build_status":  return buildStatus(args);
+        case "whats_running": return whatsRunning();
+        case "cancel":        return cancel(args);
+        case "build":         return startBuild(args);
+        default:              break;
+      }
+    } catch (Exception e) {
+      logger.error("Tool failed: " + name, e);
+      return toolResult(e instanceof IllegalArgumentException ? e.getMessage() : e.toString(), true);
+    }
+    /* A read for a read-only connection (sql, find_object, find_source with 'connection') does not touch the build
+       job: answered during a build too. copy_rows and compare also use the build job: they wait for it */
+    BuildProgress running = lastBuild;
+    if (running != null && running.isRunning() && READS_ELSEWHERE.contains(name) && !args.path("connection").asText("").trim().isEmpty()
+        && router() != null) {
+      try {
+        ObjectNode ready = args.isObject() ? (ObjectNode) args : mapper.createObjectNode();
+        ObjectNode routed;
+        synchronized (router) {
+          routed = router.handle(name, ready);
+        }
+        if (routed != null) return routed;
+      } catch (Exception e) {
+        logger.error("Tool failed: " + name, e);
+        return toolResult(e.getMessage(), true);
+      }
+    }
+    /* The build connection: one call at a time, none while a build runs */
+    String busy = enterLane(name);
+    if (busy != null) return toolResult(busy, true);
+    try {
+      return callInLane(name, args);
+    } finally {
+      laneCall = null;
+      lane.release();
+    }
+  }
+
+  /* Waits its turn on the build connection; a message instead while a build runs */
+  private String enterLane(String name) throws InterruptedException {
+    while (true) {
+      BuildProgress running = lastBuild;
+      if (running != null && running.isRunning()) return busyMessage(running);
+      if (lane.tryAcquire(250, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+        running = lastBuild;
+        if (running != null && running.isRunning()) {
+          lane.release();
+          return busyMessage(running);
+        }
+        laneCall = name;
+        laneSince = System.currentTimeMillis();
+        return null;
+      }
+    }
+  }
+
+  private static String busyMessage(BuildProgress running) {
+    return "Build " + running.id + " is running (" + running.stage + (running.target != null ? ", " + running.target : "")
+        + "): this tool uses the build job and waits for it to end. Follow it with build_status, see what the job does "
+        + "with whats_running, or stop it with cancel.";
+  }
+
+  private ObjectNode callInLane(String name, JsonNode args) throws Exception {
     if (router() != null) {
       ObjectNode ready = args.isObject() ? (ObjectNode) args : mapper.createObjectNode();
-      ObjectNode routed = router.handle(name, ready);
+      ObjectNode routed;
+      synchronized (router) {
+        routed = router.handle(name, ready);
+      }
       if (routed != null) return routed;
       args = ready;
     }
@@ -612,8 +777,7 @@ public class McpServer {
       switch (name) {
         case "compare":       return compare(args);
         case "copy_rows":     return copyRows(args);
-        case "build":  return build(args, false);
-        case "plan":   return build(args, true);
+        case "plan":   return build(args, true, null);
         case "impact": return impact(args);
         case "clean":  return clean(args);
         case "joblog": return joblog();
@@ -704,13 +868,160 @@ public class McpServer {
         args.path("otherConnection").asText("other"), args.get("otherInfo"))), false);
   }
 
-  private ObjectNode build(JsonNode args, boolean dryRun) throws Exception {
+  /* build: started on a thread of its own (it holds the lane until it ends); waits up to 'wait' seconds for it */
+  private ObjectNode startBuild(JsonNode args) throws Exception {
+    String busy = enterLane("build");
+    if (busy != null) return toolResult(busy, true);
+    BuildProgress progress;
+    try {
+      if (signOn != null) SignOnGuard.check(signOn);  // no sign-on after a rejection
+      connect();
+      progress = new BuildProgress("b" + Long.toString(System.currentTimeMillis() % 100_000_000L, 36));
+      progress.jobName = buildJob;
+      builds.put(progress.id, progress);
+      lastBuild = progress;
+      laneCall = "build " + progress.id;
+    } catch (Exception e) {
+      lane.release();
+      laneCall = null;
+      logger.error("Tool failed: build", e);
+      if (signOn != null && !(e instanceof SignOnGuard.Blocked) && SignOnGuard.failed(signOn, e)) disconnect();
+      return toolResult(e instanceof CompilerException ? ((CompilerException) e).getFullContext() : e.getMessage(), true);
+    }
+    final BuildProgress running = progress;
+    Thread thread = new Thread(() -> {
+      try {
+        running.result = build(args, false, running);  // before finish: a waiting call reads it once the state changes
+        BuildReport report = running.report;
+        running.finish(running.cancelRequested ? BuildProgress.CANCELLED
+            : report != null && report.success ? BuildProgress.SUCCEEDED : BuildProgress.FAILED, report, null);
+      } catch (Throwable e) {
+        logger.error("Build " + running.id + " failed", e);
+        running.finish(running.cancelRequested ? BuildProgress.CANCELLED : BuildProgress.FAILED, null,
+            e instanceof CompilerException ? ((CompilerException) e).getFullContext() : e.toString());
+      } finally {
+        if (running.jobEnded) connectionGone = true;
+        laneCall = null;
+        lane.release();
+      }
+    }, "mc-build-" + running.id);
+    thread.setDaemon(true);
+    thread.start();
+    return awaitBuild(running, seconds(args, DEFAULT_BUILD_WAIT));
+  }
+
+  private static int seconds(JsonNode args, int fallback) {
+    int wait = args.path("wait").isNumber() || args.path("wait").isTextual() ? args.path("wait").asInt(fallback) : fallback;
+    return Math.max(0, Math.min(wait, MAX_WAIT));
+  }
+
+  /* The report when it ended within 'wait' seconds; else where it is now */
+  private ObjectNode awaitBuild(BuildProgress build, int wait) throws Exception {
+    long until = System.currentTimeMillis() + wait * 1000L;
+    while (build.isRunning() && System.currentTimeMillis() < until) Thread.sleep(200);
+    if (!build.isRunning()) {
+      if (build.result != null) return build.result;
+      ObjectNode ended = build.toJson();
+      ended.put("error", build.error);
+      return toolResult(pretty.writeValueAsString(ended), true);
+    }
+    ObjectNode now = build.toJson();
+    JobWatch watch = jobWatch;
+    if (watch != null && build.jobName != null) now.set("joblogTail", watch.joblogTail(build.jobName, 8));
+    now.put("next", "Still running on the IBM i. Tell the user what runs now (stage, target, command, forSeconds), then call "
+        + "build_status with this buildId (wait up to " + MAX_WAIT + " s per call). If forSeconds keeps growing and the "
+        + "joblog does not move, look with whats_running; stop it with cancel only after the user agreed.");
+    return toolResult(pretty.writeValueAsString(now), false);
+  }
+
+  private BuildProgress findBuild(JsonNode args) {
+    String id = args.path("buildId").asText("").trim();
+    if (id.isEmpty()) return lastBuild;
+    BuildProgress build = builds.get(id);
+    if (build == null) throw new IllegalArgumentException("No build " + id + " in this server (it keeps the last 10; a "
+        + "restarted server forgets them)");
+    return build;
+  }
+
+  private ObjectNode buildStatus(JsonNode args) throws Exception {
+    BuildProgress build = findBuild(args);
+    if (build == null) return toolResult("No build has run in this server yet", false);
+    return awaitBuild(build, seconds(args, 0));
+  }
+
+  private ObjectNode whatsRunning() throws Exception {
+    ObjectNode result = mapper.createObjectNode();
+    BuildProgress build = lastBuild;
+    if (build != null && build.isRunning()) result.set("build", build.toJson());
+    else result.put("build", build == null ? "none run yet" : "none running (the last, " + build.id + ", " + build.state + ")");
+    String call = laneCall;
+    if (call != null) {
+      result.put("callUsingBuildJob", call);
+      result.put("forSeconds", (System.currentTimeMillis() - laneSince) / 1000);
+    }
+    JobWatch watch = jobWatch;
+    if (watch == null || buildJob == null) {
+      result.put("job", "not connected yet: nothing runs on the IBM i");
+    } else {
+      result.set("job", watch.inspect(buildJob));
+    }
+    return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  private ObjectNode cancel(JsonNode args) throws Exception {
+    BuildProgress build = findBuild(args);
+    if (build == null || !build.isRunning()) {
+      return toolResult("No build is running" + (build != null ? " (the last, " + build.id + ", " + build.state + ")" : "")
+          + ": nothing to cancel", false);
+    }
+    ObjectNode result = mapper.createObjectNode();
+    result.set("build", build.toJson());
+    JobWatch watch = jobWatch;
+    if (!args.path("confirm").asBoolean(false)) {
+      if (watch != null && build.jobName != null) {
+        ObjectNode job = watch.inspect(build.jobName);
+        result.put("jobStatus", job.path("status").asText(null));
+        if (job.has("waitingFor")) result.set("waitingFor", job.get("waitingFor"));
+      }
+      result.put("next", "Nothing was stopped. Show this to the user; if they agree, call cancel again with confirm: true. "
+          + "It cancels the running command, ends job " + build.jobName + " (ENDJOB *IMMED) if it is still running after "
+          + JobWatch.CANCEL_GRACE_SECONDS + " s, and builds nothing more (no failure hooks).");
+      return toolResult(pretty.writeValueAsString(result), false);
+    }
+    build.cancelRequested = true;
+    build.cancelSteps = "requested";
+    if (build.commandRunning() && watch != null && build.jobName != null) {
+      java.sql.Statement running = build.statement;
+      build.stopping = true;
+      try {
+        build.cancelSteps = watch.stop(build.jobName, running, () -> build.statement == running);
+        if (JobWatch.jobEnded(build.cancelSteps)) {
+          build.jobEnded = true;
+          connectionGone = true;
+        }
+      } finally {
+        build.stopping = false;
+      }
+    } else {
+      build.cancelSteps = "stopped between commands";
+    }
+    long until = System.currentTimeMillis() + 15_000;
+    while (build.isRunning() && System.currentTimeMillis() < until) Thread.sleep(200);
+    result.set("build", build.toJson());
+    result.put("stopped", build.cancelSteps);
+    result.put("next", build.isRunning() ? "Still ending: call build_status with this buildId"
+        : "Stopped. build_status with this buildId returns its report");
+    return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  private ObjectNode build(JsonNode args, boolean dryRun, BuildProgress progress) throws Exception {
     connect();
     BuildSpec spec = loadSpec();
 
     MasterCompiler compiler = new MasterCompiler(system, connection, spec, dryRun,
         parser.isDebug(), parser.isVerbose(), false, false, parser.isNoMigrate());
     compiler.setCollectReport(true);
+    compiler.setProgress(progress, jobWatch);
     Code4iConfig code4i = MasterCompiler.code4i(parser);
     compiler.setLibraryHooks(MasterCompiler.libraryHooks(parser, code4i));
     compiler.setPush(MasterCompiler.pushDir(parser, code4i, spec));
@@ -724,7 +1035,13 @@ public class McpServer {
     compiler.build();
     BuildReport report = compiler.getReport();
     report.compact(args.path("minSeverity").asInt(20));
-    return toolResult(pretty.writeValueAsString(report), !report.success);
+    if (progress == null) return toolResult(pretty.writeValueAsString(report), !report.success);
+    progress.report = report;
+    ObjectNode text = mapper.createObjectNode();
+    text.put("buildId", progress.id);
+    text.put("elapsedSeconds", (System.currentTimeMillis() - progress.started) / 1000);
+    text.setAll((ObjectNode) pretty.valueToTree(report));
+    return toolResult(pretty.writeValueAsString(text), !report.success);
   }
 
   private ObjectNode impact(JsonNode args) throws Exception {
@@ -1275,6 +1592,10 @@ public class McpServer {
 
   /* One connection for the server's lifetime; reconnect if it dropped */
   private void connect() throws Exception {
+    if (connectionGone) {  // ENDJOB ended the build job: a new one
+      connectionGone = false;
+      disconnect();
+    }
     if (connection != null && !connection.isClosed()) return;
     disconnect();
     if (readOnlyMode) {
@@ -1297,7 +1618,9 @@ public class McpServer {
       return new AS400JDBCDataSource(system).getConnection();
     });
     lastJoblog = new CommandExecutor(connection, false, false, false).getCurrentTime();
-    logger.info("Connected to IBM i as {}", system.getUserId());
+    buildJob = JobWatch.jobName(connection);
+    jobWatch = new JobWatch(system);
+    logger.info("Connected to IBM i as {} (job {})", system.getUserId(), buildJob);
   }
 
   /* One sign-on attempt through SignOnGuard: none after IBM i rejected the password */
@@ -1329,6 +1652,9 @@ public class McpServer {
   }
 
   private void disconnect() {
+    if (jobWatch != null) jobWatch.close();
+    jobWatch = null;
+    buildJob = null;
     try {
       if (readOnly != null && !readOnly.isClosed()) readOnly.close();
     } catch (Exception ignored) {}

@@ -131,6 +131,37 @@ public class SshMcpProxy {
           sendResult(id, result);
           continue;
         }
+        String tool = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
+        /* build_status, whats_running, cancel: straight to the IBM i, never behind a sync or another call */
+        if (McpServer.NEVER_QUEUED.contains(tool)) {
+          if (!remoteReady.isDone() || remoteReady.isCompletedExceptionally()) {
+            sendToolError(line, "MasterCompiler is not running on the IBM i yet (stage " + stage + "): no build runs");
+            continue;
+          }
+          if (tool.equals("cancel") && queuedBuilds.get() > 0 && remoteBuild == null) {
+            boolean confirm = request.path("params").path("arguments").path("confirm").asBoolean(false);
+            if (confirm) dropQueuedBuilds = true;
+            ObjectNode answer = mapper.createObjectNode();
+            answer.putArray("content").addObject().put("type", "text").put("text", confirm
+                ? "The build had not started on the IBM i yet (its sources were being uploaded): it will not start."
+                : "A build is waiting for its sources to be uploaded and has not started on the IBM i. Show this to the "
+                  + "user; with confirm: true it will not start.");
+            answer.put("isError", false);
+            sendResult(id, answer);
+            continue;
+          }
+          if (!tool.equals("whats_running")) buildCalls.add(id.toString());
+          try {
+            writeRemote(remoteReady.get(), line);
+          } catch (Exception e) {
+            sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
+          }
+          continue;
+        }
+        if (tool.equals("build")) {
+          buildCalls.add(id.toString());
+          queuedBuilds.incrementAndGet();
+        }
         String call = line;
         calls.execute(() -> forward(call));  // one at a time, in order
       }
@@ -188,6 +219,28 @@ public class SshMcpProxy {
 
   /* A call the remote MC answers: wait until it runs, upload what changed, pass it on */
   private void forward(String line) {
+    boolean build = isBuild(line);
+    try {
+      forwardCall(line);
+    } finally {
+      if (build && queuedBuilds.decrementAndGet() == 0) dropQueuedBuilds = false;
+    }
+  }
+
+  private boolean isBuild(String line) {
+    try {
+      JsonNode request = mapper.readTree(line);
+      return "tools/call".equals(request.path("method").asText()) && "build".equals(request.path("params").path("name").asText());
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  /* Builds waiting here for the upload; a cancel meanwhile drops them */
+  private final java.util.concurrent.atomic.AtomicInteger queuedBuilds = new java.util.concurrent.atomic.AtomicInteger();
+  private volatile boolean dropQueuedBuilds;
+
+  private void forwardCall(String line) {
     line = routed(line);
     if (line == null) return;  // answered by a read-only connection
     OutputStream toRemote;
@@ -200,13 +253,76 @@ public class SshMcpProxy {
       return;
     }
     String forward = beforeForwarding(line);
-    if (forward == null) return;  // answered here (sync failed)
+    if (forward != null && dropQueuedBuilds && isBuild(forward)) {
+      sendToolError(line, "Cancelled before it started on the IBM i: nothing was built");
+      forward = null;
+    }
+    if (forward == null) {  // answered here (sync failed, a build running, cancelled)
+      try {
+        buildCalls.remove(mapper.readTree(line).path("id").toString());
+      } catch (Exception ignored) { /* not JSON: no id kept */ }
+      return;
+    }
     try {
-      toRemote.write((forward + "\n").getBytes(StandardCharsets.UTF_8));
-      toRemote.flush();
+      writeRemote(toRemote, forward);
     } catch (Exception e) {
       sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
     }
+  }
+
+  private final Object writing = new Object();
+
+  private void writeRemote(OutputStream toRemote, String line) throws java.io.IOException {
+    synchronized (writing) {
+      toRemote.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+      toRemote.flush();
+    }
+  }
+
+  /*
+   * The build running on the IBM i, from the build / build_status / cancel answers. While it runs, calls that would
+   * sync the sources first (build, plan, impact, call_program, ...) are answered here: a sync would change the
+   * sources under the build.
+   */
+  private final Set<String> buildCalls = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private volatile String remoteBuild;
+  private final Map<String, CompletableFuture<JsonNode>> ownCalls = new java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<JsonNode>>();
+  private final java.util.concurrent.atomic.AtomicInteger ownIds = new java.util.concurrent.atomic.AtomicInteger();
+
+  void noteBuild(JsonNode response) {
+    try {
+      JsonNode text = mapper.readTree(response.path("result").path("content").path(0).path("text").asText("{}"));
+      if (!text.isObject()) return;
+      JsonNode build = text.has("buildId") ? text : text.path("build");
+      if (!build.isObject() || !build.has("buildId")) return;
+      if ("running".equals(build.path("state").asText())) remoteBuild = build.get("buildId").asText();
+      else if (build.get("buildId").asText().equals(remoteBuild)) remoteBuild = null;
+    } catch (Exception notJson) { /* an error text: no build state in it */ }
+  }
+
+  /* Asks the IBM i (build_status, not seen by VS Code) whether the build it ran last is still running */
+  private boolean remoteBuildRunning() throws Exception {
+    String id = remoteBuild;
+    if (id == null) return false;
+    String own = "mc-proxy-" + ownIds.incrementAndGet();
+    CompletableFuture<JsonNode> answer = new CompletableFuture<JsonNode>();
+    ownCalls.put(own, answer);
+    ObjectNode request = mapper.createObjectNode();
+    request.put("jsonrpc", "2.0");
+    request.put("id", own);
+    request.put("method", "tools/call");
+    ObjectNode params = request.putObject("params");
+    params.put("name", "build_status");
+    params.putObject("arguments").put("buildId", id);
+    try {
+      writeRemote(remoteReady.get(), mapper.writeValueAsString(request));
+      noteBuild(answer.get(60, java.util.concurrent.TimeUnit.SECONDS));
+    } catch (java.util.concurrent.TimeoutException e) {
+      return true;  // no answer: taken as still running (the caller says so)
+    } finally {
+      ownCalls.remove(own);
+    }
+    return remoteBuild != null;
   }
 
   /* Calls for a read-only connection are answered here; compare gets what the other system holds */
@@ -264,6 +380,16 @@ public class SshMcpProxy {
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(fromRemote, StandardCharsets.UTF_8))) {
       String line;
       while ((line = reader.readLine()) != null) {
+        if (!ownCalls.isEmpty() || !buildCalls.isEmpty()) {
+          JsonNode response = mapper.readTree(line);
+          String id = response.path("id").asText();
+          CompletableFuture<JsonNode> own = ownCalls.get(id);
+          if (own != null || id.startsWith("mc-proxy-")) {  // this server's own build_status (a late one is dropped)
+            if (own != null) own.complete(response);
+            continue;
+          }
+          if (buildCalls.remove(response.path("id").toString())) noteBuild(response);
+        }
         if (!pendingStatus.isEmpty()) line = afterStatus(line);
         if (!pendingResults.isEmpty()) line = afterResults(line);
         send(pendingImports.isEmpty() ? line : afterImport(line));
@@ -294,6 +420,13 @@ public class SshMcpProxy {
       JsonNode request = mapper.readTree(line);
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
+      if ((tool.equals("call_program") || tool.equals("find_export") || tool.equals("import_source") || tool.equals("build")
+          || tool.equals("plan") || tool.equals("impact")) && remoteBuildRunning()) {
+        sendToolError(line, "Build " + remoteBuild + " is running on the IBM i (or did not say within 60 s that it ended): "
+            + tool + " would upload the sources under it. Follow it with build_status, see what the job does with "
+            + "whats_running, or stop it with cancel.");
+        return null;
+      }
       if (tool.equals("sql") && ResultFiles.wanted(request.path("params").path("arguments"))) {
         pendingResults.put(request.path("id").toString(), request.path("params").path("arguments"));  // the file is written here
         return line;

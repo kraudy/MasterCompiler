@@ -25,11 +25,12 @@ public class CommandObject {
   private String commandString;       // System coammnd's formed string
   private String raw;                 // any other CL command, as written in the spec (Cmd: "CPYOBJS ...")
   private final java.util.List<String> ignore = new java.util.ArrayList<String>();  // message ids treated like MONMSG
+  private int timeoutSeconds;         // hook timeout: 0 = the spec's hookTimeout (if any)
 
   /* A CL command MC does not model (shop commands, CPYOBJS, ...): run exactly as written */
   public static CommandObject raw(String command) {
     CommandObject cmd = new CommandObject((SysCmd) null);
-    cmd.raw = command.trim();
+    cmd.raw = command.trim().replace("'", "''");  // it runs inside QCMDEXC('...'): quotes as written, doubled
     return cmd;
   }
 
@@ -39,6 +40,15 @@ public class CommandObject {
 
   public java.util.List<String> getIgnore() {
     return ignore;
+  }
+
+  public int getTimeoutSeconds() {
+    return timeoutSeconds;
+  }
+
+  public CommandObject timeout(int seconds) {
+    this.timeoutSeconds = seconds;
+    return this;
   }
 
   public CommandObject ignore(java.util.Collection<String> messageIds) {

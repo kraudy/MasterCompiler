@@ -105,6 +105,25 @@ public class BuildSpec {
   @JsonProperty(value = "uploadFolders", required = false)
   public final List<String> uploadFolders = new ArrayList<>();
 
+  /* Seconds any hook may run unless it sets its own timeout: then its job is looked at (status, call stack,
+     locks, messages: the report's timeouts) and stopped. None: hooks run as long as they take */
+  @JsonProperty(value = "hookTimeout", required = false)
+  public Integer hookTimeout;
+
+  /* INQMSGRPY for the build job: *DFT (default) answers inquiry messages with their default reply, so a hook
+     fails instead of waiting in MSGW; *SYSRPYL uses the system reply list; *RQD waits for a reply */
+  @JsonProperty(value = "inquiryReply", required = false)
+  public String inquiryReply;
+
+  public String inquiryReply() {
+    String reply = inquiryReply == null ? "*DFT" : inquiryReply.trim().toUpperCase();
+    if (!reply.startsWith("*")) reply = "*" + reply;
+    if (!reply.equals("*DFT") && !reply.equals("*SYSRPYL") && !reply.equals("*RQD")) {
+      throw new IllegalArgumentException("inquiryReply is *DFT, *SYSRPYL or *RQD (got: " + inquiryReply + ")");
+    }
+    return reply;
+  }
+
   /* Which Code for IBM i connection builds, and other IBM i systems the tools may read (ReadOnlyConnections) */
   @JsonProperty(value = "connections", required = false)
   public com.fasterxml.jackson.databind.JsonNode connections;

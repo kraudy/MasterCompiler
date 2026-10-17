@@ -37,6 +37,8 @@ public class BuildReport {
   public List<String> hooks;     // hook commands that ran (or would run, in a plan), in order, with their outcome
   public List<TargetResult> targets = new ArrayList<TargetResult>();
   public List<TestRun> tests;   // RPGUnit runs (RUCALLTST hooks), in order; target is null for a global hook
+  public List<Timeout> timeouts; // hooks that ran past their timeout: what their job was doing, how it was stopped
+  public String cancelled;       // cancel tool: how the build was stopped
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
   public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
@@ -51,7 +53,7 @@ public class BuildReport {
     public List<String> bindingDirectories;  // BNDDIR param / ctl-opt bnddir and where each resolves: "APPDIR -> APPLIB"
     public List<String> unresolvedSymbols;   // CPD5D02 Definition not found for symbol ...
     public List<String> binderWarnings;      // CPD5D1D and alike: harmless unless a CPD5D02 follows
-    public String failedAt;  // compile, hook or tests: what failed when the status is failed
+    public String failedAt;  // compile, hook, tests, timeout, cancelled, protectedLibs: what failed when the status is failed
     public List<CompileError> errors;    // the compile's own (EVFEVENT, its joblog messages)
     public List<JoblogMessage> joblog;
     public List<JoblogMessage> hookJoblog;  // messages while the target's hooks ran (tests, CPYF, ...): never compile errors
@@ -87,6 +89,14 @@ public class BuildReport {
     public List<TestCase> failed;
     public String source;
     public String note;
+  }
+
+  public static class Timeout {
+    public String target;   // null for a global hook
+    public String command;
+    public int seconds;
+    public com.fasterxml.jackson.databind.JsonNode job;  // status, callStack, locksWaitedFor, waitingFor, joblogTail
+    public String stopped;  // cancel, then ENDJOB if needed
   }
 
   public static class TestCase {
@@ -194,6 +204,13 @@ public class BuildReport {
             + " run, " + ((run.failures != null ? run.failures : 0) + (run.errors != null ? run.errors : 0)) + " failed)" : ""));
       }
     }
+    if (timeouts != null) {
+      for (Timeout t : timeouts) {
+        summary.add("timeout after " + t.seconds + " s" + (t.target != null ? " in " + t.target : "") + ": " + t.command
+            + (t.job != null && t.job.hasNonNull("status") ? " (job was " + t.job.get("status").asText() + ")" : ""));
+      }
+    }
+    if (cancelled != null) summary.add("cancelled: " + cancelled);
   }
 
   public TargetResult add(String target, String status) {
