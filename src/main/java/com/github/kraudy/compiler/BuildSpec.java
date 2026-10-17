@@ -105,6 +105,10 @@ public class BuildSpec {
   @JsonProperty(value = "uploadFolders", required = false)
   public final List<String> uploadFolders = new ArrayList<>();
 
+  /* Folders on the PC upload_file may also take files from, besides the project (absolute or project-relative) */
+  @JsonProperty(value = "uploadSources", required = false)
+  public final List<String> uploadSources = new ArrayList<>();
+
   /* Seconds any hook may run unless it sets its own timeout: then its job is looked at (status, call stack,
      locks, messages: the report's timeouts) and stopped. None: hooks run as long as they take */
   @JsonProperty(value = "hookTimeout", required = false)

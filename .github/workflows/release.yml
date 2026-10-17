@@ -71,8 +71,8 @@ jobs:
       - name: Build the runtime and the zip
         shell: pwsh
         run: |
-          # jdeps on the classes, plus what is loaded by name at run time (TLS / SSH EC crypto, the Windows certificate store, charsets, Unsafe, JMX)
-          $modules = 'java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.security.jgss,java.sql,java.transaction.xa,java.xml,jdk.charsets,jdk.crypto.ec,jdk.crypto.mscapi,jdk.unsupported'
+          # jdeps on the classes, plus what is loaded by name at run time (TLS / SSH EC crypto, the Windows certificate store, the 5250 secret page, charsets, Unsafe, JMX)
+          $modules = 'java.base,java.datatransfer,java.desktop,java.logging,java.management,java.naming,java.security.jgss,java.sql,java.transaction.xa,java.xml,jdk.charsets,jdk.crypto.ec,jdk.crypto.mscapi,jdk.httpserver,jdk.unsupported'
           New-Item -ItemType Directory -Force MasterCompiler | Out-Null
           jlink --add-modules $modules --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output MasterCompiler/runtime
           if ($LASTEXITCODE -ne 0) { exit 1 }

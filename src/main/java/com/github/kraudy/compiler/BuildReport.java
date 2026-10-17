@@ -39,6 +39,8 @@ public class BuildReport {
   public List<TestRun> tests;   // RPGUnit runs (RUCALLTST hooks), in order; target is null for a global hook
   public List<Timeout> timeouts; // hooks that ran past their timeout: what their job was doing, how it was stopped
   public String cancelled;       // cancel tool: how the build was stopped
+  public String skippedNote;     // compact without showSkipped: the skipped targets are only counted
+  public List<String> formerTargets;  // objects MC built for targets the spec no longer has (clean formerTargets: true)
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
   public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
@@ -122,6 +124,15 @@ public class BuildReport {
    * that did not build. Reports went from megabytes to what the agent needs.
    */
   public void compact(int minSeverity) {
+    compact(minSeverity, true);
+  }
+
+  /* showSkipped false: unchanged targets are only counted (skipped), not listed: small builds stay small */
+  public void compact(int minSeverity, boolean showSkipped) {
+    if (!showSkipped && skipped > 0) {
+      targets.removeIf(t -> SKIPPED.equals(t.status));
+      skippedNote = skipped + " unchanged target(s) skipped and not listed (showSkipped: true lists them)";
+    }
     summary = new ArrayList<String>();
     for (TargetResult t : targets) {
       List<CompileError> errors = new ArrayList<CompileError>();

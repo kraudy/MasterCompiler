@@ -3,6 +3,28 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.22
+
+From a team's feedback on deploying and testing with MC
+- `run_command`: one CL command (SBMJOB, ENDJOB, ...) in MC's job with a preview and `confirm`; refused when it names
+  a `protectedLibs` library or the spec has none; logged in `.mc/commands.log`. No more programs written only to run a command.
+- `call_program`'s preview lists `otherEffects`: what the source names besides database writes (SBMJOB, ENDJOB, QSH,
+  QCMDEXC, CALL, IFS commands, ...), and says those are not checked. An empty `writes` no longer reads as harmless.
+- `upload_file` also takes files from the spec's `uploadSources` (folders on the PC besides the project); the preview
+  shows the local path. `status` shows `uploadFolders`, `uploadSources` and `screenCcsid`.
+- 5250 screens use the system's CCSID (QCHRID's code page) unless `ccsid` or `MC_5250_CCSID` says otherwise: accents
+  show right on a non-37 system.
+- Smaller reports: `plan` and `build` only count unchanged (skipped) targets (`skippedNote`); `showSkipped: true` lists
+  them. A plan shows each hook's `timeout`.
+- Targets taken out of the spec: MC records the objects it builds (`.mc/built-objects.json`); `plan` and `build` list the
+  ones no target has any more in `formerTargets`, and `clean formerTargets: true` deletes them (with its preview).
+- `sql`: a column that does not exist (SQL0206) comes back with the columns of the query's tables.
+- 5250 hidden fields (a PASSCODE, a two-factor token, a password on a later screen): MC asks the user for the value
+  in a password box and types it; the value never goes through the chat or the agent and is never logged or
+  returned. `screen_send` takes `ask: [field numbers]`; a hidden field besides the password on the sign-on display
+  is asked before Enter (an empty one is not a refused sign-on). The box is an MCP URL elicitation (a one-time page
+  on 127.0.0.1) when the client offers it, else a dialog of MC's own. The Windows zip's Java adds `jdk.httpserver`.
+
 ## v0.3.21
 
 From a team's feedback on long builds

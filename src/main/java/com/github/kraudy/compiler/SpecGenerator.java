@@ -209,6 +209,7 @@ public class SpecGenerator {
 
     for (String lib : base.protectedLibs) scanned.protectedLibs.add(lib.trim().toUpperCase());
     scanned.uploadFolders.addAll(base.uploadFolders);
+    scanned.uploadSources.addAll(base.uploadSources);
     if (base.hookTimeout != null) scanned.hookTimeout = base.hookTimeout;
     if (base.inquiryReply != null) scanned.inquiryReply = base.inquiryReply;
 

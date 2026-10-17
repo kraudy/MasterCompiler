@@ -32,6 +32,45 @@ final class FileWrites {
 
   private FileWrites() {}
 
+  /* Commands and APIs with effects outside database files: jobs, the IFS, Qshell, other commands run by text */
+  static final List<String> OTHER_EFFECTS = java.util.Arrays.asList("SBMJOB", "ENDJOB", "STRQSH", "QSH", "QCMDEXC",
+      "QCAPCMD", "SYSTEM", "CALL", "RUNSQL", "RUNSQLSTM", "CPYTOSTMF", "CPYFRMSTMF", "CPY", "MOV", "RNM", "RMVLNK", "DEL",
+      "CRTDIR", "RMVDIR", "CHGJOB", "DLTF", "DLTOBJ", "CLRPFM", "CPYF", "QSNDDTAQ", "SNDDTAQ", "STRTCPSVR", "ENDTCPSVR",
+      "STRSBS", "ENDSBS", "CHGSYSVAL", "GRTOBJAUT", "RVKOBJAUT", "CHGOBJOWN", "CHGAUT", "SNDMSG", "SNDBRKMSG",
+      "CRTDUPOBJ", "CHGOBJ", "WRKACTJOB", "PWRDWNSYS", "RSTOBJ", "SAVOBJ", "SAVLIB", "RSTLIB", "STRSRVJOB",
+      "QZSHSYSTEM", "QP0ZSYSTEM", "JAVA", "RUNJVA", "QSYGETPH", "QWTSETP", "QUSCRTUS", "QUSCHGUS", "QMHSNDPM");
+  private static final Pattern EFFECT = Pattern.compile("(?<![A-Z0-9_$#@])(" + String.join("|", OTHER_EFFECTS)
+      + ")(?![A-Z0-9_$#@])", Pattern.CASE_INSENSITIVE);
+
+  /* "SBMJOB (lines 12, 40)": the effects outside database files the source names, comments left out */
+  static List<String> otherEffects(List<String> lines) {
+    Map<String, List<Integer>> found = new LinkedHashMap<String, List<Integer>>();
+    boolean inComment = false;
+    for (int n = 0; n < lines.size(); n++) {
+      String line = lines.get(n);
+      String trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("--") || (line.length() > 6 && line.charAt(6) == '*')) continue;
+      StringBuilder code = new StringBuilder();
+      for (int i = 0; i < line.length(); i++) {  // CL / C comments: /* ... */
+        if (!inComment && line.startsWith("/*", i)) { inComment = true; i++; continue; }
+        if (inComment && line.startsWith("*/", i)) { inComment = false; i++; continue; }
+        if (!inComment) code.append(line.charAt(i));
+      }
+      java.util.regex.Matcher m = EFFECT.matcher(code);
+      while (m.find()) {
+        List<Integer> at = found.computeIfAbsent(m.group(1).toUpperCase(Locale.ROOT), k -> new java.util.ArrayList<Integer>());
+        if (at.size() < 5 && !at.contains(n + 1)) at.add(n + 1);
+      }
+    }
+    List<String> effects = new java.util.ArrayList<String>();
+    for (Map.Entry<String, List<Integer>> e : found.entrySet()) {
+      StringBuilder at = new StringBuilder();
+      for (int line : e.getValue()) at.append(at.length() > 0 ? ", " : "").append(line);
+      effects.add(e.getKey() + " (line" + (e.getValue().size() > 1 ? "s " : " ") + at + ")");
+    }
+    return effects;
+  }
+
   static Map<String, TreeSet<String>> parse(List<String> lines) {
     Map<String, TreeSet<String>> writes = new LinkedHashMap<String, TreeSet<String>>();
     StringBuilder code = new StringBuilder();

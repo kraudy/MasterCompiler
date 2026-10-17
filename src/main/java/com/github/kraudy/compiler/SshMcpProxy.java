@@ -62,6 +62,11 @@ public class SshMcpProxy {
     return t;
   });
   private volatile boolean closing;
+  private final ExecutorService screenCalls = Executors.newSingleThreadExecutor(r -> {
+    Thread t = new Thread(r, "mc-ssh-screen");
+    t.setDaemon(true);
+    return t;
+  });
   private ReadOnlyConnections.Router router;  // calls for the spec's read-only connections
   private SignOnGuard.Target buildTarget;      // the build connection's sign-on
   private final Set<String> pendingImports = java.util.concurrent.ConcurrentHashMap.newKeySet();  // import_source call ids  // VS Code closed the session: the remote end stopping is expected
@@ -101,6 +106,8 @@ public class SshMcpProxy {
     setup.start();
 
     McpServer local = new McpServer(parser);
+    SecretPrompt.sender(this::send);
+    ScreenTools.systemCcsid(this::remoteScreenCcsid);
     BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
     String line;
     try {
@@ -113,6 +120,7 @@ public class SshMcpProxy {
           logger.error("Not a JSON-RPC message, ignored: {}", line);
           continue;
         }
+        if (SecretPrompt.answer(request)) continue;  // the client's answer to a 5250 secret request from here
         JsonNode id = request.get("id");
         if (id == null) continue;  // notifications: the remote server ignores them as well
         JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
@@ -156,6 +164,12 @@ public class SshMcpProxy {
           } catch (Exception e) {
             sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
           }
+          continue;
+        }
+        /* 5250 tools on a thread of their own: one waiting for the user (a PASSCODE) does not hold up the rest */
+        if (ScreenTools.TOOLS.contains(tool)) {
+          String screenCall = line;
+          screenCalls.execute(() -> forward(screenCall));
           continue;
         }
         if (tool.equals("build")) {
@@ -323,6 +337,32 @@ public class SshMcpProxy {
       ownCalls.remove(own);
     }
     return remoteBuild != null;
+  }
+
+  /* The screens' CCSID from MC on the IBM i (its status says screenCcsid), asked once */
+  private volatile Integer screenCcsid;
+
+  private Integer remoteScreenCcsid() {
+    if (screenCcsid != null || !remoteReady.isDone() || remoteReady.isCompletedExceptionally()) return screenCcsid;
+    String own = "mc-proxy-" + ownIds.incrementAndGet();
+    CompletableFuture<JsonNode> answer = new CompletableFuture<JsonNode>();
+    ownCalls.put(own, answer);
+    try {
+      ObjectNode request = mapper.createObjectNode();
+      request.put("jsonrpc", "2.0");
+      request.put("id", own);
+      request.put("method", "tools/call");
+      request.putObject("params").put("name", "status").putObject("arguments");
+      writeRemote(remoteReady.get(), mapper.writeValueAsString(request));
+      JsonNode text = mapper.readTree(answer.get(30, java.util.concurrent.TimeUnit.SECONDS)
+          .path("result").path("content").path(0).path("text").asText("{}"));
+      if (text.path("screenCcsid").isInt()) screenCcsid = text.get("screenCcsid").asInt();
+    } catch (Exception e) {
+      logger.info("Could not read the screens' CCSID from the IBM i: {}", e.getMessage());
+    } finally {
+      ownCalls.remove(own);
+    }
+    return screenCcsid;
   }
 
   /* Calls for a read-only connection are answered here; compare gets what the other system holds */

@@ -135,6 +135,8 @@ public class McpServer {
     protocolOut = new PrintStream(System.out, true, "UTF-8");
     System.setOut(System.err);
     MasterCompiler.quietLogs(parser.isVerbose());
+    SecretPrompt.sender(this::sendLine);
+    if (!readOnlyMode) ScreenTools.systemCcsid(this::screenCcsidForScreens);
     logger.info("MasterCompiler MCP server ready");
 
     BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
@@ -162,6 +164,7 @@ public class McpServer {
     String method = request.path("method").asText("");
     JsonNode params = request.path("params");
 
+    if (SecretPrompt.answer(request)) return;  // the client's answer to MC's own request (elicitation)
     if (id == null) return;  // notification (notifications/initialized, cancelled, ...)
 
     /* Each tool call on its own thread: the next request is read at once */
@@ -201,6 +204,7 @@ public class McpServer {
   }
 
   private ObjectNode initialize(JsonNode params) {
+    SecretPrompt.client(params);
     ObjectNode result = mapper.createObjectNode();
     result.put("protocolVersion", params.path("protocolVersion").asText(DEFAULT_PROTOCOL));
     result.putObject("capabilities").putObject("tools");
@@ -216,7 +220,7 @@ public class McpServer {
         "it with cancel (after the user agreed). Before a call that can take long, say what it runs and about how long. " +
         "Call joblog for the IBM i job's recent messages. Before the first build of a session, " +
         "call status and plan and show the user the current library and the targets; build once they agree. Tools that " +
-        "write or stop (clean, call_program, copy_rows, upload_file, screen_open, cancel) first show a preview: call them with confirm: true only " +
+        "write or stop (clean, call_program, run_command, copy_rows, upload_file, screen_open, cancel) first show a preview: call them with confirm: true only " +
         "after the user agreed. The IBM i password is typed only in VS Code's prompt, never in the chat; after an " +
         "authentication error, do not retry: follow the error's steps." + pendingRequest());
     return result;
@@ -273,11 +277,15 @@ public class McpServer {
     ObjectNode confirm = clean.putObject("properties").putObject("confirm");
     confirm.put("type", "boolean");
     confirm.put("description", "false (default): only list what would be deleted. true: delete, after the user agreed to that list");
+    ((ObjectNode) clean.get("properties")).putObject("formerTargets").put("type", "boolean").put("description",
+        "true: instead of the current targets, the objects MC built for targets the spec no longer has (plan and build "
+        + "list them in formerTargets)");
     tools.add(tool("clean",
         "Delete this project's objects from the current library, e.g. to remove a demo. Only when the user asks. "
         + "First call it without confirm: it lists the target objects that exist there and deletes nothing. Show "
         + "that list to the user (it includes any object with a target's name and type, even one MC did not build) "
-        + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members.",
+        + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members. With "
+        + "formerTargets: true it deletes the objects MC built for targets taken out of the spec instead.",
         clean));
 
     ObjectNode find = mapper.createObjectNode();
@@ -483,6 +491,23 @@ public class McpServer {
         + "Confirmed uploads are logged in .mc/uploads.log.",
         uploadSchema));
 
+    ObjectNode runSchema = mapper.createObjectNode();
+    runSchema.put("type", "object");
+    ObjectNode runProps = runSchema.putObject("properties");
+    runProps.putObject("command").put("type", "string").put("description", "One CL command as you would type it, e.g. "
+        + "SBMJOB CMD(CALL PGM(PGM1)) JOB(JOB1) or ENDJOB JOB(123456/USER1/JOB1) OPTION(*CNTRLD)");
+    runProps.putObject("confirm").put("type", "boolean")
+        .put("description", "false (default): show what would run. true: run it, after the user agreed");
+    runSchema.putArray("required").add("command");
+    tools.add(tool("run_command",
+        "Run one CL command in MasterCompiler's IBM i job (the build job: this user, the spec's library list), e.g. to "
+        + "start or end an application after a deploy (SBMJOB, ENDJOB). Refused when it names a protectedLibs library, or when "
+        + "the spec has none; "
+        + "nothing else about its effects is checked. First call without confirm and show the user the command; call "
+        + "again with confirm: true only if they agree. Returns success and the job's messages; logged in "
+        + ".mc/commands.log.",
+        runSchema));
+
     tools.add(tool("import_source",
         "Copy sources from the IBM i into the project folder, named with MC's conventions (copybooks as "
         + "*.include.*). Takes the objects (it finds their sources and /COPY members like find_source) or source "
@@ -514,7 +539,8 @@ public class McpServer {
     tools.add(tool("screen_open",
         "Open an interactive 5250 session (a green screen) on the build system and sign on as the build connection's "
         + "user, to run and check display file programs. Returns the first screen after sign-on. MasterCompiler types "
-        + "the password itself (one attempt). Every screen is also written to .mc/screen.txt, so the user can watch it in "
+        + "the password itself (one attempt); another hidden field on the sign-on display (a PASSCODE) is asked of the "
+        + "user in a password box. Every screen is also written to .mc/screen.txt, so the user can watch it in "
         + "VS Code. First call without confirm and show the user what it would do; call again with confirm: true only "
         + "if they agree. Ask the user before running commands or programs that change data.",
         open));
@@ -541,10 +567,15 @@ public class McpServer {
     cursorProp.put("description", "Optional {row, col} to put the cursor before the key (e.g. on a list line for F4 or F2)");
     sendProps.putObject("waitSeconds").put("type", "integer")
         .put("description", "How long to wait for the next screen (default 30)");
+    ObjectNode askProp = sendProps.putObject("ask");
+    askProp.put("type", "array");
+    askProp.putObject("items").put("type", "string");
+    askProp.put("description", "Hidden fields (a PASSCODE, a password) by number or \"row,col\": MasterCompiler asks the "
+        + "user for each in a password box and types it; the value never reaches you");
     tools.add(tool("screen_send",
         "Type into the 5250 screen's input fields and press a key, as a user at the terminal; returns the next screen. "
-        + "Hidden (password) fields are never typed into. Runs as the signed-on user: ask the user before commands "
-        + "or programs that change data.",
+        + "Never pass a hidden (password) field's value: name it in 'ask' and MasterCompiler asks the user for it in a "
+        + "password box. Runs as the signed-on user: ask the user before commands or programs that change data.",
         send));
 
     ObjectNode close = mapper.createObjectNode();
@@ -669,6 +700,8 @@ public class McpServer {
     ObjectNode keepGoing = props.putObject("keepGoing");
     keepGoing.put("type", "boolean");
     keepGoing.put("description", "build only (default true): false stops at the first failed target");
+    props.putObject("showSkipped").put("type", "boolean").put("description",
+        "true: list the unchanged (skipped) targets too; by default they are only counted");
     return schema;
   }
 
@@ -679,7 +712,7 @@ public class McpServer {
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
     boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows")
-        || name.equals("upload_file") || name.equals("cancel")
+        || name.equals("upload_file") || name.equals("cancel") || name.equals("run_command")
         || name.equals("screen_open") || name.equals("screen_send");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
     ObjectNode annotations = tool.putObject("annotations");
@@ -790,6 +823,7 @@ public class McpServer {
         case "import_source": return importSource(args);
         case "spool":         return spool(args);
         case "upload_file":   return uploadFile(args);
+        case "run_command":   return runCommand(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
     } catch (Exception e) {
@@ -1034,7 +1068,8 @@ public class McpServer {
 
     compiler.build();
     BuildReport report = compiler.getReport();
-    report.compact(args.path("minSeverity").asInt(20));
+    FormerTargets.update(projectDir(), report);  // before compact: every current target is still listed
+    report.compact(args.path("minSeverity").asInt(20), args.path("showSkipped").asBoolean(false));
     if (progress == null) return toolResult(pretty.writeValueAsString(report), !report.success);
     progress.report = report;
     ObjectNode text = mapper.createObjectNode();
@@ -1081,19 +1116,43 @@ public class McpServer {
 
     ObjectDescriptor objects = new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose());
     List<TargetKey> existing = new java.util.ArrayList<TargetKey>();
-    List<TargetKey> targets = new java.util.ArrayList<TargetKey>(spec.targets.keySet());
-    java.util.Collections.reverse(targets);  // dependents first
+    boolean former = args.path("formerTargets").asBoolean(false);
+    String curlib = currentLibrary();
+    ObjectNode result = mapper.createObjectNode();
+    ArrayNode elsewhere = mapper.createArrayNode();
+    List<TargetKey> targets = new java.util.ArrayList<TargetKey>();
+    if (former) {
+      /* objects MC built for targets the spec no longer has (FormerTargets), in the current library */
+      java.util.Set<String> current = new java.util.HashSet<String>();
+      for (TargetKey key : spec.targets.keySet()) {
+        current.add(FormerTargets.object((key.isCurLib() ? curlib : key.getLibrary()) + "." + key.getObjectName() + "."
+            + key.getObjectTypeEnum().name()));
+      }
+      for (String target : FormerTargets.former(projectDir(), current)) {
+        TargetKey key = new TargetKey(target);
+        if (!key.getLibrary().equalsIgnoreCase(curlib) || protectedLibs().stream().anyMatch(p -> p.equalsIgnoreCase(key.getLibrary()))) {
+          elsewhere.add(target + ": in " + key.getLibrary() + ", not the current library (" + curlib + "): not deleted here");
+          continue;
+        }
+        targets.add(key);
+      }
+    } else {
+      targets.addAll(spec.targets.keySet());
+      java.util.Collections.reverse(targets);  // dependents first
+    }
     for (TargetKey key : targets) {
       objects.objectExists(key);
       if (key.objectExists()) existing.add(key);
+      else if (former) FormerTargets.forget(projectDir(), key.asString());  // already gone
     }
 
     boolean confirmed = args.path("confirm").asBoolean(false);
-    ObjectNode result = mapper.createObjectNode();
-    result.put("library", currentLibrary());
+    result.put("library", curlib);
+    if (former) result.put("formerTargets", true);
     result.put("confirmed", confirmed);
     ArrayNode listed = result.putArray(confirmed ? "deleted" : "wouldDelete");
     ArrayNode failed = result.putArray("notDeleted");
+    failed.addAll(elsewhere);
     for (TargetKey key : existing) {
       String name = key.getObjectName() + " *" + key.getObjectTypeEnum().name();
       if (!confirmed) {
@@ -1104,6 +1163,7 @@ public class McpServer {
         executor.deleteObject(key);
         listed.add(name);
         removeEventMember(key.getObjectName());
+        if (former) FormerTargets.forget(projectDir(), key.asString());
       } catch (Exception e) {
         failed.add(name + ": " + e.getMessage());
       }
@@ -1208,8 +1268,55 @@ public class McpServer {
       ObjectNode result = new SqlTools(maxRows, mask, readOnlyMode ? readLibs : null).query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
       return toolResult(pretty.writeValueAsString(result), false);
     } catch (java.sql.SQLException e) {
-      return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage(), true);
+      String hint = "42703".equals(e.getSQLState()) ? columnsHint(statement) : "";
+      return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage() + hint, true);
     }
+  }
+
+  private static final java.util.regex.Pattern QUERY_TABLE = java.util.regex.Pattern.compile(
+      "\\b(?:FROM|JOIN)\\s+(?:([A-Z$#@][A-Z0-9_$#@]*)\\s*[./]\\s*)?([A-Z$#@][A-Z0-9_$#@]*)", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+  /* SQL0206 (column not found): the columns of the query's tables, so the right name is one call away */
+  private String columnsHint(String statement) {
+    StringBuilder hint = new StringBuilder();
+    java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
+    int tables = 0;
+    java.util.regex.Matcher m = QUERY_TABLE.matcher(statement);
+    while (m.find() && tables < 5) {
+      String lib = m.group(1) != null ? m.group(1).toUpperCase() : null;
+      String table = m.group(2).toUpperCase();
+      if (table.equals("TABLE") || table.equals("LATERAL") || !seen.add((lib != null ? lib + "." : "") + table)) continue;
+      tables++;
+      String where = lib != null ? "C.TABLE_SCHEMA = ?" : "C.TABLE_SCHEMA = (SELECT L.SCHEMA_NAME FROM QSYS2.LIBRARY_LIST_INFO L "
+          + "WHERE L.ORDINAL_POSITION = (SELECT MIN(L2.ORDINAL_POSITION) FROM QSYS2.LIBRARY_LIST_INFO L2 JOIN QSYS2.SYSTABLES T "
+          + "ON T.TABLE_SCHEMA = L2.SCHEMA_NAME AND (T.TABLE_NAME = ? OR T.SYSTEM_TABLE_NAME = ?)))";
+      try (java.sql.PreparedStatement stmt = readOnly.prepareStatement("SELECT C.TABLE_SCHEMA, C.COLUMN_NAME, C.SYSTEM_COLUMN_NAME "
+          + "FROM QSYS2.SYSCOLUMNS2 C WHERE " + where + " AND (C.TABLE_NAME = ? OR C.SYSTEM_TABLE_NAME = ?) "
+          + "FETCH FIRST 120 ROWS ONLY")) {
+        int p = 1;
+        if (lib != null) stmt.setString(p++, lib);
+        else { stmt.setString(p++, table); stmt.setString(p++, table); }
+        stmt.setString(p++, table);
+        stmt.setString(p, table);
+        stmt.setQueryTimeout(30);
+        StringBuilder columns = new StringBuilder();
+        String schema = null;
+        try (java.sql.ResultSet rs = stmt.executeQuery()) {
+          while (rs.next()) {
+            schema = rs.getString(1).trim();
+            String name = rs.getString(2).trim();
+            String system = rs.getString(3) != null ? rs.getString(3).trim() : name;
+            columns.append(columns.length() > 0 ? ", " : "").append(name).append(system.equals(name) ? "" : " (" + system + ")");
+          }
+        }
+        if (schema != null && seen.add("=" + schema + "." + table)) {
+          hint.append("\nColumns of ").append(schema).append('.').append(table).append(": ").append(columns);
+        }
+      } catch (Exception e) {
+        logger.info("No column list for {}: {}", table, e.getMessage());
+      }
+    }
+    return hint.toString();
   }
 
   private ObjectNode findObject(JsonNode args) throws Exception {
@@ -1241,6 +1348,13 @@ public class McpServer {
     result.put("spec", specName());
     ArrayNode prot = result.putArray("protectedLibs");
     for (String lib : protectedLibs()) prot.add(lib);
+    try {
+      BuildSpec spec = loadSpec();
+      ArrayNode up = result.putArray("uploadFolders");  // where upload_file may write on the IBM i
+      for (String f : spec.uploadFolders) up.add(f);
+      ArrayNode from = result.putArray("uploadSources");  // folders on the PC it may take files from, besides the project
+      for (String f : spec.uploadSources) from.add(f);
+    } catch (Exception noSpec) { /* shown without them */ }
     if (signOn == null) signOn = buildSignOn();
     if (signOn != null) SignOnGuard.known(signOn);
     /* Not connected (a rejected password, a network error): status still answers, with why */
@@ -1250,6 +1364,8 @@ public class McpServer {
       result.put("system", system.getSystemName());
       result.put("currentLibrary", currentLibrary());
       result.put("libraryList", String.join(" ", SqlTools.libraryList(connection)));
+      Integer screens = screenCcsid();
+      if (screens != null) result.put("screenCcsid", screens);
     } catch (Exception e) {
       result.put("error", e.getMessage());
     }
@@ -1330,6 +1446,14 @@ public class McpServer {
       return toolResult("Refused: " + program + " can change files (" + writes + ") and the spec sets no protectedLibs, so "
           + "nothing keeps it from production data. Add protectedLibs: [<production libraries>] to the spec first.", true);
     }
+    /* Database writes are checked; other effects (jobs, the IFS, commands run by text) are only listed */
+    List<String> sourceLines = java.nio.file.Files.readAllLines(source.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+    ArrayNode effects = result.putArray("otherEffects");
+    for (String effect : FileWrites.otherEffects(sourceLines)) effects.add(effect);
+    result.put("notChecked", "Only database file writes are checked against protectedLibs. otherEffects lists what the "
+        + "source names besides them (submitted jobs, ended jobs, Qshell, IFS files, commands run by text, programs it "
+        + "calls); none of those is checked, and a CALLed program's own effects are not seen" + (effects.size() == 0
+        ? ". None was found in this source, which does not mean there are none" : ""));
     result.set("parameters", args.path("parameters"));
     /* checkRows: the same queries before and after the call */
     List<RowChanges> checks;
@@ -1359,6 +1483,7 @@ public class McpServer {
     ObjectNode ran = ProgramCaller.call(system, curlib, program, args.path("parameters").isArray()
         ? args.path("parameters") : mapper.createArrayNode(), SqlTools.libraryList(connection), curlib);
     ran.set("writes", writes);
+    ran.set("otherEffects", effects);
     if (!checks.isEmpty()) {
       ArrayNode changes = ran.putArray("rowChanges");
       List<String> masked = new java.util.ArrayList<String>();
@@ -1381,6 +1506,62 @@ public class McpServer {
     } catch (IllegalArgumentException e) {
       return toolResult(e.getMessage(), true);
     }
+  }
+
+  /* run_command: one CL command in the build job, after a preview the user agreed to; logged in .mc/commands.log */
+  private ObjectNode runCommand(JsonNode args) throws Exception {
+    String command = args.path("command").asText("").trim();
+    if (command.isEmpty()) return toolResult("Give the CL 'command', e.g. SBMJOB CMD(CALL PGM(PGM1)) JOB(JOB1)", true);
+    if (command.contains("\n") || command.contains("\r") || command.length() > 5000) {
+      return toolResult("'command' is one CL command on one line (up to 5000 characters)", true);
+    }
+    String upper = command.toUpperCase(java.util.Locale.ROOT);
+    if (protectedLibs().isEmpty()) {
+      return toolResult("Refused: the spec sets no protectedLibs, so nothing keeps a command from production data. Add "
+          + "protectedLibs: [<production libraries>] to the spec first.", true);
+    }
+    for (String lib : protectedLibs()) {
+      if (java.util.regex.Pattern.compile("(?<![A-Z0-9_$#@])" + java.util.regex.Pattern.quote(lib.trim().toUpperCase(java.util.Locale.ROOT))
+          + "(?![A-Z0-9_$#@])").matcher(upper).find()) {
+        return toolResult("Refused: the command names " + lib.trim().toUpperCase() + ", a protectedLibs library", true);
+      }
+    }
+    connectWithLibraryList();
+    ObjectNode result = mapper.createObjectNode();
+    result.put("command", command);
+    result.put("job", buildJob);
+    result.put("user", system.getUserId());
+    result.put("currentLibrary", currentLibrary());
+    result.put("notChecked", "It runs as written in MasterCompiler's job, as this user, with the spec's library list. Only "
+        + "the protectedLibs names are checked (as words in the command); what the command or the programs it calls or "
+        + "submits do is not");
+    if (!args.path("confirm").asBoolean(false)) {
+      result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
+      return toolResult(pretty.writeValueAsString(result), false);
+    }
+    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
+    Timestamp since = executor.getCurrentTime();
+    boolean ok = true;
+    try {
+      executor.executeCommand(command.replace("'", "''"), since);  // inside QCMDEXC('...'): quotes doubled
+    } catch (CompilerException e) {
+      ok = false;
+    }
+    result.put("success", ok);
+    ArrayNode messages = result.putArray("messages");
+    for (BuildReport.JoblogMessage m : executor.getJoblogMessages(since)) {
+      messages.addObject().put("id", m.id).put("severity", m.severity).put("text", m.text);
+    }
+    try {
+      File log = new File(projectDir(), ".mc/commands.log");
+      log.getParentFile().mkdirs();
+      java.nio.file.Files.write(log.toPath(), (java.time.OffsetDateTime.now().withNano(0) + " " + system.getUserId() + " "
+          + (ok ? "ok" : "failed") + ": " + command + System.lineSeparator()).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+    } catch (Exception e) {
+      logger.warn("Could not log the command: {}", e.getMessage());
+    }
+    return toolResult(pretty.writeValueAsString(result), !ok);
   }
 
   /* The file is on the PC: MC on the PC uploads (over SSH the proxy does, before this server sees the call) */
@@ -1628,6 +1809,48 @@ public class McpServer {
     return signOn != null ? SignOnGuard.signOn(signOn, attempt) : attempt.call();
   }
 
+  /* QCHRID's code page: the 5250 screens' CCSID (ScreenTools); read once, on the build connection (in the lane) */
+  private volatile Integer screenCcsid;
+
+  private Integer screenCcsid() {
+    if (screenCcsid != null || connection == null) return screenCcsid;
+    try (java.sql.Statement stmt = connection.createStatement();
+         java.sql.ResultSet rs = stmt.executeQuery("SELECT SYSTEM_VALUE_NAME, CURRENT_NUMERIC_VALUE, CURRENT_CHARACTER_VALUE "
+             + "FROM QSYS2.SYSTEM_VALUE_INFO WHERE SYSTEM_VALUE_NAME IN ('QCHRID', 'QCCSID')")) {
+      Integer chrid = null;
+      Integer ccsid = null;
+      while (rs.next()) {
+        if ("QCHRID".equals(rs.getString(1).trim())) {
+          chrid = ScreenTools.codePage(rs.getString(3) != null ? rs.getString(3) : String.valueOf(rs.getLong(2)));
+        } else if (rs.getLong(2) > 0 && rs.getLong(2) != 65535) {
+          ccsid = (int) rs.getLong(2);
+        }
+      }
+      screenCcsid = chrid != null && chrid > 0 ? chrid : ccsid;  // QCHRID's code page, else QCCSID
+      if (screenCcsid == null) logger.warn("Neither QCHRID nor QCCSID gives the screens' CCSID: 37 is used");
+    } catch (Exception e) {
+      logger.warn("Could not read QCHRID: {}", e.getMessage());
+    }
+    return screenCcsid;
+  }
+
+  /* For screen_open without a ccsid: the cached value, else read now if the build job is free */
+  private Integer screenCcsidForScreens() {
+    if (screenCcsid != null) return screenCcsid;
+    try {
+      BuildProgress running = lastBuild;
+      if ((running != null && running.isRunning()) || !lane.tryAcquire(5, java.util.concurrent.TimeUnit.SECONDS)) return null;
+      try {
+        connect();
+        return screenCcsid();
+      } finally {
+        lane.release();
+      }
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
   /* The 5250 session signs on as the build connection does: null on the IBM i (no password there) */
   private SignOnGuard.Target screenSignOn() {
     try {
@@ -1692,6 +1915,14 @@ public class McpServer {
     error.put("code", code);
     error.put("message", message);
     send(response);
+  }
+
+  private void sendLine(String line) {
+    try {
+      send(mapper.readTree(line));
+    } catch (Exception e) {
+      logger.error("Could not send MCP message", e);
+    }
   }
 
   private synchronized void send(JsonNode message) {

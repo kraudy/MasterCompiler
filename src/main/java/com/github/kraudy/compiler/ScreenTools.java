@@ -72,14 +72,22 @@ final class ScreenTools {
     }
     int port = args.path("port").asInt(Integer.parseInt(env("MC_5250_PORT", "992")));
     boolean tls = args.has("tls") ? args.get("tls").asBoolean() : port != 23;
-    int ccsid = args.path("ccsid").asInt(Integer.parseInt(env("MC_5250_CCSID", "37")));
+    int ccsid = args.path("ccsid").asInt(defaultCcsid());
     String where = build.host + ":" + port + (tls ? " (TLS)" : " (no TLS: the password crosses the network in clear text)");
     if (!args.path("confirm").asBoolean(false)) {
       ObjectNode preview = mapper.createObjectNode();
       preview.put("wouldOpen", "an interactive 5250 session on " + where + ", signed on as " + build.user
           + ": a job where every key you send runs as that user");
       preview.put("signOn", "one attempt with the build connection's password; if IBM i rejects it, MasterCompiler "
-          + "stops signing on for this user (also for builds) until the user types the password again");
+          + "stops signing on for this user (also for builds) until the user types the password again. With a code field "
+          + "(a PASSCODE) a refusal may be the code's: it does not stop the builds, and before another code sign-on "
+          + "MasterCompiler checks the password alone over the host servers");
+      String how = SecretPrompt.how();
+      preview.put("otherHiddenFields", "a hidden field besides the password on the sign-on display (a PASSCODE, a token) "
+          + (how != null ? "is asked of the user through " + how + ", before Enter; its value never reaches the chat"
+          : "cannot be asked here (no desktop, no URL elicitation): the user signs on in their own emulator"));
+      preview.put("ccsid", ccsid + (args.has("ccsid") ? "" : " (MC_5250_CCSID if set, else the system's QCHRID code page, "
+          + "else 37 when it could not be read; give 'ccsid' if accents show wrong)"));
       preview.put("watch", watchFile.getPath() + ": every screen is written there; the user can open it in VS Code to follow along");
       preview.put("next", "Nothing opened yet. Show this to the user; if they agree, call screen_open again with confirm: true.");
       return result(mapper.writeValueAsString(preview), false);
@@ -98,12 +106,59 @@ final class ScreenTools {
       }
       Screen5250.Field userField = input.get(0);
       Screen5250.Field passwordField = input.get(1);
+      /* Other hidden fields (a PASSCODE): asked of the user before Enter, so an empty one is not a refused sign-on.
+         A refusal then may be the code's: it does not block the password for builds, but before another code
+         sign-on MasterCompiler checks the password alone over the host servers (a wrong one counts there) */
+      boolean codeField = false;
+      for (int n = 2; n < input.size(); n++) codeField |= input.get(n).hidden();
+      if (codeField) {
+        SignOnGuard.check(target);  // a password already refused: no code asked, no try
+        Long refused = codeRefused(target);
+        if (refused != null) {
+          try {
+            /* The password alone: right, and IBM i's count of failed sign-ons starts again; wrong, a refusal like any */
+            SignOnGuard.signOn(target, () -> {
+              com.ibm.as400.access.AS400 check = new com.ibm.as400.access.AS400(target.host, target.user, target.password.toCharArray());
+              try {
+                check.setGuiAvailable(false);
+                check.validateSignon();
+              } finally {
+                check.disconnectAllServices();
+              }
+              return Boolean.TRUE;
+            });
+            /* the mark stays until a sign-on with a code works: every try until then checks the password first */
+          } catch (SignOnGuard.Blocked | SignOnGuard.Refused e) {
+            screen.close();
+            throw e;
+          } catch (Exception e) {
+            if (SignOnGuard.authCode(e) != null) {
+              screen.close();
+              throw e;
+            }
+            screen.close();
+            return result("A sign-on with a code was refused before (" + java.time.Instant.ofEpochMilli(refused) + "), and "
+                + "MasterCompiler could not check the password alone over the host servers (" + e.getMessage() + "), so it "
+                + "tries no other code sign-on (QMAXSIGN). The user signs on once in their own emulator, then deletes "
+                + CODE_REFUSED + " and calls screen_open again.", true);
+          }
+        }
+      }
+      boolean askedOthers = false;
+      for (int n = 2; n < input.size(); n++) {
+        if (input.get(n).hidden()) {
+          askUser(screen, input.get(n), n + 1, "Sign-on to " + target.host);
+          askedOthers = true;
+        }
+      }
+      final boolean withCode = askedOthers;
+      if (withCode) codeRefused(target, System.currentTimeMillis());  // until it works: a dropped try leaves the mark
       SignOnGuard.signOn(target, () -> {
         screen.fill(userField, target.user);
         fillHidden(screen, passwordField, target.password);
         screen.press(Screen5250.AID_ENTER);
         screen.waitForInput(wait);
-        refusedSignOn(screen, new SignOnDisplay(userField.start, passwordField.start));
+        refusedSignOn(screen, new SignOnDisplay(userField.start, passwordField.start), withCode, target);
         return screen;
       });
     } catch (Exception e) {
@@ -111,12 +166,87 @@ final class ScreenTools {
       throw e;
     }
     session = screen;
+    if (codeRefused(target) != null) codeRefused(target, null);  // password and code accepted
     writeWatch();
     ObjectNode answer = view(screen);
     answer.put("signedOn", target.user + "@" + target.name);
     answer.put("note", "Signed on with the user profile's own library list, not the spec's: run CHGLIBL / CHGCURLIB on "
         + "a command line first when the program needs them. Sign off (SIGNOFF) before screen_close so the job ends.");
     return result(mapper.writeValueAsString(answer), false);
+  }
+
+  /* The screens' CCSID when screen_open names none: MC_5250_CCSID, else the system's (QCHRID's code page, what a
+     device that the telnet server creates uses), else 37 */
+  private static volatile java.util.function.Supplier<Integer> systemCcsid;
+
+  static void systemCcsid(java.util.function.Supplier<Integer> supplier) {
+    systemCcsid = supplier;
+  }
+
+  private static int defaultCcsid() {
+    String env = env("MC_5250_CCSID", "").trim();
+    if (env.matches("\\d{2,5}")) return Integer.parseInt(env);
+    if (!env.isEmpty()) logger.warn("MC_5250_CCSID={} is not a CCSID: ignored", env);
+    try {
+      Integer system = systemCcsid != null ? systemCcsid.get() : null;
+      if (system != null && system > 0) return system;
+    } catch (Exception e) {
+      logger.info("5250: the system's CCSID is not known ({}), 37 is used", e.getMessage());
+    }
+    return 37;
+  }
+
+  /* QCHRID's code page, the CCSID of the screens' text: SYSTEM_VALUE_INFO gives "00000006970000000284" (two 10-digit
+     numbers: character set, code page); DSPSYSVAL shows "697 284" */
+  static Integer codePage(String qchrid) {
+    if (qchrid == null) return null;
+    String value = qchrid.trim();
+    String page = value.matches("\\d{20}") ? value.substring(10) : value.replaceAll("^.*\\s", "");
+    try {
+      int ccsid = Integer.parseInt(page);
+      return ccsid > 0 && ccsid < 65535 ? ccsid : null;
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  /* Sign-ons with a code (a PASSCODE) refused, per host and user: kept in the project, so a restart does not retry */
+  static final String CODE_REFUSED = ".mc/screen-code-refused.json";
+
+  private static File codeRefusedFile() {
+    return new File(watchFile.getParentFile(), "screen-code-refused.json");
+  }
+
+  private static final Map<String, Long> codeRefusedHere = new java.util.HashMap<String, Long>();  // also when the file fails
+
+  /* The mark, from this run or the file; a file that cannot be read counts as marked (the safe side) */
+  private static Long codeRefused(SignOnGuard.Target target) {
+    Long here = codeRefusedHere.get(target.key());
+    if (here != null) return here;
+    File file = codeRefusedFile();
+    if (!file.isFile()) return null;
+    try {
+      JsonNode when = mapper.readTree(file).path(target.key());
+      if (when.isMissingNode()) return null;
+      return when.isNumber() ? when.asLong() : 0L;
+    } catch (Exception unreadable) {
+      return 0L;
+    }
+  }
+
+  private static void codeRefused(SignOnGuard.Target target, Long when) {
+    if (when == null) codeRefusedHere.remove(target.key());
+    else codeRefusedHere.put(target.key(), when);
+    try {
+      File file = codeRefusedFile();
+      ObjectNode all = file.isFile() && mapper.readTree(file).isObject() ? (ObjectNode) mapper.readTree(file) : mapper.createObjectNode();
+      if (when == null) all.remove(target.key());
+      else all.put(target.key(), when);
+      file.getParentFile().mkdirs();
+      mapper.writeValue(file, all);
+    } catch (Exception e) {
+      logger.warn("Could not write {}: {}", CODE_REFUSED, e.getMessage());
+    }
   }
 
   /* Where the sign-on display had its user and password fields */
@@ -130,16 +260,43 @@ final class ScreenTools {
     }
   }
 
+  /* A hidden field's value from the user (SecretPrompt), typed here; never logged, returned or kept */
+  private static void askUser(Screen5250 screen, Screen5250.Field f, int number, String title) throws Exception {
+    String label = "";
+    for (JsonNode o : view(screen).path("fields")) {
+      if (o.path("field").asInt() == number) label = o.path("label").asText("");
+    }
+    String what = label.isEmpty() ? "the hidden field " + number : label;
+    char[] value = SecretPrompt.ask(title, what, f.length);
+    try {
+      if (value == null) throw new IllegalArgumentException("The user did not give " + what + ": nothing was typed or sent");
+      fillSecret(screen, f, new String(value), what);
+    } finally {
+      SecretPrompt.clear(value);
+    }
+  }
+
   /* The password goes only into the sign-on display's hidden field, typed by MasterCompiler itself */
   private static void fillHidden(Screen5250 screen, Screen5250.Field field, String password) {
     if (password.length() > field.length) {
       throw new IllegalArgumentException("The password is longer than the sign-on display's password field");
     }
-    screen.fill(field, password);
+    fillSecret(screen, field, password, "the password");
+  }
+
+  /* fill's own errors quote the text: for a secret, only what was wrong */
+  private static void fillSecret(Screen5250 screen, Screen5250.Field field, String secret, String what) {
+    try {
+      screen.fill(field, secret);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(what + " does not fit its field (" + field.length + " positions"
+          + (field.numeric() ? ", digits only" : "") + "): nothing was sent");
+    }
   }
 
   /* Still on the sign-on display (the password field again): IBM i refused it */
-  private static void refusedSignOn(Screen5250 screen, SignOnDisplay signOn) throws Exception {
+  private static void refusedSignOn(Screen5250 screen, SignOnDisplay signOn, boolean withCode, SignOnGuard.Target target)
+      throws Exception {
     if (screen.closed()) {
       /* the IBM i itself closed it (it does after too many tries, or varies the device off): count it as refused */
       if (Screen5250.CLOSED_BY_IBMI.equals(screen.closedBy())) {
@@ -172,6 +329,16 @@ final class ScreenTools {
         : lower.contains("not correct") ? "CPF1107"
         : lower.contains("does not exist") ? "CPF1120"
         : "5250 sign-on refused";
+    /* With a code the user typed (a PASSCODE) the refusal may be the code's: the password is not blocked for the
+       builds, and no other code sign-on is tried until the password alone signed on (see open). The bottom line
+       saying the profile is disabled still counts */
+    String bottom = message.toLowerCase(Locale.ROOT);
+    if (withCode && !bottom.contains("disabled") && !bottom.contains("cannot sign on")) {
+      codeRefused(target, System.currentTimeMillis());
+      throw new java.io.IOException("The sign-on with the password and the code the user typed was refused"
+          + (message.isEmpty() ? "" : ": " + message) + ". It may be the code: the password was not marked as refused, "
+          + "and before another try MasterCompiler checks the password alone. Check the code with the user.");
+    }
     throw new SignOnGuard.Refused(code, "5250 sign-on refused" + (message.isEmpty() ? "" : ": " + message));
   }
 
@@ -198,10 +365,20 @@ final class ScreenTools {
       Map.Entry<String, JsonNode> entry = it.next();
       Screen5250.Field f = field(screen, input, entry.getKey());
       if (f.hidden()) {
-        throw new IllegalArgumentException("Field " + entry.getKey() + " is a hidden (password) field: MasterCompiler "
-            + "does not type into those. The user types it in their own emulator.");
+        throw new IllegalArgumentException("Field " + entry.getKey() + " is a hidden (password) field: never pass its "
+            + "value. Put its number in 'ask' instead: MasterCompiler asks the user for it and types it.");
       }
       screen.fill(f, entry.getValue().asText());
+    }
+    /* ask: hidden fields whose value MasterCompiler asks of the user (never seen by the agent) */
+    for (JsonNode which : args.path("ask")) {
+      String k = which.asText();
+      Screen5250.Field f = field(screen, input, k);
+      if (!f.hidden()) {
+        throw new IllegalArgumentException("Field " + k + " is not hidden: put its value in 'fields'. 'ask' is only for "
+            + "hidden fields (a PASSCODE, a password)");
+      }
+      askUser(screen, f, input.indexOf(f) + 1, "IBM i 5250 screen");
     }
     if (args.has("cursor")) {
       screen.moveCursor(args.path("cursor").path("row").asInt(), args.path("cursor").path("col").asInt());

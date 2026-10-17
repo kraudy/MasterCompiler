@@ -108,7 +108,8 @@ public class CommandExecutor {
             getJoblogMessages(commandTime)));
         if (removeXml != null && !jobEnded()) RpgUnit.remove(connection, removeXml);
       }
-      hooksRun.add((dryRun && !isLibraryListCommand(command) ? "planned: " : "ok: ") + CommandStringParser.toPasteable(commandString));
+      hooksRun.add((dryRun && !isLibraryListCommand(command) ? "planned: " : "ok: ") + CommandStringParser.toPasteable(commandString)
+          + (timeout > 0 ? " (timeout " + timeout + " s)" : ""));
     } catch (CompilerException e) {
       /* ignore: [CPF2105, ...] on the hook, like MONMSG */
       String text = e.getFullContext() + " " + (e.getCause() != null ? e.getCause().toString() : "");

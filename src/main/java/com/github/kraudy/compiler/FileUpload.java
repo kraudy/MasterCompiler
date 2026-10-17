@@ -42,15 +42,37 @@ final class FileUpload {
 
   /* uploadFolders from the spec (build.yaml, else mc-base.yaml), checked */
   static List<String> folders(File project) throws Exception {
+    List<String> folders = new ArrayList<String>();
+    for (String f : specList(project, "uploadFolders")) folders.add(folder(f, "uploadFolders"));
+    return folders;
+  }
+
+  /* Local folders files may also be uploaded from (uploadSources), besides the project: absolute or project-relative */
+  static List<File> sources(File project) throws Exception {
+    List<File> roots = new ArrayList<File>();
+    roots.add(project.getCanonicalFile());
+    for (String s : specList(project, "uploadSources")) {
+      File f = new File(s.trim());
+      if (!f.isAbsolute()) f = new File(project, s.trim());
+      f = f.getCanonicalFile();
+      if (!f.isDirectory()) throw new IllegalArgumentException("uploadSources: " + s + " is not a folder on this PC");
+      if (f.getParentFile() == null) throw new IllegalArgumentException("uploadSources: " + s + " is a whole drive; name a folder");
+      roots.add(f);
+    }
+    return roots;
+  }
+
+  /* A list from the spec (build.yaml, else mc-base.yaml) */
+  private static List<String> specList(File project, String field) throws Exception {
     ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
     for (String name : new String[] { "build.yaml", "mc-base.yaml" }) {
       File spec = new File(project, name);
       if (!spec.isFile()) continue;
-      JsonNode node = yaml.readTree(spec).path("uploadFolders");
+      JsonNode node = yaml.readTree(spec).path(field);
       if (node.isMissingNode() || node.isNull()) continue;
-      List<String> folders = new ArrayList<String>();
-      for (JsonNode f : node.isArray() ? node : mapper.createArrayNode().add(node)) folders.add(folder(f.asText(), name));
-      return folders;
+      List<String> values = new ArrayList<String>();
+      for (JsonNode f : node.isArray() ? node : mapper.createArrayNode().add(node)) values.add(f.asText());
+      return values;
     }
     return new ArrayList<String>();
   }
@@ -104,8 +126,12 @@ final class FileUpload {
     File root = project.getCanonicalFile();
     File local = new File(requested).isAbsolute() ? new File(requested) : new File(root, requested);
     local = local.getCanonicalFile();
-    if (!local.toPath().startsWith(root.toPath())) {
-      throw new IllegalArgumentException(requested + " is outside the project folder: only the project's files are uploaded");
+    List<File> roots = sources(project);
+    boolean fromAllowed = false;
+    for (File r : roots) fromAllowed |= local.toPath().startsWith(r.toPath());
+    if (!fromAllowed) {
+      throw new IllegalArgumentException(requested + " is outside the project folder and the spec's uploadSources: only "
+          + "those files are uploaded. Ask the user before adding a folder to uploadSources");
     }
     if (!local.isFile()) throw new IllegalArgumentException(requested + " is not a file");
     if (local.length() > MAX_BYTES) throw new IllegalArgumentException(requested + " is larger than 512 MB");
@@ -134,7 +160,9 @@ final class FileUpload {
     boolean text = TEXT.contains(ext);
 
     ObjectNode result = mapper.createObjectNode();
-    result.put("file", root.toPath().relativize(local.toPath()).toString().replace('\\', '/'));
+    result.put("file", local.toPath().startsWith(root.toPath())
+        ? root.toPath().relativize(local.toPath()).toString().replace('\\', '/') : local.getPath());
+    result.put("localPath", local.getPath());
     result.put("bytes", local.length());
     result.put("sha256", sha256(local));
     result.put("to", path);
