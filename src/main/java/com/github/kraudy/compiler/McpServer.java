@@ -463,6 +463,14 @@ public class McpServer {
     ObjectNode debugProps = (ObjectNode) debugSchema.get("properties");
     ObjectNode breakpoints = debugProps.putObject("breakpoints");
     breakpoints.put("type", "array");
+    ArrayNode breakItem = breakpoints.putObject("items").putArray("anyOf");
+    breakItem.addObject().put("type", "integer");
+    ObjectNode breakObject = breakItem.addObject();
+    breakObject.put("type", "object");
+    ObjectNode breakProps = breakObject.putObject("properties");
+    breakProps.putObject("line").put("type", "integer");
+    breakProps.putObject("module").put("type", "string");
+    breakObject.putArray("required").add("line");
     breakpoints.put("description", "Up to " + ProgramDebugger.MAX_BREAKS + " lines of the program's source file to stop at: "
         + "[12, 40], or [{\"line\": 12, \"module\": \"MOD1\"}] for a program of several modules. A line without a "
         + "statement (blank, comment) is reported as not set");

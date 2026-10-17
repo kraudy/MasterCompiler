@@ -3,6 +3,12 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.24
+
+- `debug_program` loads in GitHub Copilot: its `breakpoints` schema declares its items (a line number or
+  `{line, module}`). Copilot refused the tool with "tool parameters array type must have items". After updating, run
+  Developer: Reload Window in VS Code: restarting only the MCP server keeps Copilot's old schema.
+
 ## v0.3.23
 
 - `debug_program`: run a program like `call_program` with breakpoints on source lines; at each stop MC reads the
