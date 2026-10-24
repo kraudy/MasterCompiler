@@ -33,6 +33,13 @@ public class ArgParser {
     MAX_ROWS      (null, "max-rows",     Kind.VALUE, "With --read-only: most rows one query or copy may read"),
     MASK_COLUMNS  (null, "mask-columns", Kind.VALUE, "With --read-only: columns (comma-separated) sql shows masked and copy_rows must replace"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
+    SSH_PORT      (null, "ssh-port",     Kind.VALUE, "SSH port; wins over the Code for IBM i connection's port and IBMI_SSH_PORT (default 22)"),
+    REMOTE        (null, "remote",       Kind.FLAG,  "Build over SSH: upload MC and the --project folder, run the build on the IBM i and stream its output (no host servers needed)"),
+    SSH_BUILD     (null, "ssh-build",    Kind.FLAG,  "Same as --remote"),
+    DOCTOR        (null, "doctor",       Kind.FLAG,  "Explain and test the connection (where it comes from, SSH, host servers, libraries); never prints the password"),
+    EXPLAIN_CONNECTION(null, "explain-connection", Kind.FLAG, "Same as --doctor"),
+    PASSWORD_STDIN(null, "password-stdin", Kind.FLAG, "Read the IBM i password from the first line of stdin (not with --mcp); IBMI_PASSWORD_FILE names a chmod 600 file instead"),
+    STRICT_HOST_KEY(null, "strict-host-key", Kind.FLAG, "SSH: refuse a host key that is not in known_hosts (fails with its fingerprint) instead of trusting it; IBMI_SSH_KNOWN_HOSTS names the known_hosts file"),
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
     INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code)"),
     VERSION       (null, "version",      Kind.FLAG,  "Print the MasterCompiler version"),
@@ -120,6 +127,11 @@ public class ArgParser {
   private String libl;
   private String curlib;
   private boolean ssh;
+  private int sshPort;  // 0: not given
+  private boolean remote;
+  private boolean doctor;
+  private boolean passwordStdin;
+  private boolean strictHostKey;
   private boolean readOnly;
   private int maxRows;
   private String maskColumns;
@@ -130,7 +142,10 @@ public class ArgParser {
   private String next;
   private String nextFile;  // --next-file: removed once setup saved the request
 
+  private final String[] args;
+
   public ArgParser(String[] args) {
+    this.args = args.clone();
     parse(args);
   }
 
@@ -227,6 +242,12 @@ public class ArgParser {
       case SETUP_VSCODE:  setupVscode = true; break;
       case PRINT:         print = true; break;
       case SSH:           ssh = true; break;
+      case REMOTE:
+      case SSH_BUILD:     remote = true; break;
+      case DOCTOR:
+      case EXPLAIN_CONNECTION: doctor = true; break;
+      case PASSWORD_STDIN: passwordStdin = true; break;
+      case STRICT_HOST_KEY: strictHostKey = true; break;
       case READ_ONLY:     readOnly = true; break;
       case HOST_SERVERS:  hostServers = true; break;
       case INSTALL_SKILLS: installSkills = true; break;
@@ -289,6 +310,14 @@ public class ArgParser {
         }
         break;
       case MASK_COLUMNS:  maskColumns = value; break;
+      case SSH_PORT:
+        try {
+          sshPort = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+          sshPort = -1;
+        }
+        if (sshPort < 1 || sshPort > 65535) throw new IllegalArgumentException("--ssh-port needs a port from 1 to 65535: " + value);
+        break;
       case CONNECTION:
         connection = value;
         code4i = true;
@@ -303,8 +332,32 @@ public class ArgParser {
    * Call before using getters that require a mode.
    */
   public void validate() {
-    if (ssh && !mcp && !setupVscode) {
-      throw new IllegalArgumentException("--ssh goes with --mcp (or --setup-vscode)");
+    if (doctor) {
+      if (mcp || setupVscode || remote || installSkills || version || importSelection != null || yamlFile != null
+          || scanRoot != null || tobiRoot != null || push != null) {
+        throw new IllegalArgumentException("--doctor takes only --code4i, --connection, --ssh-port, --strict-host-key, "
+            + "--password-stdin, --project, --libl, --curlib, -v");
+      }
+      return;
+    }
+    if (ssh && !mcp && !setupVscode && !remote) {
+      throw new IllegalArgumentException("--ssh goes with --mcp (or --setup-vscode); to build over SSH use --remote");
+    }
+    if (sshPort != 0 && !ssh && !remote) {
+      throw new IllegalArgumentException("--ssh-port goes with --ssh, --remote or --doctor");
+    }
+    if (passwordStdin && mcp) {
+      throw new IllegalArgumentException("--password-stdin cannot be used with --mcp: stdin is the protocol channel");
+    }
+    if (remote) {
+      if (mcp) throw new IllegalArgumentException("--remote builds from the command line; the MCP server over SSH is --mcp --ssh");
+      if (projectRoot == null) throw new IllegalArgumentException("--remote needs --project <local folder> to upload");
+      if (yamlFile != null || scanRoot != null || tobiRoot != null || importSelection != null || baseFile != null
+          || push != null || outputFile != null || jsonReport != null || generateOnly || since != null) {
+        throw new IllegalArgumentException("--remote takes --project and the build options (-x, -v, -c, -k, --dry-run, --diff, "
+            + "--no-migrate, --lib, --libl, --curlib); the sources come from the --project folder, and the IBM i copy has no git history");
+      }
+      if (hostServers) throw new IllegalArgumentException("Use either --remote or --host-servers");
     }
     if (ssh && mcp && projectRoot == null) {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
@@ -437,6 +490,52 @@ public class ArgParser {
 
   public boolean isSsh() {
     return ssh;
+  }
+
+  /** {@code --ssh-port}, or 0 when not given. */
+  public int getSshPort() {
+    return sshPort;
+  }
+
+  /** {@code --remote} / {@code --ssh-build}: build on the IBM i over SSH. */
+  public boolean isRemote() {
+    return remote;
+  }
+
+  /** {@code --doctor} / {@code --explain-connection}. */
+  public boolean isDoctor() {
+    return doctor;
+  }
+
+  public boolean isPasswordStdin() {
+    return passwordStdin;
+  }
+
+  public boolean isStrictHostKey() {
+    return strictHostKey;
+  }
+
+  /*
+   * The arguments for MC running on the IBM i (--remote): the build options as typed, without the connection ones
+   * (they only mean something on this PC), and --project pointing at the uploaded copy.
+   */
+  public List<String> remoteArgs(String remoteProject) {
+    java.util.Set<Option> local = java.util.EnumSet.of(Option.CODE4I, Option.CONNECTION, Option.SSH, Option.SSH_PORT,
+        Option.REMOTE, Option.SSH_BUILD, Option.PASSWORD_STDIN, Option.STRICT_HOST_KEY, Option.PROJECT);
+    List<String> out = new java.util.ArrayList<String>();
+    for (int i = 0; i < args.length; i++) {
+      Option opt = args[i].startsWith("--") ? LONG_OPTIONS.get(args[i].substring(2))
+          : args[i].length() == 2 ? SHORT_OPTIONS.get(args[i].substring(1)) : null;
+      boolean value = opt != null && !opt.isFlag();
+      if (opt == null || !local.contains(opt)) {
+        out.add(args[i]);
+        if (value && i + 1 < args.length) out.add(args[i + 1]);
+      }
+      if (value) i++;
+    }
+    out.add("--project");
+    out.add(remoteProject);
+    return out;
   }
 
   /** {@code --read-only}: an MCP server that only reads, for a second IBM i. */

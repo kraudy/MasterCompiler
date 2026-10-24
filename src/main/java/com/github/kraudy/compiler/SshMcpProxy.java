@@ -81,13 +81,8 @@ public class SshMcpProxy {
     MasterCompiler.quietLogs(parser.isVerbose());
 
     Code4iConfig code4i = MasterCompiler.code4i(parser);
-    host = code4i != null ? code4i.host : required("IBMI_HOSTNAME");
-    String user = code4i != null ? code4i.username : required("IBMI_USERNAME");
-    int port = code4i != null ? code4i.port : Integer.parseInt(env("IBMI_SSH_PORT", "22"));
-    project = new File(parser.getProjectRoot()).getCanonicalFile();
+    configure(code4i);
     router = new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
-    SignOnGuard.project(project);
-    buildTarget = new SignOnGuard.Target(code4i != null ? code4i.name : host, host, user, System.getenv("IBMI_PASSWORD"));
     SignOnGuard.known(buildTarget);
 
     /*
@@ -96,7 +91,7 @@ public class SshMcpProxy {
      */
     Thread setup = new Thread(() -> {
       try {
-        remoteReady.complete(startRemote(code4i, host, port, user));
+        remoteReady.complete(startRemote(code4i));
       } catch (Throwable e) {
         logger.error("Could not start MasterCompiler on " + host, e);
         remoteReady.completeExceptionally(e);
@@ -188,17 +183,40 @@ public class SshMcpProxy {
     }
   }
 
-  /* SSH in, upload MC when this version is new, sync the sources and start MC there; returns its stdin */
-  private OutputStream startRemote(Code4iConfig code4i, String host, int port, String user) throws Exception {
+  private volatile String user;
+  private volatile int port;
+
+  /* Who and where: the Code for IBM i connection, else IBMI_HOSTNAME / IBMI_USERNAME (environment or .env); the SSH port rule is in SshTarget.Port */
+  private void configure(Code4iConfig code4i) throws Exception {
+    host = code4i != null ? code4i.host : required("IBMI_HOSTNAME");
+    user = code4i != null ? code4i.username : required("IBMI_USERNAME");
+    SshTarget.Port sshPort = SshTarget.Port.of(parser, code4i);
+    port = sshPort.number;
+    logger.info("SSH port {} ({})", port, sshPort.origin);
+    project = new File(parser.getProjectRoot()).getCanonicalFile();
+    SignOnGuard.project(project);
+    buildTarget = new SignOnGuard.Target(code4i != null ? code4i.name : host, host, user, Passwords.get(user + "@" + host));
+  }
+
+  /* Stages 1 to 3: SSH in, MC on the IBM i (this version), the project's sources; returns the remote jar */
+  private String prepareRemote(Code4iConfig code4i) throws Exception {
     long start = System.currentTimeMillis();
     stage("1/5 connecting to " + user + "@" + host + ":" + port + " over SSH");
     /* A rejected password: no further try in this run (or at a restart with the same one); the server stays up */
-    ssh = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, System.getenv("IBMI_PASSWORD"),
+    ssh = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, buildTarget.password,
         code4i != null ? code4i.privateKeyPath : null));
     /* Home: Code for IBM i's when it has one, else the SSH user's own */
     String home = code4i != null && code4i.homeKnown ? code4i.homeDirectory : ssh.exec("echo $HOME").trim();
     home = home.startsWith("/") ? trimSlash(home) : "/home/" + user.toUpperCase();
-    remoteDir = parser.getPush() != null ? trimSlash(parser.getPush()) : home + "/mc/" + project.getName();
+    if (parser.getPush() != null) {
+      remoteDir = trimSlash(parser.getPush());
+    } else {
+      /* MC's own folders are private to the SSH user */
+      ssh.privateDirs(true);
+      ssh.exec("umask 077 && mkdir -p " + SshTarget.quote(home + "/mc/.mc") + " && chmod 700 "
+          + SshTarget.quote(home + "/mc") + " " + SshTarget.quote(home + "/mc/.mc"));
+      remoteDir = ownDirectory(home);
+    }
 
     stage("2/5 checking MasterCompiler on the IBM i");
     String jar = ensureRemoteJar(ssh, home);
@@ -207,6 +225,32 @@ public class SshMcpProxy {
     int uploaded = sync(projectFiles(), true);
     logger.info("Sources synced: {} files uploaded ({} s for MC, {} s for sources)", uploaded,
         (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
+    return jar;
+  }
+
+  /*
+   * <home>/mc/<project folder>, unless another project with that folder name already owns it there (the marker
+   * .mc/local-project holds a hash of the owner's path): two projects must not mirror over each other
+   */
+  private String ownDirectory(String home) throws Exception {
+    String base = home + "/mc/" + project.getName();
+    String id = sha256(project.getCanonicalPath().getBytes(StandardCharsets.UTF_8)).substring(0, 12);
+    String marker = "/.mc/local-project";
+    String owner = ssh.execQuiet("cat " + SshTarget.quote(base + marker));  // null: no marker yet
+    String dir = base;
+    if (owner != null && !owner.trim().isEmpty() && !owner.trim().equals(id)) {
+      dir = base + "-" + id;
+      logger.warn("{} on the IBM i belongs to another project with the same folder name: this one uses {}", base, dir);
+      owner = ssh.execQuiet("cat " + SshTarget.quote(dir + marker));
+    }
+    if (owner == null || !owner.trim().equals(id)) ssh.upload(id.getBytes(StandardCharsets.UTF_8), dir + marker);
+    return dir;
+  }
+
+  /* SSH in, upload MC when this version is new, sync the sources and start MC there; returns its stdin */
+  private OutputStream startRemote(Code4iConfig code4i) throws Exception {
+    long start = System.currentTimeMillis();
+    String jar = prepareRemote(code4i);
 
     stage("4/5 starting MasterCompiler on the IBM i");
     remote = ssh.start(remoteCommand(jar, code4i));
@@ -221,6 +265,33 @@ public class SshMcpProxy {
     pump.setDaemon(true);
     pump.start();
     return toRemote;
+  }
+
+  /* --remote: the same start-up, then MC builds on the IBM i and its output comes back here; returns its exit code */
+  public int build() throws Exception {
+    Code4iConfig code4i = MasterCompiler.code4i(parser);
+    configure(code4i);
+    try {
+      String jar = prepareRemote(code4i);
+      stage("4/5 building on the IBM i");
+      List<String> args = parser.remoteArgs(remoteDir);
+      args.addAll(libraryArgs(code4i, false));
+      StringBuilder command = new StringBuilder(startCommand(jar));
+      for (String arg : args) command.append(' ').append(SshTarget.quote(arg));
+      ChannelExec channel = ssh.start(command.toString());
+      channel.setOutputStream(System.out, true);
+      channel.setErrStream(System.err, true);
+      channel.connect(30_000);
+      Thread stop = new Thread(channel::disconnect, "mc-ssh-stop");
+      Runtime.getRuntime().addShutdownHook(stop);  // Ctrl+C here ends the build there too
+      while (!channel.isClosed()) Thread.sleep(100);
+      try { Runtime.getRuntime().removeShutdownHook(stop); } catch (IllegalStateException shuttingDown) { /* too late: fine */ }
+      int status = channel.getExitStatus();
+      channel.disconnect();
+      return status < 0 ? 1 : status;
+    } finally {
+      if (ssh != null) ssh.close();
+    }
   }
 
   /* Start-up stage, logged and kept for tool calls that wait or fail */
@@ -632,8 +703,10 @@ public class SshMcpProxy {
    * never in a --push folder the user chose; MC's .mc/ working files stay.
    */
   int sync(Set<String> localFiles, boolean mirror) throws Exception {
+    localFiles = withoutSecrets(localFiles);
     logger.info("Comparing {} local files with the copy on the IBM i", localFiles.size());
     Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
+    SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
     Map<String, File> changed = new LinkedHashMap<String, File>();
     for (String path : localFiles) {
       File local = new File(path);
@@ -642,11 +715,10 @@ public class SshMcpProxy {
       long[] attrs = remoteFiles.get(rel);
       if (!local.isFile()) {
         if (attrs != null) ssh.exec("rm -f " + SshTarget.quote(remoteDir + "/" + rel));
+        manifest.remove(rel);
         continue;
       }
-      if (attrs != null && attrs[0] == local.length() && attrs[1] == local.lastModified() / 1000) {
-        continue;
-      }
+      if (attrs != null && unchanged(manifest, rel, local, attrs)) continue;
       changed.put(rel, local);
     }
 
@@ -660,6 +732,7 @@ public class SshMcpProxy {
       for (String rel : remoteFiles.keySet()) {
         if (!localRel.contains(rel) && !rel.startsWith(".mc/") && !rel.equals(".mc-sync.tar")) gone.add(rel);
       }
+      for (String rel : gone) manifest.remove(rel);
       if (!gone.isEmpty()) {
         logger.info("Removing {} files from the IBM i copy that the project no longer has: {}", gone.size(),
             gone.size() <= 10 ? String.join(", ", gone) : String.join(", ", gone.subList(0, 10)) + ", ...");
@@ -679,62 +752,204 @@ public class SshMcpProxy {
           changed.size() >= TAR_FROM ? "as one tar" : "one by one");
     }
     if (changed.size() >= TAR_FROM) {
-      TarWriter tar = new TarWriter();
+      boolean own = parser.getPush() == null;
+      TarWriter tar = new TarWriter(own ? 0600 : 0644);  // MC's own copy is private to the SSH user
       for (Map.Entry<String, File> file : changed.entrySet()) tar.add(file.getKey(), file.getValue());
       String archive = remoteDir + "/.mc-sync.tar";
       ssh.upload(tar.finish(), archive);
       logger.info("Unpacking the tar on the IBM i");
-      ssh.exec("cd " + SshTarget.quote(remoteDir) + " && " + env("MC_REMOTE_TAR", "/QOpenSys/usr/bin/tar")
+      ssh.exec("cd " + SshTarget.quote(remoteDir) + " && " + (own ? "umask 077 && " : "") + env("MC_REMOTE_TAR", "/QOpenSys/usr/bin/tar")
           + " -xf .mc-sync.tar; status=$?; rm -f .mc-sync.tar; exit $status");
     } else {
       for (Map.Entry<String, File> file : changed.entrySet()) ssh.upload(file.getValue(), remoteDir + "/" + file.getKey());
     }
     for (String rel : changed.keySet()) uploaded.add(remoteDir + "/" + rel);
     if (!uploaded.isEmpty()) {
-      logger.info("Tagging {} uploaded files as UTF-8 (CCSID 1208)", uploaded.size());
-      ssh.setUtf8(uploaded);
+      /* Only text is UTF-8: a binary file tagged 1208 would be converted when read */
+      List<String> text = new ArrayList<String>();
+      for (Map.Entry<String, File> file : changed.entrySet()) {
+        if (isText(file.getValue())) text.add(remoteDir + "/" + file.getKey());
+      }
+      if (!text.isEmpty()) {
+        logger.info("Tagging {} uploaded text files as UTF-8 (CCSID 1208)", text.size());
+        ssh.setUtf8(text);
+      }
+      if (parser.getPush() == null && changed.size() < TAR_FROM) ssh.restrict(uploaded);  // the tar already set 600
+      for (Map.Entry<String, File> file : changed.entrySet()) {
+        File local = file.getValue();
+        if (local.length() <= SyncManifest.HASH_UP_TO) {
+          manifest.put(file.getKey(), local.length(), local.lastModified() / 1000, sha256(local));
+        } else {
+          manifest.remove(file.getKey());
+        }
+      }
     }
+    manifest.save();
     return uploaded.size();
   }
 
-  /* The jar running here, uploaded once per version (named by its hash) */
+  /*
+   * Same size and time on the IBM i, and the same SHA-256 when the last sync recorded one (an edit of the same size
+   * within the same second looks identical otherwise). When the IBM i did not keep the time but this file is exactly
+   * what the last sync uploaded, it is unchanged too. Files over 1 MB are compared by size and time only.
+   */
+  private static boolean unchanged(SyncManifest manifest, String rel, File local, long[] remote) throws Exception {
+    long size = local.length();
+    long mtime = local.lastModified() / 1000;
+    if (remote[0] != size) return false;
+    String sha = size <= SyncManifest.HASH_UP_TO ? sha256(local) : null;
+    com.fasterxml.jackson.databind.JsonNode known = manifest.get(rel);
+    boolean sameAsUploaded = known != null && sha != null && known.path("size").asLong(-1) == size
+        && sha.equals(known.path("sha256").asText());
+    if (remote[1] == mtime) {
+      if (known != null && sha != null && !sameAsUploaded) return false;  // same size and time, other content
+      if (known == null && sha != null) manifest.put(rel, size, mtime, sha);
+      return true;
+    }
+    return sameAsUploaded && known.path("mtime").asLong(-1) == mtime;
+  }
+
+  /* Secrets never go to the IBM i copy, tracked by git or not */
+  private Set<String> withoutSecrets(Set<String> files) throws Exception {
+    Set<String> kept = new LinkedHashSet<String>();
+    List<String> secrets = new ArrayList<String>();
+    for (String path : files) {
+      String rel = relative(new File(path));
+      if (rel != null && isSecret(rel)) secrets.add(rel);
+      else kept.add(path);
+    }
+    if (!secrets.isEmpty()) {
+      logger.warn("Not uploading {} files that look like secrets or MC's own working files: {}", secrets.size(),
+          secrets.size() <= 10 ? String.join(", ", secrets) : String.join(", ", secrets.subList(0, 10)) + ", ...");
+    }
+    return kept;
+  }
+
+  /* .env and .env.*, SSH keys, certificates, credentials files, and the .mc / .ssh / .gnupg folders */
+  static boolean isSecret(String rel) {
+    String[] parts = rel.replace('\\', '/').split("/");
+    for (int i = 0; i < parts.length - 1; i++) {
+      if (parts[i].equals(".mc") || parts[i].equals(".ssh") || parts[i].equals(".gnupg")) return true;
+    }
+    String name = parts[parts.length - 1].toLowerCase(java.util.Locale.ROOT);
+    if (name.equals(".env") || name.startsWith(".env.") || name.equals(".netrc") || name.equals("known_hosts")
+        || name.startsWith("id_rsa") || name.startsWith("id_dsa") || name.startsWith("id_ecdsa")
+        || name.startsWith("id_ed25519")) return true;
+    for (String extension : new String[] { ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".ppk" }) {
+      if (name.endsWith(extension)) return true;
+    }
+    return false;
+  }
+
+  /* No NUL byte in the first 8 KB: a source or text file, not a binary */
+  static boolean isText(File file) {
+    try (InputStream in = new FileInputStream(file)) {
+      byte[] head = new byte[8192];
+      int read = in.read(head);
+      for (int i = 0; i < read; i++) if (head[i] == 0) return false;
+      return true;
+    } catch (java.io.IOException e) {
+      return true;
+    }
+  }
+
+  /* The jar running here, uploaded once per version (named by its hash) and checked there by SHA-256 */
   static String ensureRemoteJar(SshTarget ssh, String home) throws Exception {
     File local = new File(VscodeSetup.jarPath());
     if (!local.isFile()) throw new IllegalStateException("Run MasterCompiler from its jar to use --ssh");
-    String remote = home + "/mc/.mc/MasterCompiler-" + sha256(local).substring(0, 12) + ".jar";
+    String hash = sha256(local);
+    String remote = home + "/mc/.mc/MasterCompiler-" + hash.substring(0, 12) + ".jar";
     com.jcraft.jsch.SftpATTRS there = ssh.stat(remote);
     if (there != null && there.getSize() == local.length()) {
-      logger.info("MasterCompiler {} already on the IBM i: {}", MasterCompiler.version(), remote);
-      return remote;
-    }
-    if (there != null) {
+      String actual = remoteSha256(ssh, remote);  // null: the IBM i has no checksum tool, the size has to do
+      if (actual == null || actual.equals(hash)) {
+        logger.info("MasterCompiler {} already on the IBM i: {}", MasterCompiler.version(), remote);
+        ssh.restrict(java.util.Collections.singletonList(remote));
+        checkRemoteJava(ssh);
+        return remote;
+      }
+      logger.warn("The MasterCompiler jar on the IBM i has the right size but another content (SHA-256 differs): "
+          + "uploading it again");
+    } else if (there != null) {
       logger.warn("The MasterCompiler jar on the IBM i is broken ({} of {} bytes, an earlier upload was cut): "
           + "uploading it again", there.getSize(), local.length());
     } else {
       logger.warn("First start of this MasterCompiler version: uploading it ({}) to {}", SshTarget.mb(local.length()), remote);
     }
     ssh.upload(local, remote);
+    String actual = remoteSha256(ssh, remote);
+    if (actual != null && !actual.equals(hash)) {
+      throw new IllegalStateException("The MasterCompiler jar arrived damaged on the IBM i (SHA-256 " + actual
+          + " instead of " + hash + "): start again to upload it once more");
+    }
+    ssh.restrict(java.util.Collections.singletonList(remote));
     /* keep only the version in use; remove pieces of cut uploads */
     String dir = remote.substring(0, remote.lastIndexOf('/'));
     ssh.exec("for f in " + SshTarget.quote(dir) + "/MasterCompiler-*.jar " + SshTarget.quote(dir) + "/*.part; do [ \"$f\" = "
         + SshTarget.quote(remote) + " ] || rm -f \"$f\"; done");
+    checkRemoteJava(ssh);
     return remote;
   }
 
-  private String remoteCommand(String jar, Code4iConfig code4i) {
+  /* SHA-256 of a file on the IBM i (sha256sum, else PASE's csum); null when neither can run */
+  static String remoteSha256(SshTarget ssh, String path) {
+    String quoted = SshTarget.quote(path);
+    java.util.regex.Pattern hex = java.util.regex.Pattern.compile("\\b([0-9a-fA-F]{64})\\b");
+    for (String command : new String[] { "sha256sum " + quoted, "/QOpenSys/pkgs/bin/sha256sum " + quoted,
+        "/QOpenSys/usr/bin/csum -h SHA256 " + quoted }) {
+      String out = ssh.execQuiet(command);
+      java.util.regex.Matcher found = out == null ? null : hex.matcher(out);
+      if (found != null && found.find()) return found.group(1).toLowerCase(java.util.Locale.ROOT);
+    }
+    return null;
+  }
+
+  /* MC is compiled for Java 8: say clearly when java is missing or older on the IBM i; returns its version line */
+  static String checkRemoteJava(SshTarget ssh) {
+    String javaCommand = env("MC_REMOTE_JAVA", REMOTE_JAVA);
+    String out = ssh.execQuiet(javaCommand + " -version");
+    java.util.regex.Matcher found = out == null ? null
+        : java.util.regex.Pattern.compile("version \"(\\d+)(?:\\.(\\d+))?").matcher(out);
+    if (found == null || !found.find()) {
+      throw new IllegalStateException("Java does not run on the IBM i at " + javaCommand + " (MC_REMOTE_JAVA changes the path). "
+          + "Install an OpenJDK 8 or newer for PASE (or IBM Java, 5733-SC1) and start again.");
+    }
+    int first = Integer.parseInt(found.group(1));
+    int major = first == 1 && found.group(2) != null ? Integer.parseInt(found.group(2)) : first;
+    if (major < 8) {
+      throw new IllegalStateException("Java " + major + " on the IBM i (" + javaCommand + ") is too old: MasterCompiler needs Java 8 "
+          + "or newer. Install a newer OpenJDK for PASE or point MC_REMOTE_JAVA at it.");
+    }
+    return out.trim().split("\n")[0];
+  }
+
+  /* umask 077 (the owner only) in MC's own folder, the folder, and the java call without arguments */
+  private String startCommand(String jar) {
     /* mkdir -p: an empty repository (import_source fills it) uploads nothing, so the folder may not exist yet */
-    StringBuilder command = new StringBuilder("mkdir -p ").append(SshTarget.quote(remoteDir))
-        .append(" && cd ").append(SshTarget.quote(remoteDir))
-        .append(" && ").append(env("MC_REMOTE_JAVA", REMOTE_JAVA))
-        .append(" -jar ").append(SshTarget.quote(jar))
+    return (parser.getPush() == null ? "umask 077 && " : "") + "mkdir -p " + SshTarget.quote(remoteDir)
+        + " && cd " + SshTarget.quote(remoteDir)
+        + " && " + env("MC_REMOTE_JAVA", REMOTE_JAVA) + " -jar " + SshTarget.quote(jar);
+  }
+
+  private String remoteCommand(String jar, Code4iConfig code4i) {
+    StringBuilder command = new StringBuilder(startCommand(jar))
         .append(" --mcp --project ").append(SshTarget.quote(remoteDir));
-    String libl = parser.getLibl() != null ? parser.getLibl()
-        : code4i != null && !code4i.libraryList.isEmpty() ? String.join(" ", code4i.libraryList) : null;
-    String curlib = parser.getCurlib() != null ? parser.getCurlib() : code4i != null ? code4i.currentLibrary : null;
-    if (libl != null) command.append(" --libl ").append(SshTarget.quote(libl));
-    if (curlib != null) command.append(" --curlib ").append(SshTarget.quote(curlib));
+    List<String> libraries = libraryArgs(code4i, true);
+    for (int i = 0; i < libraries.size(); i++) command.append(' ').append(i % 2 == 0 ? libraries.get(i) : SshTarget.quote(libraries.get(i)));
     if (parser.isVerbose()) command.append(" -v");
     return command.toString();
+  }
+
+  /* --libl / --curlib pairs: as typed (when typed is true), else the Code for IBM i connection's */
+  private List<String> libraryArgs(Code4iConfig code4i, boolean typed) {
+    List<String> out = new ArrayList<String>();
+    String libl = typed && parser.getLibl() != null ? parser.getLibl()
+        : parser.getLibl() == null && code4i != null && !code4i.libraryList.isEmpty() ? String.join(" ", code4i.libraryList) : null;
+    String curlib = typed && parser.getCurlib() != null ? parser.getCurlib()
+        : parser.getCurlib() == null && code4i != null ? code4i.currentLibrary : null;
+    if (libl != null) { out.add("--libl"); out.add(libl); }
+    if (curlib != null) { out.add("--curlib"); out.add(curlib); }
+    return out;
   }
 
   /* Every file git knows in the project (tracked and not ignored), else every file under it */
@@ -827,8 +1042,19 @@ public class SshMcpProxy {
     return hex.toString();
   }
 
+  private static String sha256(byte[] data) throws Exception {
+    StringBuilder hex = new StringBuilder();
+    for (byte b : MessageDigest.getInstance("SHA-256").digest(data)) hex.append(String.format("%02x", b));
+    return hex.toString();
+  }
+
   private static String required(String name) {
     String value = System.getenv(name);
+    if (value == null || value.isEmpty()) {
+      try {
+        value = io.github.theprez.dotenv_ibmi.IBMiDotEnv.getDotEnv().get(name);  // the .env of the folder MC runs in
+      } catch (Exception noDotEnv) { /* the message below */ }
+    }
     if (value == null || value.isEmpty()) {
       throw new IllegalArgumentException(name + " is not set: use --code4i or set IBMI_HOSTNAME and IBMI_USERNAME");
     }

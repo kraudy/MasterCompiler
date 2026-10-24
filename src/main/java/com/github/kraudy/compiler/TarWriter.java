@@ -11,6 +11,11 @@ import java.nio.file.Files;
  */
 final class TarWriter {
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+  private final int mode;
+
+  TarWriter(int mode) {
+    this.mode = mode;
+  }
 
   /* Path with "/" separators; ustar holds up to 100 + 155 characters split on a "/" */
   void add(String path, File file) throws Exception {
@@ -28,7 +33,7 @@ final class TarWriter {
       name = path.substring(split + 1);
     }
     put(header, 0, 100, bytes(name));
-    put(header, 100, 8, octal(0644, 8));
+    put(header, 100, 8, octal(mode, 8));
     put(header, 108, 8, octal(0, 8));
     put(header, 116, 8, octal(0, 8));
     put(header, 124, 12, octal(data.length, 12));

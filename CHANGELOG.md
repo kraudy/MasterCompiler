@@ -3,6 +3,23 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## Unreleased
+
+Connection feedback from PUB400 (SSH on 2222, host servers blocked)
+- `--doctor` / `--explain-connection`: where the connection comes from, host, user, SSH port, auth, libraries, and what SSH
+  and the host servers do with it; never prints the password. `--ssh-port` > Code for IBM i's port > `IBMI_SSH_PORT` > 22.
+- `--remote` / `--ssh-build --project <dir>`: build from the command line over SSH (upload MC and the project, run there,
+  stream the output and exit code), no host servers needed.
+- SSH copy: `.env`, `.env.*`, `.mc/`, keys and certificates are never uploaded (tracked by git or not); MC's folders on
+  the IBM i and the copied files are private (700/600); only text files are tagged CCSID 1208; the jar is verified by
+  SHA-256 and Java 8+ is checked there; `.mc/sync-manifest.json` catches same-size edits within the same second; two
+  projects with the same folder name no longer share (and mirror over) one copy.
+- Passwords: `--password-stdin`, `IBMI_PASSWORD_FILE` (refused unless only the owner can read it), a terminal prompt;
+  `IBMI_PASSWORD` stays as before. Command-line builds go through the sign-on guard: a wrong password costs one attempt.
+- SSH host keys: `--strict-host-key` / `IBMI_SSH_KNOWN_HOSTS` refuse unknown hosts with their fingerprint; keyboard-interactive
+  sends the password to one password prompt and cancels on one-time-code prompts or several questions.
+- Not done: TLS for the host servers connection.
+
 ## v0.3.24
 
 - `debug_program` loads in GitHub Copilot: its `breakpoints` schema declares its items (a line number or

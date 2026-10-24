@@ -1008,7 +1008,63 @@ public class MasterCompiler{
   static AS400 connect(ArgParser parser) throws Exception {
     Code4iConfig code4i = code4i(parser);
     if (code4i != null) return code4i.connect();
-    return IBMiDotEnv.getNewSystemConnection(true);
+    if (IBMiDotEnv.isIBMi()) return IBMiDotEnv.getNewSystemConnection(true);
+    /* A password from --password-stdin, IBMI_PASSWORD_FILE or the terminal: IBMiDotEnv only knows IBMI_PASSWORD */
+    io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
+    String password = dotenvPassword(env);
+    if (password.isEmpty() || (Passwords.explicit() == null && !env.get("IBMI_PASSWORD", "").isEmpty())) {
+      return IBMiDotEnv.getNewSystemConnection(true);
+    }
+    AS400 system = new AS400(env.get("IBMI_HOSTNAME", ""), env.get("IBMI_USERNAME", ""), password.toCharArray());
+    system.setGuiAvailable(false);
+    return system;
+  }
+
+  /* --password-stdin / IBMI_PASSWORD_FILE, else IBMI_PASSWORD of the environment or .env, else asked on the terminal */
+  private static String dotenvPassword(io.github.cdimascio.dotenv.Dotenv env) {
+    String explicit = Passwords.explicit();
+    if (explicit != null) return explicit;
+    String fromEnv = env.get("IBMI_PASSWORD", "");
+    if (!fromEnv.isEmpty()) return fromEnv;
+    String typed = Passwords.prompt(env.get("IBMI_USERNAME", "") + "@" + env.get("IBMI_HOSTNAME", ""));
+    return typed != null ? typed : "";
+  }
+
+  /* Who signs on with a password, for SignOnGuard: the Code for IBM i connection, else .env / IBMI_*; null on the IBM i itself */
+  static SignOnGuard.Target signOnTarget(ArgParser parser, java.io.File project) throws Exception {
+    if (IBMiDotEnv.isIBMi()) return null;
+    SignOnGuard.project(project);
+    Code4iConfig code4i = code4i(parser);
+    if (code4i != null) {
+      return new SignOnGuard.Target(code4i.name, code4i.host, code4i.username, Passwords.get(code4i.username + "@" + code4i.host));
+    }
+    io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
+    return new SignOnGuard.Target(null, env.get("IBMI_HOSTNAME", ""), env.get("IBMI_USERNAME", ""), dotenvPassword(env));
+  }
+
+  /*
+   * The command-line builds sign on through SignOnGuard like the MCP server: a rejected password costs one attempt
+   * (validateSignon, before the JDBC connection would send it again) and is remembered in .mc/auth-blocked.json
+   */
+  static AS400 signOn(ArgParser parser) throws Exception {
+    SignOnGuard.Target target = signOnTarget(parser, new java.io.File(parser.getProjectRoot() != null ? parser.getProjectRoot() : "."));
+    if (target == null) return connect(parser);
+    try {
+      return SignOnGuard.signOn(target, () -> {
+        AS400 system = connect(parser);
+        if (!target.password.isEmpty() && !system.validateSignon()) {
+          throw new SignOnGuard.Refused("CPF22E2", "IBM i rejected the user profile or password");
+        }
+        return system;
+      });
+    } catch (SignOnGuard.Blocked blocked) {
+      /* SignOnGuard's text goes on with steps for VS Code's password prompts: a terminal user needs the first part only */
+      String message = blocked.getMessage();
+      int steps = message.indexOf(" Do not retry");
+      throw new SignOnGuard.Blocked((steps > 0 ? message.substring(0, steps) : message)
+          + " Run again with the right password (a different one gets one attempt). A disabled or expired profile needs "
+          + "the security administrator; then delete .mc/auth-blocked.json.");
+    }
   }
 
   static Code4iConfig code4i(ArgParser parser) throws Exception {
@@ -1081,9 +1137,23 @@ public class MasterCompiler{
         return exitCode;
       }
 
+      SshTarget.strictHostKey = parser.isStrictHostKey();
+      Passwords.init(parser);
+
+      /* What the connection is, and what works: SSH, host servers (no password printed) */
+      if (parser.isDoctor()) {
+        quietLogs(parser.isVerbose());
+        return ConnectionDoctor.run(parser);
+      }
+
+      /* Build on the IBM i over SSH: MC and the project are uploaded, the output comes back */
+      if (parser.isRemote()) {
+        return new SshMcpProxy(parser).build();
+      }
+
       /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
       if (parser.getImportSelection() != null) {
-        system = connect(parser);
+        system = signOn(parser);
         connection = new AS400JDBCDataSource(system).getConnection();
         String outDir = parser.getOutputFile();
         LibraryImporter.ImportReport imported = new LibraryImporter(system, connection, parser.isVerbose())
@@ -1107,7 +1177,7 @@ public class MasterCompiler{
       if (parser.isGenerateOnly()) {
         system = null;
         try {
-          system = connect(parser);
+          system = signOn(parser);
         } catch (Exception ignore) {
           /* local-only generation */
           if (parser.isVerbose()) {
@@ -1147,7 +1217,7 @@ public class MasterCompiler{
         return exitCode;
       }
 
-      system = connect(parser);
+      system = signOn(parser);
       connection = new AS400JDBCDataSource(system).getConnection();
 
       BuildSpec spec;

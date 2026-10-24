@@ -1853,7 +1853,7 @@ public class McpServer {
       return;
     }
     /* An MCP server cannot prompt: without credentials, say how to provide them */
-    if (!parser.isCode4i() && !IBMiDotEnv.isIBMi() && System.getenv("IBMI_PASSWORD") == null && !new File(".env").isFile()) {
+    if (!parser.isCode4i() && !IBMiDotEnv.isIBMi() && Passwords.source() == null && !new File(".env").isFile()) {
       throw new IllegalArgumentException("No IBM i credentials. In VS Code the password comes from the password prompt "
           + "in .vscode/mcp.json (--setup-vscode writes it): ask the user to run MasterCompiler's setup or start the server "
           + "from VS Code; never ask for the password in the chat or put it in a file. A .env (IBMI_HOSTNAME, "
@@ -1929,15 +1929,7 @@ public class McpServer {
 
   /* The build connection's sign-on on the PC: the Code for IBM i connection, else .env / IBMI_* */
   private SignOnGuard.Target buildSignOn() throws Exception {
-    if (parser == null || IBMiDotEnv.isIBMi()) return null;
-    SignOnGuard.project(projectDir());
-    Code4iConfig code4i = MasterCompiler.code4i(parser);
-    if (code4i != null) {
-      return new SignOnGuard.Target(code4i.name, code4i.host, code4i.username, System.getenv("IBMI_PASSWORD"));
-    }
-    io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
-    return new SignOnGuard.Target(null, env.get("IBMI_HOSTNAME", ""), env.get("IBMI_USERNAME", ""),
-        env.get("IBMI_PASSWORD", ""));
+    return parser == null ? null : MasterCompiler.signOnTarget(parser, projectDir());
   }
 
   private void disconnect() {

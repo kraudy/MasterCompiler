@@ -29,14 +29,16 @@ public final class Code4iConfig {
   public final String homeDirectory;
   public final boolean homeKnown;       // false: not set in Code for IBM i ("." is its default), /home/USER assumed
   public final int port;                // SSH port Code for IBM i uses (--ssh)
+  public final boolean portSet;         // false: the connection has no port and 22 is the default
   public final String privateKeyPath;   // SSH key, when the connection has one
 
   private Code4iConfig(String name, String host, String username, String currentLibrary,
-      List<String> libraryList, String homeDirectory, int port, String privateKeyPath) {
+      List<String> libraryList, String homeDirectory, int port, boolean portSet, String privateKeyPath) {
     this.name = name;
     this.host = host;
     this.username = username;
     this.port = port;
+    this.portSet = portSet;
     this.privateKeyPath = privateKeyPath;
     this.currentLibrary = currentLibrary;
     this.libraryList = libraryList;
@@ -104,7 +106,7 @@ public final class Code4iConfig {
     if (key == null) key = text(connection, "privateKey");
     return new Code4iConfig(name, connection.path("host").asText(), username,
         currentLibrary != null ? currentLibrary.toUpperCase() : null, libraryList, homeDirectory,
-        connection.path("port").asInt(22), key);
+        connection.path("port").asInt(22), connection.hasNonNull("port"), key);
   }
 
   /* VS Code user settings: MC_VSCODE_SETTINGS, else the usual per-OS locations (Code, Insiders, VSCodium) */
@@ -127,14 +129,14 @@ public final class Code4iConfig {
     return null;
   }
 
-  /* Host servers connection as the Code for IBM i user; password from IBMI_PASSWORD */
+  /* Host servers connection as the Code for IBM i user; password from --password-stdin, IBMI_PASSWORD_FILE or IBMI_PASSWORD */
   public AS400 connect() throws Exception {
     return connect("IBMI_PASSWORD");
   }
 
   /* The same with the password in another variable (a read-only connection's IBMI_PASSWORD_<NAME>) */
   public AS400 connect(String passwordVariable) throws Exception {
-    String password = System.getenv(passwordVariable);
+    String password = passwordVariable.equals("IBMI_PASSWORD") ? Passwords.get(username + "@" + host) : System.getenv(passwordVariable);
     if (password == null || password.isEmpty()) {
       throw new IllegalArgumentException(passwordVariable + " is not set. In .vscode/mcp.json give the server "
           + "\"env\": { \"" + passwordVariable + "\": \"${input:...}\" } with a password input "

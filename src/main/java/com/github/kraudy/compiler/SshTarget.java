@@ -27,7 +27,8 @@ import com.jcraft.jsch.UserInfo;
  * --ssh: the IBM i over SSH, the way Code for IBM i reaches it (port 22 instead of the host servers).
  * Authentication: the connection's private key, else ~/.ssh/id_ed25519 / id_ecdsa / id_rsa, else IBMI_PASSWORD.
  * Host keys follow OpenSSH's accept-new: an unknown host is trusted and recorded in ~/.ssh/known_hosts,
- * a changed key is refused.
+ * a changed key is refused. --strict-host-key (or IBMI_SSH_KNOWN_HOSTS, a known_hosts file of your own) refuses an
+ * unknown one too and says its fingerprint, for CI.
  */
 /* The SFTP methods are synchronized: the proxy's call thread syncs while its response thread downloads */
 public final class SshTarget implements AutoCloseable {
@@ -36,16 +37,49 @@ public final class SshTarget implements AutoCloseable {
   private final Session session;
   private ChannelSftp sftp;
   private final Set<String> knownDirs = new HashSet<String>();  // created or seen: no need to check again
+  private volatile boolean privateDirs;  // folders MC creates are 700: MC's own copy, not a --push folder the user chose
 
   private SshTarget(Session session) {
     this.session = session;
   }
 
+  /* The SSH port and where it came from: --ssh-port, the Code for IBM i connection's, IBMI_SSH_PORT, else 22 */
+  static final class Port {
+    final int number;
+    final String origin;
+
+    private Port(int number, String origin) {
+      this.number = number;
+      this.origin = origin;
+    }
+
+    static Port of(ArgParser parser, Code4iConfig code4i) {
+      if (parser.getSshPort() != 0) return new Port(parser.getSshPort(), "--ssh-port");
+      if (code4i != null && code4i.portSet) return new Port(code4i.port, "Code for IBM i connection '" + code4i.name + "'");
+      String env = System.getenv("IBMI_SSH_PORT");
+      if (env != null && !env.trim().isEmpty()) {
+        try {
+          int number = Integer.parseInt(env.trim());
+          if (number >= 1 && number <= 65535) return new Port(number, "IBMI_SSH_PORT");
+        } catch (NumberFormatException ignored) { /* the error below */ }
+        throw new IllegalArgumentException("IBMI_SSH_PORT is not a port from 1 to 65535: " + env);
+      }
+      return new Port(22, "default");
+    }
+  }
+
+  /* --strict-host-key: set once by run(); an IBMI_SSH_KNOWN_HOSTS file also makes it strict */
+  static volatile boolean strictHostKey;
+
   public static SshTarget connect(String host, int port, String user, String password, String privateKeyPath) throws Exception {
     JSch jsch = new JSch();
     File sshDir = new File(System.getProperty("user.home"), ".ssh");
-    File knownHosts = new File(sshDir, "known_hosts");
+    String own = System.getenv("IBMI_SSH_KNOWN_HOSTS");
+    boolean strict = strictHostKey || (own != null && !own.isEmpty());
+    File knownHosts = own != null && !own.isEmpty() ? new File(own) : new File(sshDir, "known_hosts");
     if (!knownHosts.isFile()) {
+      if (strict) throw new IllegalArgumentException("Strict host keys need a known_hosts file with " + host + " in it: "
+          + knownHosts + " does not exist (add the host with ssh-keyscan or a first ssh login, and check its fingerprint)");
       sshDir.mkdirs();
       knownHosts.createNewFile();
     }
@@ -77,7 +111,7 @@ public final class SshTarget implements AutoCloseable {
     session.setConfig("FingerprintHash", "SHA256");
     session.setConfig("PreferredAuthentications", keys == 0 ? "password,keyboard-interactive"
         : hasPassword ? "publickey,password,keyboard-interactive" : "publickey");
-    session.setUserInfo(new AcceptNewHosts(password));
+    session.setUserInfo(new AcceptNewHosts(password, strict));
     /* A link that stops answering (VPN drop, stuck firewall) ends the session after ~60 s instead of hanging */
     session.setServerAliveInterval(15_000);
     session.setServerAliveCountMax(3);
@@ -122,6 +156,28 @@ public final class SshTarget implements AutoCloseable {
           + new String(err.toByteArray(), StandardCharsets.UTF_8).trim());
     }
     return new String(out.toByteArray(), StandardCharsets.UTF_8);
+  }
+
+  /* Like exec, merged stderr, and the status instead of an exception: null when it could not even run */
+  public String execQuiet(String command) {
+    try {
+      return exec("(" + command + ") 2>&1");
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  public void privateDirs(boolean on) {
+    privateDirs = on;
+  }
+
+  /* Only the owner reads the copy of the project on the IBM i: files 600 (directories are 700 through umask 077) */
+  public void restrict(List<String> remotePaths) throws Exception {
+    for (int i = 0; i < remotePaths.size(); i += 50) {
+      StringBuilder command = new StringBuilder("chmod 600");
+      for (String path : remotePaths.subList(i, Math.min(remotePaths.size(), i + 50))) command.append(' ').append(quote(path));
+      exec(command.toString());
+    }
   }
 
   /* A long-running remote process whose stdin/stdout the caller drives (the remote MCP server) */
@@ -275,6 +331,9 @@ public final class SshTarget implements AutoCloseable {
     if (stat(dir) == null) {
       mkdirs(dir.substring(0, Math.max(0, dir.lastIndexOf('/'))));
       sftp().mkdir(dir);
+      if (privateDirs) {
+        try { sftp().chmod(0700, dir); } catch (SftpException ignored) { /* the owner's umask stays */ }
+      }
     }
     knownDirs.add(dir);
   }
@@ -352,13 +411,20 @@ public final class SshTarget implements AutoCloseable {
    */
   private static final class AcceptNewHosts implements UserInfo, UIKeyboardInteractive {
     private final String password;
+    private final boolean strict;
 
-    AcceptNewHosts(String password) {
+    AcceptNewHosts(String password, boolean strict) {
       this.password = password;
+      this.strict = strict;
     }
 
     @Override public boolean promptYesNo(String message) {
       boolean changed = message.toUpperCase().contains("CHANGED");
+      if (strict && !changed) {
+        logger.error("SSH host key not in known_hosts, refusing to connect (strict host keys). Check this fingerprint with "
+            + "your administrator and add it to known_hosts: {}", message.replace('\n', ' '));
+        return false;
+      }
       if (changed) logger.error("SSH host key changed, refusing to connect: {}", message);
       /* JSch's message names the host and the key fingerprint: show it so the user can check it */
       else logger.warn("Trusting a new SSH host key, added to known_hosts. Check the fingerprint with your administrator: {}",
@@ -378,14 +444,28 @@ public final class SshTarget implements AutoCloseable {
     @Override public boolean promptPassphrase(String message) { return false; }
     @Override public void showMessage(String message) { logger.info("SSH: {}", message); }
 
+    /* The password goes to one prompt that asks for it; a one-time code or any other question cancels the login */
     @Override
     public String[] promptKeyboardInteractive(String destination, String name, String instruction,
         String[] prompts, boolean[] echo) {
+      if (prompts == null || prompts.length == 0) return new String[0];  // only information to show
       if (sent || password == null || password.isEmpty()) return null;  // cancel: no password, or it was already sent
+      if (prompts.length != 1 || !isPasswordPrompt(prompts[0], echo != null && echo.length > 0 && echo[0])) {
+        logger.error("SSH asks for something other than the password (a one-time code or several questions: \"{}\"): "
+            + "MasterCompiler cancels the login instead of sending the password to it", String.join(" / ", prompts));
+        return null;
+      }
       sent = true;
-      String[] answers = new String[prompts.length];
-      for (int i = 0; i < prompts.length; i++) answers[i] = password;
-      return answers;
+      return new String[] { password };
+    }
+
+    /* A prompt that says "password", or a hidden-input one in the server's own language, unless it asks for a code */
+    static boolean isPasswordPrompt(String prompt, boolean echo) {
+      String text = prompt == null ? "" : prompt.toLowerCase(java.util.Locale.ROOT);
+      for (String other : new String[] { "otp", "one-time", "one time", "passcode", "token", "verification", "code", "pin" }) {
+        if (text.contains(other)) return false;
+      }
+      return text.contains("password") || !echo;
     }
   }
 }
