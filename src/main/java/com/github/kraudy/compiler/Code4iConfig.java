@@ -129,7 +129,7 @@ public final class Code4iConfig {
     return null;
   }
 
-  /* Host servers connection as the Code for IBM i user; password from --password-stdin, IBMI_PASSWORD_FILE or IBMI_PASSWORD */
+  /* Host servers connection as the Code for IBM i user; password from --password-stdin, IBMI_PASSWORD_FILE, --password-command, IBMI_PASSWORD or SSH_ASKPASS */
   public AS400 connect() throws Exception {
     return connect("IBMI_PASSWORD");
   }

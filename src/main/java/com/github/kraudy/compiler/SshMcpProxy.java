@@ -185,6 +185,8 @@ public class SshMcpProxy {
 
   private volatile String user;
   private volatile int port;
+  private volatile String remoteHome;
+  private volatile String ownerId;  // the hash in .mc/local-project of this project's copy
 
   /* Who and where: the Code for IBM i connection, else IBMI_HOSTNAME / IBMI_USERNAME (environment or .env); the SSH port rule is in SshTarget.Port */
   private void configure(Code4iConfig code4i) throws Exception {
@@ -208,6 +210,7 @@ public class SshMcpProxy {
     /* Home: Code for IBM i's when it has one, else the SSH user's own */
     String home = code4i != null && code4i.homeKnown ? code4i.homeDirectory : ssh.exec("echo $HOME").trim();
     home = home.startsWith("/") ? trimSlash(home) : "/home/" + user.toUpperCase();
+    remoteHome = home;
     if (parser.getPush() != null) {
       remoteDir = trimSlash(parser.getPush());
     } else {
@@ -235,6 +238,7 @@ public class SshMcpProxy {
   private String ownDirectory(String home) throws Exception {
     String base = home + "/mc/" + project.getName();
     String id = sha256(project.getCanonicalPath().getBytes(StandardCharsets.UTF_8)).substring(0, 12);
+    ownerId = id;
     String marker = "/.mc/local-project";
     String owner = ssh.execQuiet("cat " + SshTarget.quote(base + marker));  // null: no marker yet
     String dir = base;
@@ -276,6 +280,19 @@ public class SshMcpProxy {
       stage("4/5 building on the IBM i");
       List<String> args = parser.remoteArgs(remoteDir);
       args.addAll(libraryArgs(code4i, false));
+      /* The spec may name this PC's project folder (a scanned CHGCURDIR): MC there points it at the uploaded copy */
+      args.add("--local-project");
+      args.add(project.getPath());
+      /* The build report comes back for the summary (and for --json); a file in MC's private folder, deleted after */
+      byte[] random = new byte[8];
+      new java.security.SecureRandom().nextBytes(random);
+      StringBuilder id = new StringBuilder();
+      for (byte b : random) id.append(String.format("%02x", b));
+      String reportDir = remoteHome + "/mc/.mc";
+      ssh.exec("umask 077 && mkdir -p " + SshTarget.quote(reportDir));
+      String remoteReport = reportDir + "/report-" + id + ".json";
+      args.add("--json");
+      args.add(remoteReport);
       StringBuilder command = new StringBuilder(startCommand(jar));
       for (String arg : args) command.append(' ').append(SshTarget.quote(arg));
       ChannelExec channel = ssh.start(command.toString());
@@ -288,9 +305,65 @@ public class SshMcpProxy {
       try { Runtime.getRuntime().removeShutdownHook(stop); } catch (IllegalStateException shuttingDown) { /* too late: fine */ }
       int status = channel.getExitStatus();
       channel.disconnect();
-      return status < 0 ? 1 : status;
+      status = status < 0 ? 1 : status;
+      if (!summarize(remoteReport, status) && parser.getJsonReport() != null) {
+        logger.error("--json: the build report could not be copied from the IBM i, so {} is not written", parser.getJsonReport());
+        if (status == 0) status = 1;
+      }
+      if (parser.isCleanRemote()) {
+        if (status == 0) cleanRemote(jar);
+        else logger.warn("--clean-remote: the build failed, so {} and the MC jar stay on the IBM i for inspection", remoteDir);
+      }
+      return status;
     } finally {
       if (ssh != null) ssh.close();
+    }
+  }
+
+  /* The report MC wrote on the IBM i: to --json when given, and a short summary of the result printed last */
+  private boolean summarize(String remoteReport, int status) {
+    File local = null;
+    try {
+      local = parser.getJsonReport() != null ? new File(parser.getJsonReport()) : File.createTempFile("mc-report", ".json");
+      ssh.download(remoteReport, local);
+      System.out.println(RemoteSummary.format(mapper.readTree(local), status, host));
+      return true;
+    } catch (Exception e) {
+      System.out.println("Build summary: no report came back from the IBM i (" + e.getClass().getSimpleName()
+          + "); the exit code is " + status);
+      logger.debug("Remote report not read", e);
+      return false;
+    } finally {
+      if (local != null && parser.getJsonReport() == null) local.delete();
+      ssh.execQuiet("rm -f " + SshTarget.quote(remoteReport));
+    }
+  }
+
+  /*
+   * --clean-remote after a successful build: the uploaded project copy and this MC version's jar. Only MC's own copy
+   * is deleted: never a --push folder, and only when its real path (symbolic links resolved) is below <home>/mc and its
+   * marker .mc/local-project holds this project's id. The next --remote uploads again.
+   */
+  private void cleanRemote(String jar) {
+    try {
+      String mc = ssh.realPath(remoteHome + "/mc");
+      String real = ssh.realPath(remoteDir);
+      String marker = ssh.execQuiet("cat " + SshTarget.quote(remoteDir + "/.mc/local-project"));
+      if (parser.getPush() != null || mc == null || real == null || !real.startsWith(mc + "/") || real.length() <= mc.length() + 1
+          || marker == null || !marker.trim().equals(ownerId)) {
+        logger.warn("--clean-remote: {} is not an MC copy of this project (inside {}/mc, with its marker), so it stays", remoteDir, remoteHome);
+      } else {
+        ssh.exec("rm -rf " + SshTarget.quote(real));
+        SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
+        manifest.clear();
+        manifest.save();
+        logger.info("--clean-remote: {} deleted from the IBM i", remoteDir);
+      }
+      ssh.exec("rm -f " + SshTarget.quote(jar));
+      ssh.execQuiet("rmdir " + SshTarget.quote(remoteHome + "/mc/.mc") + " " + SshTarget.quote(remoteHome + "/mc"));  // only when empty
+      logger.info("--clean-remote: MC's jar deleted from the IBM i");
+    } catch (Exception e) {
+      logger.warn("--clean-remote did not finish: {}", e.getMessage());
     }
   }
 

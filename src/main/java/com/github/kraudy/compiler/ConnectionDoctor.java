@@ -49,13 +49,26 @@ final class ConnectionDoctor {
       if (host.isEmpty() || user.isEmpty()) {
         out.println("Connection        : none. Use --code4i [--connection <name>], or set IBMI_HOSTNAME and IBMI_USERNAME "
             + "(environment or .env)");
+        out.println("  IBMI_HOSTNAME   : " + (host.isEmpty() ? "not set" : host));
+        out.println("  IBMI_USERNAME   : " + (user.isEmpty() ? "not set" : user.toUpperCase()));
+        String seen = Passwords.source();
+        out.println("  password source : " + (seen != null ? seen + " (it only supplies the password: the host and user come from "
+            + "--code4i or IBMI_HOSTNAME / IBMI_USERNAME)" : "none (--password-stdin, IBMI_PASSWORD_FILE, --password-command, "
+            + "IBMI_PASSWORD or SSH_ASKPASS)"));
+        if (Passwords.askpassNote() != null) out.println("  " + Passwords.askpassNote());
         return 1;
       }
     }
 
     SshTarget.Port port = SshTarget.Port.of(parser, code4i);
     String key = code4i != null && code4i.privateKeyPath != null && new File(code4i.privateKeyPath).isFile() ? code4i.privateKeyPath : null;
-    String password = Passwords.get(user + "@" + host);
+    String password;
+    try {
+      password = Passwords.get(user + "@" + host);
+    } catch (IllegalArgumentException e) {
+      out.println("Password source   : " + e.getMessage());
+      return 1;
+    }
     String passwordSource = Passwords.source() != null ? Passwords.source() : password != null ? "typed at the terminal" : null;
 
     out.println("Connection source : " + source);
@@ -64,6 +77,7 @@ final class ConnectionDoctor {
     out.println("SSH auth          : " + (key != null ? "key " + key : passwordSource != null ? "password from " + passwordSource
         : "keys in ~/.ssh (id_ed25519, id_ecdsa, id_rsa), no password"));
     out.println("Host servers auth : " + (passwordSource != null ? "password from " + passwordSource : "no password available"));
+    if (Passwords.askpassNote() != null) out.println("Password note     : " + Passwords.askpassNote());
     out.println("Host key checking : " + (SshTarget.strictHostKey || System.getenv("IBMI_SSH_KNOWN_HOSTS") != null
         ? "strict (unknown keys refused)" : "accept-new (unknown keys trusted and recorded)"));
     String curlib = parser.getCurlib() != null ? parser.getCurlib() + " (--curlib)"
@@ -137,7 +151,7 @@ final class ConnectionDoctor {
       return false;
     }
     if (target.password.isEmpty()) {
-      out.println("Host sign-on      : not tried (no password: IBMI_PASSWORD, IBMI_PASSWORD_FILE or --password-stdin)");
+      out.println("Host sign-on      : not tried (no password: --password-stdin, IBMI_PASSWORD_FILE, --password-command, IBMI_PASSWORD or SSH_ASKPASS)");
       return false;
     }
     AS400 system = null;

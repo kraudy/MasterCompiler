@@ -70,6 +70,11 @@ final class SyncManifest {
     if (files().remove(rel) != null) dirty = true;
   }
 
+  /* Forget everything for this folder (it was deleted on the IBM i) */
+  void clear() {
+    if (root.remove(key) != null) dirty = true;
+  }
+
   void save() {
     if (!dirty) return;
     try {

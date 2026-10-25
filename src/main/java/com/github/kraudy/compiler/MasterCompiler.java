@@ -186,13 +186,7 @@ public class MasterCompiler{
         progress.stage("pushing the sources to " + push);
         compileBaseDir = SourcePusher.push(system, baseDir, push, since, changedFiles, dryRun, verbose);
         /* A scanned spec's CHGCURDIR names the folder on this PC: the job works in the pushed copy instead */
-        for (CommandObject hook : globalSpec.before) {
-          if (hook.getSystemCommand() == SysCmd.CHGCURDIR && hook.get(ParamCmd.DIR) != null && baseDir != null
-              && new java.io.File(hook.get(ParamCmd.DIR).replace("'", "").trim()).getAbsoluteFile().toPath().normalize()
-                  .equals(new java.io.File(baseDir).getAbsoluteFile().toPath().normalize())) {
-            hook.put(ParamCmd.DIR, compileBaseDir);
-          }
-        }
+        if (baseDir != null) moveCurDir(globalSpec, baseDir, compileBaseDir);
         globalSpec.before.add(0, new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, compileBaseDir));
       }
 
@@ -812,6 +806,56 @@ public class MasterCompiler{
     context.getLogger(SshTarget.class).setLevel(ch.qos.logback.classic.Level.INFO);
   }
 
+  /*
+   * CHGCURDIR hooks that name the folder from (or one under it) name the same place under to: a spec scanned or
+   * written on the PC runs on a copy elsewhere (the --push folder, the --remote copy on the IBM i)
+   */
+  static void moveCurDir(BuildSpec spec, String from, String to) {
+    List<List<CommandObject>> lists = new ArrayList<List<CommandObject>>();
+    lists.add(spec.before);
+    lists.add(spec.after);
+    lists.add(spec.success);
+    lists.add(spec.failure);
+    for (BuildSpec.TargetSpec target : spec.targets.values()) {
+      lists.add(target.before);
+      lists.add(target.after);
+      lists.add(target.success);
+      lists.add(target.failure);
+    }
+    List<String> root = segments(from);
+    boolean windows = from.matches("^[A-Za-z]:.*");  // a drive letter: the folder was written on a Windows PC
+    for (List<CommandObject> hooks : lists) {
+      for (CommandObject hook : hooks) {
+        if (hook.getSystemCommand() != SysCmd.CHGCURDIR || hook.get(ParamCmd.DIR) == null) continue;
+        List<String> dir = segments(hook.get(ParamCmd.DIR).replace("'", "").trim());
+        if (dir.size() < root.size()) continue;
+        boolean inside = true;
+        for (int i = 0; i < root.size() && inside; i++) inside = windows ? root.get(i).equalsIgnoreCase(dir.get(i)) : root.get(i).equals(dir.get(i));
+        if (!inside) continue;
+        StringBuilder moved = new StringBuilder(to.endsWith("/") ? to.substring(0, to.length() - 1) : to);
+        for (String below : dir.subList(root.size(), dir.size())) moved.append('/').append(below);
+        hook.put(ParamCmd.DIR, moved.toString());
+      }
+    }
+  }
+
+  /* The parts of a path with / or \\, without "." and with ".." applied; a relative path is taken from the current folder */
+  private static List<String> segments(String path) {
+    String full = path;
+    boolean rooted = path.startsWith("/") || path.startsWith("\\") || path.matches("^[A-Za-z]:.*");
+    if (!rooted) full = new java.io.File(path).getAbsolutePath();
+    List<String> parts = new ArrayList<String>();
+    for (String part : full.split("[/\\\\]")) {
+      if (part.isEmpty() || part.equals(".")) continue;
+      if (part.equals("..")) {
+        if (!parts.isEmpty()) parts.remove(parts.size() - 1);
+      } else {
+        parts.add(part);
+      }
+    }
+    return parts;
+  }
+
   /* Targets never reached are listed as not built, then the report is written (--json) */
   private void finishReport() {
     if (compilationError) report.success = false;
@@ -1009,10 +1053,10 @@ public class MasterCompiler{
     Code4iConfig code4i = code4i(parser);
     if (code4i != null) return code4i.connect();
     if (IBMiDotEnv.isIBMi()) return IBMiDotEnv.getNewSystemConnection(true);
-    /* A password from --password-stdin, IBMI_PASSWORD_FILE or the terminal: IBMiDotEnv only knows IBMI_PASSWORD */
+    /* A password from --password-stdin, IBMI_PASSWORD_FILE, --password-command, SSH_ASKPASS or the terminal: IBMiDotEnv only knows IBMI_PASSWORD */
     io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
     String password = dotenvPassword(env);
-    if (password.isEmpty() || (Passwords.explicit() == null && !env.get("IBMI_PASSWORD", "").isEmpty())) {
+    if (password.isEmpty() || (Passwords.provided() == null && !env.get("IBMI_PASSWORD", "").isEmpty())) {
       return IBMiDotEnv.getNewSystemConnection(true);
     }
     AS400 system = new AS400(env.get("IBMI_HOSTNAME", ""), env.get("IBMI_USERNAME", ""), password.toCharArray());
@@ -1020,13 +1064,13 @@ public class MasterCompiler{
     return system;
   }
 
-  /* --password-stdin / IBMI_PASSWORD_FILE, else IBMI_PASSWORD of the environment or .env, else asked on the terminal */
+  /* --password-stdin / IBMI_PASSWORD_FILE / the password command, else IBMI_PASSWORD of the environment or .env, else SSH_ASKPASS or the terminal */
   private static String dotenvPassword(io.github.cdimascio.dotenv.Dotenv env) {
-    String explicit = Passwords.explicit();
-    if (explicit != null) return explicit;
+    String provided = Passwords.provided();
+    if (provided != null) return provided;
     String fromEnv = env.get("IBMI_PASSWORD", "");
     if (!fromEnv.isEmpty()) return fromEnv;
-    String typed = Passwords.prompt(env.get("IBMI_USERNAME", "") + "@" + env.get("IBMI_HOSTNAME", ""));
+    String typed = Passwords.interactive(env.get("IBMI_USERNAME", "") + "@" + env.get("IBMI_HOSTNAME", ""));
     return typed != null ? typed : "";
   }
 
@@ -1151,6 +1195,11 @@ public class MasterCompiler{
         return new SshMcpProxy(parser).build();
       }
 
+      /* Objects as save files, down to this PC over SSH */
+      if (parser.getDownload() != null) {
+        return ObjectDownload.run(parser);
+      }
+
       /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
       if (parser.getImportSelection() != null) {
         system = signOn(parser);
@@ -1202,6 +1251,7 @@ public class MasterCompiler{
         } else if (parser.hasScan()) {
           SpecGenerator generator = new SpecGenerator(
               system, connection, parser.isDebug(), parser.isVerbose());
+          generator.setServiceProgramsFromExports(parser.isSrvpgmFromExports());
           generated = generator.generate(
               parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
           scanRootComment = parser.getScanRoot();
@@ -1231,6 +1281,7 @@ public class MasterCompiler{
         /* no object inspection: a build uses the sources and MC's defaults, not the existing objects */
         SpecGenerator generator = new SpecGenerator(
             system, null, parser.isDebug(), parser.isVerbose());
+        generator.setServiceProgramsFromExports(parser.isSrvpgmFromExports());
         spec = generator.generate(
             parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
         if (parser.getOutputFile() != null) {
@@ -1244,6 +1295,11 @@ public class MasterCompiler{
           SpecWriter.writeToFile(spec, parser.getOutputFile(), null);
           logger.info("Generated YAML: {}", parser.getOutputFile());
         }
+      }
+
+      /* --remote runs this on the IBM i: a spec written on the PC names the PC's project folder in CHGCURDIR */
+      if (parser.getLocalProject() != null && spec.getBaseDirectory() != null) {
+        moveCurDir(spec, parser.getLocalProject(), spec.getBaseDirectory());
       }
 
       compiler = new MasterCompiler(

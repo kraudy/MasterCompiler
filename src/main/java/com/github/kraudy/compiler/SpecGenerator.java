@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
+import com.github.kraudy.compiler.CompilationPattern.SourceType;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.github.kraudy.compiler.SourceNaming.ParsedName;
 import com.github.kraudy.compiler.SourceScanner.CandidateSource;
@@ -30,6 +31,7 @@ public class SpecGenerator {
   private final Connection connection; // may be null; used to inspect existing objects
   private final boolean debug;
   private final boolean verbose;
+  private boolean serviceProgramsFromExports;  // --srvpgm-from-exports
 
   public SpecGenerator(AS400 system, boolean debug, boolean verbose) {
     this(system, null, debug, verbose);
@@ -40,6 +42,11 @@ public class SpecGenerator {
     this.connection = connection;
     this.debug = debug;
     this.verbose = verbose;
+  }
+
+  /** A module that exports procedures and that no service program binds gets a service program ({@code --srvpgm-from-exports}). */
+  public void setServiceProgramsFromExports(boolean on) {
+    this.serviceProgramsFromExports = on;
   }
 
   /**
@@ -88,6 +95,8 @@ public class SpecGenerator {
     spec.setBaseDirectory(baseDir);
 
     int added = 0;
+    java.util.Map<TargetKey, String> moduleTexts = new java.util.LinkedHashMap<TargetKey, String>();  // module sources read here
+    java.util.Set<String> boundSymbols = new java.util.HashSet<String>();                            // EXPORT SYMBOL of the binder sources
     java.util.Map<String, String> objects = new java.util.HashMap<String, String>();  // LIB.NAME.TYPE -> file
     for (CandidateSource candidate : candidates) {
       Optional<ParsedName> parsed = SourceNaming.parseFileName(candidate.fileName);
@@ -118,6 +127,16 @@ public class SpecGenerator {
       if (spec.targets.containsKey(key)) {
         logger.warn("Duplicate target key {} from {}; keeping first", key.asString(), candidate.relativePath);
         continue;
+      }
+
+      String text = readLocal(candidate);
+      if (text != null) {
+        for (String warning : SourceLint.check(candidate.relativePath, key.getObjectTypeEnum(), name.sourceType, text)) {
+          logger.warn(warning);
+          spec.warnings.add(warning);
+        }
+        if (key.isModule()) moduleTexts.put(key, text);
+        if (name.sourceType == SourceType.BND) boundSymbols.addAll(SourceLint.binderSymbols(text));
       }
 
       BuildSpec.TargetSpec targetSpec = new BuildSpec.TargetSpec();
@@ -162,6 +181,9 @@ public class SpecGenerator {
     /* Merge non-inferable params from base overlay (mc-base.yaml / --base) */
     mergeBaseOverlay(spec, root, basePath);
 
+    /* After the overlay: its MODULE lists count as service programs that already take a module */
+    if (serviceProgramsFromExports) added += addServicePrograms(spec, library, moduleTexts, boundSymbols);
+
     spec.setTargetsList(spec.targets.keySet());
     logger.info("Discovered {} targets under {}", added, root);
 
@@ -183,6 +205,49 @@ public class SpecGenerator {
     SpecResolver.resolveAll(spec, descriptor);
 
     return spec;
+  }
+
+  /* The source as text when it is a local file this scan can read; null for an IFS source or one that cannot be read */
+  private static String readLocal(CandidateSource candidate) {
+    try {
+      java.io.File file = new java.io.File(candidate.absolutePath);
+      if (!file.isFile() || file.length() > 4L * 1024 * 1024) return null;
+      return new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /*
+   * --srvpgm-from-exports: NAME.SRVPGM for each module that exports procedures (DCL-PROC ... EXPORT) when no service
+   * program of the project takes it: not listed in a srvpgm target's MODULE, and none of its exports named by a binder
+   * source's EXPORT SYMBOL. The service program is the module with EXPORT(*ALL), like NAME.srvpgm.rpgle.
+   */
+  private int addServicePrograms(BuildSpec spec, String library, java.util.Map<TargetKey, String> moduleTexts,
+      java.util.Set<String> boundSymbols) throws Exception {
+    java.util.Set<String> listed = new java.util.HashSet<String>();
+    for (java.util.Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : spec.targets.entrySet()) {
+      String modules = entry.getKey().isServiceProgram() ? entry.getValue().params.get(ParamCmd.MODULE) : null;
+      if (modules == null) continue;
+      for (String module : modules.trim().split("\\s+")) listed.add(module.replaceAll("^.*/", "").toUpperCase());
+    }
+    int added = 0;
+    for (java.util.Map.Entry<TargetKey, String> module : moduleTexts.entrySet()) {
+      String name = module.getKey().getObjectName();
+      java.util.List<String> exports = SourceLint.exportedProcedures(module.getValue());
+      if (exports.isEmpty() || listed.contains(name.toUpperCase())) continue;
+      boolean named = false;
+      for (String export : exports) named |= boundSymbols.contains(export);
+      TargetKey srvKey = new TargetKey(library + "." + name + ".SRVPGM.BND");
+      if (named || spec.targets.containsKey(srvKey)) continue;
+      BuildSpec.TargetSpec srvSpec = new BuildSpec.TargetSpec();
+      srvSpec.params.put(ParamCmd.MODULE, name);
+      srvSpec.params.put(ParamCmd.EXPORT, "*ALL");
+      spec.targets.put(srvKey, srvSpec);
+      added++;
+      logger.info("Target: {} <- module {} exports {} (EXPORT(*ALL))", srvKey.asString(), name, exports);
+    }
+    return added;
   }
 
   /**

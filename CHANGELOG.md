@@ -20,6 +20,19 @@ Connection feedback from PUB400 (SSH on 2222, host servers blocked)
   sends the password to one password prompt and cancels on one-time-code prompts or several questions.
 - Not done: TLS for the host servers connection.
 
+Feedback from building DCL-PROC samples over SSH
+- `--remote`: a `build.yaml` that names the PC's project folder in `CHGCURDIR` (the scan writes it) now runs in the uploaded
+  copy (`--local-project`, set by `--remote`; also for folders below the project and for target hooks). `--push` rewrites
+  target hooks too. The IBM i writes the build report, which comes back: `--json <file>` is allowed with `--remote`, and the
+  output ends with a short summary (result, each failed target's command, its first compile errors). `--clean-remote` deletes
+  the uploaded copy and MC's jar after a successful build.
+- `--scan` warns about a program with `DCL-PROC main` and no `ctl-opt main(main)` (RNF7023) and about `DFTACTGRP` / `ACTGRP`
+  in a `NOMAIN` module (the warnings are in the report too). `--srvpgm-from-exports`: a module that exports procedures
+  and that no service program takes gets `NAME.SRVPGM` (`EXPORT(*ALL)`).
+- `--download LIB/OBJ[,...] -o <dir>`: objects as save files over SSH (`SAVOBJ`, SFTP, then the temporary save file is deleted).
+- Passwords: `--password-command` / `IBMI_PASSWORD_COMMAND` (a keyring or secrets manager) and `SSH_ASKPASS`.
+  `--doctor` shows these sources, says why `SSH_ASKPASS` is not used, and lists what is missing when no connection is found.
+
 ## v0.3.24
 
 - `debug_program` loads in GitHub Copilot: its `breakpoints` schema declares its items (a line number or
