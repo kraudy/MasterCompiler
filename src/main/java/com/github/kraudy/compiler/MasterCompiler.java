@@ -56,6 +56,7 @@ public class MasterCompiler{
   private String compileBaseDir = null; // where the IBM i job resolves relative SRCSTMF (spec dir or pushed dir)
   private boolean collectReport = false; // keep the report in memory (MCP) even without --json
   private Set<String> changedFiles = null; // explicit changed sources (MCP build/plan files), like --since
+  private List<TargetSelection> onlyTargets = null;  // --target: build just these, no dependents
   private boolean keepGoing = false;  // --keep-going: after a failure, build everything that does not depend on it
   private List<CommandObject> libraryHooks = new ArrayList<CommandObject>(); // --code4i / --libl / --curlib
 
@@ -107,6 +108,16 @@ public class MasterCompiler{
     this.since = since;
   }
 
+  /* --target NAME[,NAME.TYPE...]: only those targets; throws IllegalArgumentException when one names no target */
+  public void setOnlyTargets(String selection) {
+    if (selection == null) {
+      onlyTargets = null;
+      return;
+    }
+    onlyTargets = TargetSelection.parse(selection);
+    TargetSelection.select(globalSpec.targets.keySet(), onlyTargets);  // a name the spec does not have fails before any connection work
+  }
+
   public void setPush(String push) {
     this.push = push;
   }
@@ -144,7 +155,12 @@ public class MasterCompiler{
 
   /* --diff and --since both build a rebuild set and skip the rest */
   private boolean isIncremental() {
-    return diff || since != null || changedFiles != null;
+    return diff || since != null || changedFiles != null || onlyTargets != null;
+  }
+
+  /* The dependency graph is read for what depends on what: --diff, --since, changed files and keep-going (not --target) */
+  private boolean needsDependencies() {
+    return diff || since != null || changedFiles != null || keepGoing;
   }
 
   public void build() {
@@ -163,7 +179,7 @@ public class MasterCompiler{
     if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
 
     /* Init dependency awareness */
-    if (isIncremental() || keepGoing) depAwareness = new DependencyAwareness(system, debug, verbose);
+    if (needsDependencies()) depAwareness = new DependencyAwareness(system, debug, verbose);
 
 
     /* Init source descriptor */
@@ -209,9 +225,10 @@ public class MasterCompiler{
       }
 
       /* The dependency graph drives incremental selection and, with keep-going, what a failure blocks */
-      if ((isIncremental() || keepGoing) && !globalSpec.isDependenciesDetected()) depAwareness.detectDependencies(globalSpec);
+      if (needsDependencies() && !globalSpec.isDependenciesDetected()) depAwareness.detectDependencies(globalSpec);
       if (since != null || changedFiles != null) collectSinceRebuildSet();
       else if (diff) collectDiffRebuildSet();
+      else if (onlyTargets != null) rebuildSet.addAll(TargetSelection.select(globalSpec.targets.keySet(), onlyTargets));
 
       /* Build each target */
       buildTargets(globalSpec.targets);
@@ -296,7 +313,7 @@ public class MasterCompiler{
             resolveLibrary(key);
             report.add(key.asString(), BuildReport.SKIPPED);
           }
-          if (verbose) logger.info("Skipping unchanged target: " + key.asString() + (diff ? key.getTimestmaps() : ""));
+          if (verbose) logger.info((onlyTargets != null ? "Skipping target not selected: " : "Skipping unchanged target: ") + key.asString() + (diff ? key.getTimestmaps() : ""));
           continue;
         }
       }
@@ -1200,6 +1217,18 @@ public class MasterCompiler{
         return ObjectDownload.run(parser);
       }
 
+      /* Run a program in one job and print what it gave back (its output is the answer: no logger lines around it) */
+      if (parser.getCall() != null) {
+        if (parser.isDryRun()) {
+          System.out.println(CallRunner.dryRun(parser));
+          return exitCode;
+        }
+        quietLogs(parser.isVerbose());
+        system = signOn(parser);
+        connection = new AS400JDBCDataSource(system).getConnection();
+        return CallRunner.run(system, connection, parser, code4i(parser));
+      }
+
       /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
       if (parser.getImportSelection() != null) {
         system = signOn(parser);
@@ -1315,6 +1344,7 @@ public class MasterCompiler{
         );
       compiler.setJsonReport(parser.getJsonReport());
       compiler.setSince(parser.getSince());
+      compiler.setOnlyTargets(parser.getTarget());
       Code4iConfig code4i = code4i(parser);
       compiler.setLibraryHooks(libraryHooks(parser, code4i));
       compiler.setPush(pushDir(parser, code4i, spec));

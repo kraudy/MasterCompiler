@@ -102,6 +102,7 @@ public final class SpecResolver {
         switch (cmd) {
           case CRTBNDRPG:
           case CRTBNDCL:
+          case CRTBNDC:
           case CRTRPGPGM:
           case CRTCLPGM:
             return true;
@@ -124,6 +125,7 @@ public final class SpecResolver {
         switch (cmd) {
           case CRTRPGMOD:
           case CRTCLMOD:
+          case CRTCMOD:
           case CRTSRVPGM:
             return true;
           default:

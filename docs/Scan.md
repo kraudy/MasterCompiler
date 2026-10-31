@@ -104,12 +104,13 @@ Object type and source type are taken from the **basename** (not the folder):
 | `QDDSSRC/ARTICLE.pf.dds` | `curlib.ARTICLE.pf.dds` |
 | `QSRVSRC/FFAMILLY.srvpgm.BND` | `curlib.FFAMILLY.srvpgm.bnd` |
 | `QRPGLESRC/ADDNUM.RPGLE` | `curlib.ADDNUM.pgm.rpgle` |
+| `QCSRC/DUMPSTATIC.module.c` | `curlib.DUMPSTATIC.module.c` |
 
 Defaults when object type is omitted:
 
 - `rpgle` / `sqlrpgle` / `clle` / `rpg` / `clp` → `pgm`  
 - `bnd` → `srvpgm`  
-- DDS and SQL **require** the middle segment (`pf.dds`, `table.sql`, …)
+- DDS, SQL and C **require** the middle segment (`pf.dds`, `table.sql`, `DUMPSTATIC.module.c`, `RUNDUMP.pgm.c`). A C file without it (`helper.c`) is not a target, so C files that were in a scanned tree before are still ignored; `NAME.srvpgm.c` is a module plus its service program, like `NAME.srvpgm.rpgle`. C targets use `CRTCMOD` / `CRTBNDC` with `SRCSTMF`; their dependencies are not read from the source (name the order with a `.srvpgm.bnd` or a `before:` hook).
 
 Object name must be a valid IBM i name (1–10 chars: `A-Z 0-9 $ # @ _`).  
 Descriptive middle tokens (e.g. `hello2.nomain.module.rpgle`) are ignored; the first segment is the object name.

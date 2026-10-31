@@ -14,6 +14,8 @@ This behavior, conveninently let us decribe objects in a consice, unique and int
 | mylib.modhello.**module.rpgle**     | `CRTRPGMOD`  | **Rpgle_Mod_Pattern**
 | mylib.modhello.**module.sqlrpgle**  | `CRTSQLRPGI` | **SqlRpgle_Pgm_Mod_Pattern**
 | mylib.modhello.**module.clle**      | `CRTCLMOD`   | **Clle_Mod_Pattern**
+| mylib.chello.**pgm.c**              | `CRTBNDC`    | **C_Pgm_Pattern**
+| mylib.cmodhello.**module.c**        | `CRTCMOD`    | **C_Mod_Pattern**
 | mylib.srvhello.**srvpgm.bnd**       | `CRTSRVPGM`  | **Bnd_Srvpgm_Pattern**
 
 ## OPM keys

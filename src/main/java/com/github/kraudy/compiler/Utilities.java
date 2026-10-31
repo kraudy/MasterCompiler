@@ -56,6 +56,8 @@ public class Utilities {
       case CRTSRVPGM:
       case CRTRPGMOD:
       case CRTCLMOD:
+      case CRTCMOD:
+      case CRTBNDC:
       case RUNSQLSTM:
       case CRTCMD:
         targetKey.put(ParamCmd.SRCFILE, targetKey.getQualifiedSourceFile())
@@ -79,6 +81,7 @@ public class Utilities {
     
       case CRTBNDRPG:
       case CRTBNDCL:
+      case CRTBNDC:
         targetKey.put(ParamCmd.DBGVIEW, ValCmd.ALL);
       case CRTRPGPGM:
       case CRTCLPGM:
@@ -105,6 +108,7 @@ public class Utilities {
 
       case CRTRPGMOD:
       case CRTCLMOD:
+      case CRTCMOD:
         targetKey.put(ParamCmd.DBGVIEW, ValCmd.ALL)
           .put(ParamCmd.MODULE, targetKey.getQualifiedObject())
           .put(ParamCmd.MODULE, targetKey.getQualifiedObject(ValCmd.CURLIB));
@@ -158,8 +162,10 @@ public class Utilities {
       case CRTSRVPGM:
       case CRTBNDRPG:
       case CRTBNDCL:
+      case CRTBNDC:
       case CRTRPGMOD:
       case CRTCLMOD:
+      case CRTCMOD:
       case CRTSQLRPGI:
       case CRTRPGPGM:
       case CRTCLPGM:
@@ -177,8 +183,10 @@ public class Utilities {
       case CRTSRVPGM:
       case CRTBNDRPG:
       case CRTBNDCL:
+      case CRTBNDC:
       case CRTRPGMOD:
       case CRTCLMOD:
+      case CRTCMOD:
       case CRTSQLRPGI:
       case CRTDSPF:
       case CRTPF:
@@ -462,8 +470,10 @@ public class Utilities {
     switch (key.getCompilationCommand()){
       case CRTBNDRPG:
       case CRTBNDCL:
+      case CRTBNDC:
       case CRTRPGMOD:
       case CRTCLMOD:
+      case CRTCMOD:
         if (key.containsKey(ParamCmd.SRCSTMF)) {
           key.put(ParamCmd.TGTCCSID, ValCmd.JOB);
         }
@@ -538,6 +548,8 @@ public class Utilities {
     switch (key.getCompilationCommand()){
       case CRTRPGMOD:
       case CRTCLMOD:
+      case CRTCMOD:
+      case CRTBNDC:
       case CRTBNDRPG:
       case CRTBNDCL:
       case CRTSQLRPGI:

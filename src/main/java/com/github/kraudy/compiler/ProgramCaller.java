@@ -107,6 +107,11 @@ final class ProgramCaller {
     ExecutorService runner = Executors.newSingleThreadExecutor();
     ObjectNode result = mapper.createObjectNode();
     result.put("program", library + "/" + program);
+    /* The job the program runs in (its spooled output and job log are found by this name); not worth failing the call for */
+    try {
+      com.ibm.as400.access.Job job = setup.getServerJob();
+      result.put("job", job.getNumber() + "/" + job.getUser() + "/" + job.getName());
+    } catch (Exception ignored) { /* the answer just has no job */ }
     long start = System.currentTimeMillis();
     try {
       if (around != null) {

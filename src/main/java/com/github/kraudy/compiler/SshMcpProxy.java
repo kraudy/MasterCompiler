@@ -280,19 +280,24 @@ public class SshMcpProxy {
       stage("4/5 building on the IBM i");
       List<String> args = parser.remoteArgs(remoteDir);
       args.addAll(libraryArgs(code4i, false));
-      /* The spec may name this PC's project folder (a scanned CHGCURDIR): MC there points it at the uploaded copy */
-      args.add("--local-project");
-      args.add(project.getPath());
-      /* The build report comes back for the summary (and for --json); a file in MC's private folder, deleted after */
-      byte[] random = new byte[8];
-      new java.security.SecureRandom().nextBytes(random);
-      StringBuilder id = new StringBuilder();
-      for (byte b : random) id.append(String.format("%02x", b));
-      String reportDir = remoteHome + "/mc/.mc";
-      ssh.exec("umask 077 && mkdir -p " + SshTarget.quote(reportDir));
-      String remoteReport = reportDir + "/report-" + id + ".json";
-      args.add("--json");
-      args.add(remoteReport);
+      /* --call prints its answer (parameters, messages, spooled output): no build report to bring back */
+      boolean call = parser.getCall() != null;
+      String remoteReport = null;
+      if (!call) {
+        /* The spec may name this PC's project folder (a scanned CHGCURDIR): MC there points it at the uploaded copy */
+        args.add("--local-project");
+        args.add(project.getPath());
+        /* The build report comes back for the summary (and for --json); a file in MC's private folder, deleted after */
+        byte[] random = new byte[8];
+        new java.security.SecureRandom().nextBytes(random);
+        StringBuilder id = new StringBuilder();
+        for (byte b : random) id.append(String.format("%02x", b));
+        String reportDir = remoteHome + "/mc/.mc";
+        ssh.exec("umask 077 && mkdir -p " + SshTarget.quote(reportDir));
+        remoteReport = reportDir + "/report-" + id + ".json";
+        args.add("--json");
+        args.add(remoteReport);
+      }
       StringBuilder command = new StringBuilder(startCommand(jar));
       for (String arg : args) command.append(' ').append(SshTarget.quote(arg));
       ChannelExec channel = ssh.start(command.toString());
@@ -306,7 +311,7 @@ public class SshMcpProxy {
       int status = channel.getExitStatus();
       channel.disconnect();
       status = status < 0 ? 1 : status;
-      if (!summarize(remoteReport, status) && parser.getJsonReport() != null) {
+      if (!call && !summarize(remoteReport, status) && parser.getJsonReport() != null) {
         logger.error("--json: the build report could not be copied from the IBM i, so {} is not written", parser.getJsonReport());
         if (status == 0) status = 1;
       }

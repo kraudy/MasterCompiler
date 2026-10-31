@@ -192,7 +192,8 @@ public final class SourceNaming {
         return ObjectType.MSGF;
       case DDS:
       case SQL:
-        // object type required in the name (pf.dds, table.sql, ...)
+      case C:
+        // object type required in the name (pf.dds, table.sql, name.module.c, ...)
         return null;
       default:
         return null;

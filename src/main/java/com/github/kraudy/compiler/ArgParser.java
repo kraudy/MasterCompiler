@@ -68,6 +68,9 @@ public class ArgParser {
     KEEP_GOING    ("k", "keep-going", Kind.FLAG,  "After a failed target, keep building everything that does not depend on it"),
     MCP           (null, "mcp",          Kind.FLAG,  "Run as an MCP server on stdio (tools: build, plan, impact, clean, find_source, import_source, joblog)"),
     NO_MIGRATE    (null, "no-migrate",   Kind.FLAG,  "Disable automatic source migration"),
+    TARGET        (null, "target",       Kind.VALUE, "Build only these targets of the spec (no dependents): NAME or NAME.TYPE, comma-separated, e.g. DUMPSTATIC.SRVPGM"),
+    CALL          (null, "call",         Kind.VALUE, "Run a program in one job with --libl / --curlib and print its parameters, messages and spooled output: LIB/PGM or PGM"),
+    CALL_PARAMS   (null, "call-params",  Kind.VALUE, "With --call: the program's parameters as a JSON array, e.g. '[{\"type\":\"char\",\"length\":10,\"value\":\"A\"}]'"),
     JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 
     final String shortName;
@@ -140,6 +143,9 @@ public class ArgParser {
   private boolean cleanRemote;
   private String localProject;
   private String download;
+  private String target;
+  private String call;
+  private String callParams;
   private boolean srvpgmFromExports;
   private boolean strictHostKey;
   private boolean readOnly;
@@ -311,6 +317,9 @@ public class ArgParser {
       case PASSWORD_COMMAND: passwordCommand = value; break;
       case LOCAL_PROJECT: localProject = value; break;
       case DOWNLOAD:      download = value; break;
+      case TARGET:        target = value; break;
+      case CALL:          call = value; break;
+      case CALL_PARAMS:   callParams = value; break;
       case LIBL:
         libl = value;
         break;
@@ -375,6 +384,31 @@ public class ArgParser {
     }
     if (passwordStdin && mcp) {
       throw new IllegalArgumentException("--password-stdin cannot be used with --mcp: stdin is the protocol channel");
+    }
+    if (callParams != null && call == null) {
+      throw new IllegalArgumentException("--call-params goes with --call");
+    }
+    if (call != null) {
+      if (mcp || setupVscode || installSkills || version || importSelection != null || yamlFile != null || scanRoot != null
+          || tobiRoot != null || push != null || generateOnly || diff || since != null || target != null || clean || keepGoing
+          || baseFile != null || outputFile != null || srvpgmFromExports || ssh || hostServers || noMigrate) {
+        throw new IllegalArgumentException("--call takes only --call-params, --libl, --curlib, --json, --dry-run, --code4i, --connection, "
+            + "--ssh-port, --strict-host-key, --password-stdin, --password-command, -x, -v; with --remote also --project <folder> "
+            + "(uploaded, it carries MC) and --clean-remote");
+      }
+      CallRunner.parse(call);  // names, parameters and library list checked now, not after the connection
+      CallRunner.parameters(callParams);
+      if (libl != null) CallRunner.libraries(libl);
+      if (remote) {
+        if (projectRoot == null) throw new IllegalArgumentException("--remote needs --project <local folder> to upload");
+        if (jsonReport != null) throw new IllegalArgumentException("--json is not available with --call --remote: the output comes back on the screen");
+      }
+      return;  // --project (MC on the IBM i gets the uploaded copy's) is not used by the call itself
+    }
+    if (target != null) {
+      if (diff || since != null) throw new IllegalArgumentException("--target names the targets to build; it cannot be combined with --diff or --since");
+      if (mcp || generateOnly) throw new IllegalArgumentException("--target selects targets of a build; it cannot be used with --mcp or --generate-only");
+      TargetSelection.parse(target);  // names checked now
     }
     if (remote) {
       if (mcp) throw new IllegalArgumentException("--remote builds from the command line; the MCP server over SSH is --mcp --ssh");
@@ -564,6 +598,21 @@ public class ArgParser {
   /** {@code --download} selection (LIB/OBJ, comma-separated), or null. */
   public String getDownload() {
     return download;
+  }
+
+  /** {@code --target} selection (NAME or NAME.TYPE, comma-separated), or null. */
+  public String getTarget() {
+    return target;
+  }
+
+  /** {@code --call} program (LIB/PGM or PGM), or null. */
+  public String getCall() {
+    return call;
+  }
+
+  /** {@code --call-params}: the parameters as JSON, or null. */
+  public String getCallParams() {
+    return callParams;
   }
 
   /** {@code --srvpgm-from-exports}. */

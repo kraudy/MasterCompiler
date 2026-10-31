@@ -5,6 +5,16 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
 ## Unreleased
 
+Feedback from the ART200 runtime probes
+- `--call LIB/PGM [--call-params '<json>'] [--libl ...] [--curlib ...]`: run a program from the command line in one job with
+  that library list (no more `CHGLIBL` lost between `system` calls) and print its parameters, messages and the spooled
+  output of its job (`QPRINT`, job log). `--remote --project <dir> --call ...` does it over SSH. `call_program`'s answer
+  now names the `job` it ran in.
+- C sources are targets: `NAME.module.c` (`CRTCMOD`) and `NAME.pgm.c` (`CRTBNDC`), compiled from the stream file with
+  `DBGVIEW(*ALL)`; `NAME.srvpgm.c` is a module plus its service program. A `.c` file without the object type in its name is
+  still ignored by the scan, so existing projects do not start compiling C they never had as targets.
+- `--target NAME[,NAME.TYPE...]`: build only those targets of the spec (no dependents), to repeat one target after a one-line edit.
+
 Connection feedback from PUB400 (SSH on 2222, host servers blocked)
 - `--doctor` / `--explain-connection`: where the connection comes from, host, user, SSH port, auth, libraries, and what SSH
   and the host servers do with it; never prints the password. `--ssh-port` > Code for IBM i's port > `IBMI_SSH_PORT` > 22.

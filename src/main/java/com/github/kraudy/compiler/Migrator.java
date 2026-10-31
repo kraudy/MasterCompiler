@@ -39,6 +39,8 @@ public class Migrator {
         /* If Export and not Stream file, ignore migration */
         if (key.containsKey(ParamCmd.EXPORT) && !key.containsStreamFile()) break;
       case CRTCLMOD:
+      case CRTCMOD:
+      case CRTBNDC:
       case CRTRPGMOD:
       case CRTBNDRPG:
       case CRTBNDCL:

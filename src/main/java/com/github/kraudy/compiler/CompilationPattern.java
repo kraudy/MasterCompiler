@@ -78,7 +78,8 @@ public class CompilationPattern {
   public enum CompCmd implements Command { 
     CRTRPGMOD, CRTSQLRPGI, CRTBNDRPG, CRTRPGPGM, CRTCLMOD, CRTBNDCL, CRTCLPGM, RUNSQLSTM, 
     CRTSRVPGM, CRTDSPF, CRTLF, CRTPRTF, CRTMNU, CRTQMQRY, CRTPF, CRTCMD,
-    CRTBNDDIR, CRTDTAARA, CRTDTAQ, CRTMSGF
+    CRTBNDDIR, CRTDTAARA, CRTDTAQ, CRTMSGF,
+    CRTCMOD, CRTBNDC
     ;
 
     public static CompCmd fromString(String value) {
@@ -95,7 +96,7 @@ public class CompilationPattern {
   );
 
   public enum SourceType { 
-    RPG, RPGLE, SQLRPGLE, CLP, CLLE, SQL, BND, DDS,
+    RPG, RPGLE, SQLRPGLE, CLP, CLLE, SQL, BND, DDS, C,
     CMD, MNU, QMQRY, BNDDIR, DTAARA, DTAQ, MSGF
     ;
 
@@ -121,6 +122,8 @@ public class CompilationPattern {
         case CLP:
         case CLLE:
           return DftSrc.QCLSRC.name();
+        case C:
+          return DftSrc.QCSRC.name();
         case CMD:
           return DftSrc.QCMDSRC.name();
         case BNDDIR:
@@ -164,7 +167,7 @@ public class CompilationPattern {
   /* Default source files */
   public enum DftSrc { 
     QRPGLESRC, QRPGSRC, QCLSRC, QSQLSRC, QSRVSRC, QDSPFSRC, QPFSRC, QLFSRC, QSQLRPGSRC, QSQLMODSRC, QPRTFSRC,
-    QCMDSRC, QBNDSRC, QDTAARA, QDTAQSRC, QMSGFSRC
+    QCMDSRC, QBNDSRC, QDTAARA, QDTAQSRC, QMSGFSRC, QCSRC
   }
 
   /* Commands params as enums */
@@ -408,6 +411,12 @@ public class CompilationPattern {
     clleMap.put(ObjectType.MODULE, CompCmd.CRTCLMOD);
     clleMap.put(ObjectType.PGM, CompCmd.CRTBNDCL);
     typeToCmdMap.put(SourceType.CLLE, clleMap);
+
+    /* Source type: C (the file name must say the object type: NAME.module.c, NAME.pgm.c) */
+    Map<ObjectType, CompCmd> cMap = new EnumMap<>(ObjectType.class);
+    cMap.put(ObjectType.MODULE, CompCmd.CRTCMOD);
+    cMap.put(ObjectType.PGM, CompCmd.CRTBNDC);
+    typeToCmdMap.put(SourceType.C, cMap);
 
     /* Source type: SQL */
     Map<ObjectType, CompCmd> sqlMap = new EnumMap<>(ObjectType.class);
@@ -972,6 +981,54 @@ public class CompilationPattern {
 
   );
 
+  // CRTCMOD
+  public static final List<ParamCmd> C_Mod_Pattern = Arrays.asList(
+    ParamCmd.MODULE,
+    ParamCmd.SRCFILE,
+    ParamCmd.SRCMBR,
+    ParamCmd.SRCSTMF,
+    ParamCmd.TEXT,
+    ParamCmd.OUTPUT,
+    ParamCmd.OPTION,
+
+    ParamCmd.DEFINE,
+    ParamCmd.REPLACE,
+    ParamCmd.TGTRLS,
+    ParamCmd.AUT,
+    ParamCmd.OPTIMIZE,
+    ParamCmd.DBGVIEW,
+    ParamCmd.DBGENCKEY,
+    ParamCmd.ENBPFRCOL,
+    ParamCmd.STGMDL,
+    ParamCmd.INCDIR,
+    ParamCmd.TGTCCSID
+
+  );
+
+  // CRTBNDC
+  public static final List<ParamCmd> C_Pgm_Pattern = Arrays.asList(
+    ParamCmd.PGM,
+    ParamCmd.SRCFILE,
+    ParamCmd.SRCMBR,
+    ParamCmd.SRCSTMF,
+    ParamCmd.TEXT,
+    ParamCmd.OUTPUT,
+    ParamCmd.OPTION,
+
+    ParamCmd.DEFINE,
+    ParamCmd.REPLACE,
+    ParamCmd.TGTRLS,
+    ParamCmd.AUT,
+    ParamCmd.OPTIMIZE,
+    ParamCmd.DBGVIEW,
+    ParamCmd.DBGENCKEY,
+    ParamCmd.ENBPFRCOL,
+    ParamCmd.STGMDL,
+    ParamCmd.INCDIR,
+    ParamCmd.TGTCCSID
+
+  );
+
   /* Sql and RPG */
 
   // CRTSQLRPGI
@@ -1413,6 +1470,8 @@ public class CompilationPattern {
     commandToPatternMap.put(CompCmd.CRTBNDCL, Clle_Pgm_Pattern);
     commandToPatternMap.put(CompCmd.CRTRPGMOD, Rpgle_Mod_Pattern);
     commandToPatternMap.put(CompCmd.CRTCLMOD, Clle_Mod_Pattern);
+    commandToPatternMap.put(CompCmd.CRTCMOD, C_Mod_Pattern);
+    commandToPatternMap.put(CompCmd.CRTBNDC, C_Pgm_Pattern);
     commandToPatternMap.put(CompCmd.CRTSQLRPGI, SqlRpgle_Pgm_Mod_Pattern);
     /* OPM */
     commandToPatternMap.put(CompCmd.CRTRPGPGM, Rpg_Pgm_Pattern);
