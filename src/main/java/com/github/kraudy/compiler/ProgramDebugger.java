@@ -33,7 +33,7 @@ import com.ibm.as400.access.QSYSObjectPathName;
  */
 final class ProgramDebugger {
   static final String HELPER = "MCDBG";
-  static final String VERSION = "MasterCompiler debug helper v3";
+  static final String VERSION = "MasterCompiler debug helper v5";
   private static final String LINES = "[\\n\\u0085\\r]+";  // ILE C writes its newline as NEL
   static final int MAX_BREAKS = 20;
   static final int MAX_VARS = 20;

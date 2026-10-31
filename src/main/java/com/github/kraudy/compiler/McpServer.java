@@ -10,6 +10,7 @@ import java.sql.Timestamp;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -1830,7 +1831,15 @@ public class McpServer {
       generator.setServiceProgramsFromExports(parser.isSrvpgmFromExports());
       return generator.generate(parser.getScanRoot(), parser.getLibrary(), parser.getBaseFile());
     }
-    return parser.getSpecFromYamlFile();
+    BuildSpec spec = parser.getSpecFromYamlFile();
+    /* call_program/debug_program look for the target's SRCSTMF; apply the YAML
+       target params before that, as the build path does. */
+    SpecResolver.resolveAll(spec, null);
+    for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : spec.targets.entrySet()) {
+      String stmf = entry.getValue().params.get(CompilationPattern.ParamCmd.SRCSTMF);
+      if (stmf != null && !stmf.isEmpty()) entry.getKey().setStreamSourceFile(stmf);
+    }
+    return spec;
   }
 
   private String specName() {

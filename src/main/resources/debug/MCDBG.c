@@ -273,19 +273,21 @@ static void evaluate(View *view, const char *name) {
       memcpy(text, buffer + r->V.ExpressionText.oExpressionText, len);
       text[len] = '\0';
     } else if (r->ResultKind == _TE_kExpressionValueR) {
-      char line[1200];
+      char line[16384];
       unsigned long len = r->V.ExpressionValue.ExpressionValueLength;
+      unsigned long j;
       if (r->V.ExpressionValue.oExpressionValue >= returned) continue;
       if (len > returned - r->V.ExpressionValue.oExpressionValue) len = returned - r->V.ExpressionValue.oExpressionValue;
-      if (len > 1000) {
+      if (len > 4096) {
         char note[200];
-        sprintf(note, "NOTE %s: value cut to 1000 of %lu characters", text, len);
+        sprintf(note, "NOTE %s: value cut to 4096 of %lu characters", text, len);
         add(note);
-        len = 1000;
+        len = 4096;
       }
       sprintf(line, "VAR %s=", text);
-      memcpy(line + strlen(line), buffer + r->V.ExpressionValue.oExpressionValue, len);
-      line[strlen("VAR =") + strlen(text) + len] = '\0';
+      for (j = 0; j < len && strlen(line) + 3 < sizeof(line); j++) {
+        sprintf(line + strlen(line), "%02X", (unsigned char) buffer[r->V.ExpressionValue.oExpressionValue + j]);
+      }
       add(line);
       any = 1;
     }
