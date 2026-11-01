@@ -15,6 +15,18 @@ Feedback from the ART200 runtime probes
   still ignored by the scan, so existing projects do not start compiling C they never had as targets.
 - `--target NAME[,NAME.TYPE...]`: build only those targets of the spec (no dependents), to repeat one target after a one-line edit.
 
+Feedback from the SETLL probe through `--call`
+- `--call` reads only its job's own spooled files, never another job's: it waits (up to 15 s) until they are complete and have
+  lines, and shows each one with its qualified job name and status. When the job owns none, it says so and lists the user's
+  recent files by name only. (The earlier fall back to "files made since the call began" could serve a stale file.) A note
+  warns that QPRINT is 132 characters wide.
+- `--sql "SELECT ..."` (read-only, tab-separated rows, `--json`) and `--fetch /ifs/file [-o ...]` read what a probe wrote to a
+  physical file or the IFS, so the spool is out of the loop.
+- `--target` takes the spec's own form: `LIB/NAME`, `LIB.NAME.TYPE`, `LIB.NAME.TYPE.SOURCETYPE`; a name in several libraries is
+  refused with the qualified names instead of building all of them.
+- A `--call` that hangs says why: the job's status (`MSGW`), the last messages of its job log, and `--inqmsgry` answers
+  inquiry messages with their default reply so the error shows in the job log.
+
 Connection feedback from PUB400 (SSH on 2222, host servers blocked)
 - `--doctor` / `--explain-connection`: where the connection comes from, host, user, SSH port, auth, libraries, and what SSH
   and the host servers do with it; never prints the password. `--ssh-port` > Code for IBM i's port > `IBMI_SSH_PORT` > 22.

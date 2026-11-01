@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ibm.as400.access.AS400;
+import com.ibm.as400.access.CommandCall;
 
 /*
  * --call LIB/PGM [--call-params '<json>'] [--libl "<libs>"] [--curlib <lib>]: run a program from the command line, in one
@@ -32,6 +33,9 @@ final class CallRunner {
   private static final Pattern NAME = Pattern.compile("[A-Z0-9_#@$]{1,10}");
   private static final ObjectMapper mapper = new ObjectMapper();
   private static final int JOB_END_SECONDS = 20;
+  private static final int SPOOL_SETTLE_SECONDS = 15;  // for the job's files to be complete and readable
+  private static final int NO_SPOOL_SECONDS = 5;       // how long to look for a file when the job has none
+  private static final int QPRINT_WIDTH = 132;
 
   private CallRunner() {}
 
@@ -125,7 +129,8 @@ final class CallRunner {
     Timestamp started = serverTime(connection);
     ObjectNode result;
     try {
-      result = ProgramCaller.call(system, program.library == null ? "*LIBL" : program.library, program.name, parameters, libl, curlib);
+      result = ProgramCaller.call(system, program.library == null ? "*LIBL" : program.library, program.name, parameters, libl, curlib,
+          new CallJob(system, connection, parser.isInqmsgry()));
     } catch (IllegalStateException e) {
       System.err.println("Call failed: " + e.getMessage());
       return 1;
@@ -158,9 +163,82 @@ final class CallRunner {
     }
   }
 
+  /* Around the call: the job answers inquiry messages by default when asked to, and says what it waits on if it hangs */
+  private static final class CallJob implements ProgramCaller.Around {
+    private final AS400 system;
+    private final Connection connection;
+    private final boolean inquiryDefault;
+
+    CallJob(AS400 system, Connection connection, boolean inquiryDefault) {
+      this.system = system;
+      this.connection = connection;
+      this.inquiryDefault = inquiryDefault;
+    }
+
+    @Override
+    public void before() throws Exception {
+      if (!inquiryDefault) return;
+      CommandCall chgjob = new CommandCall(system);  // the same host-server job as the call
+      if (!chgjob.run("CHGJOB INQMSGRPY(*DFT)")) throw new IllegalStateException("CHGJOB INQMSGRPY(*DFT) failed for the call's job");
+    }
+
+    @Override
+    public void after(ObjectNode result) {}
+
+    @Override
+    public String hung(String job) {
+      StringBuilder out = new StringBuilder();
+      boolean waiting = false;
+      String simpleName = job.substring(job.lastIndexOf('/') + 1);
+      try (PreparedStatement stmt = connection.prepareStatement("SELECT JOB_STATUS, COALESCE(FUNCTION, '') "
+          + "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => ?)) WHERE JOB_NAME = ?")) {
+        stmt.setQueryTimeout(10);
+        stmt.setString(1, simpleName);
+        stmt.setString(2, job);
+        try (ResultSet rs = stmt.executeQuery()) {
+          if (rs.next()) {
+            String status = rs.getString(1).trim();
+            waiting = status.equals("MSGW");
+            out.append("Job ").append(job).append(" status: ").append(status).append(waiting ? " (a message waits for a reply)" : "");
+            if (!rs.getString(2).trim().isEmpty()) out.append(", function ").append(rs.getString(2).trim());
+          }
+        }
+      } catch (Exception e) {
+        logger.debug("Job status not read", e);
+      }
+      boolean inquiry = false;
+      try (PreparedStatement stmt = connection.prepareStatement("SELECT COALESCE(MESSAGE_ID, ''), MESSAGE_TYPE, SEVERITY, "
+          + "COALESCE(MESSAGE_TEXT, '') FROM TABLE(QSYS2.JOBLOG_INFO(?)) ORDER BY ORDINAL_POSITION DESC FETCH FIRST 6 ROWS ONLY")) {
+        stmt.setQueryTimeout(15);
+        stmt.setString(1, job);
+        List<String> lines = new ArrayList<String>();
+        try (ResultSet rs = stmt.executeQuery()) {
+          while (rs.next()) {
+            String type = rs.getString(2).trim();
+            inquiry |= type.equals("INQUIRY");
+            lines.add(0, "  " + rs.getString(1).trim() + " " + type + " (sev " + rs.getInt(3) + ") " + rs.getString(4).trim());
+          }
+        }
+        if (!lines.isEmpty()) {
+          out.append(out.length() == 0 ? "" : "\n").append("Last messages in its job log:");
+          for (String line : lines) out.append('\n').append(line);
+        }
+      } catch (Exception e) {
+        logger.debug("Job log not read", e);
+      }
+      if (waiting || inquiry) {
+        out.append("\nA batch / server job waits forever for an inquiry message's reply (an RPG error such as invalid numeric data): "
+            + "run again with --inqmsgry to answer them with the default reply, and the error shows in the job log.");
+      }
+      return out.length() == 0 ? null : out.toString();
+    }
+  }
+
   /*
    * The call's job is ended so its open QPRINT is closed (an open spooled file shows no data) and its job log is
-   * written; then the spooled files that job made are read. Nothing here can fail the call: the answer is just shorter.
+   * written; then the spooled files that job owns are read, once they are complete (not OPEN / CLOSED) and have lines,
+   * for a bounded time. Only the job's own files are ever read: another job's file would look like this run's output.
+   * Nothing here can fail the call: the answer is just shorter, and says why.
    */
   private static void collectSpool(AS400 system, Connection connection, ObjectNode result, Timestamp started) {
     String job = result.path("job").asText("");
@@ -169,33 +247,127 @@ final class CallRunner {
       result.put("spoolNote", "The call's job is not known, so its spooled output was not read");
       return;
     }
+    StringBuilder notes = new StringBuilder();
     try {
       system.disconnectService(AS400.COMMAND);
-      boolean ended = waitForJobEnd(connection, job);
-      if (!ended) result.put("spoolNote", "The job may still have been ending: its last output may be missing");
-      /* The files the job owns, oldest first: the order it wrote them */
-      List<String[]> files = new ArrayList<String[]>();
-      for (JsonNode f : SpoolFiles.list(connection, "", job).path("spooledFiles")) {
-        files.add(0, new String[] { f.path("file").asText(), String.valueOf(f.path("number").asInt()), job });
+      if (!waitForJobEnd(connection, job)) notes.append("The job may still have been ending: its last output may be missing. ");
+      long now = System.currentTimeMillis();
+      long settleEnd = now + SPOOL_SETTLE_SECONDS * 1000L;
+      long noFileEnd = now + NO_SPOOL_SECONDS * 1000L;
+      List<ObjectNode> files = new ArrayList<ObjectNode>();
+      java.util.Map<String, ObjectNode> read = new java.util.HashMap<String, ObjectNode>();  // complete files are read once
+      while (true) {
+        files = readJobFiles(connection, job, read);
+        now = System.currentTimeMillis();
+        boolean complete = !files.isEmpty();
+        for (ObjectNode f : files) complete &= !incomplete(f.path("status").asText()) && f.path("totalLines").asInt() > 0;
+        if (complete || now >= settleEnd || (files.isEmpty() && now >= noFileEnd)) break;
+        sleep(500);
       }
-      /* A server job's output can belong to a print job (QPRTJOB) of the user instead: then the files made since the call began */
-      if (files.isEmpty() && started != null) {
-        try (PreparedStatement stmt = connection.prepareStatement("SELECT SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER, QUALIFIED_JOB_NAME "
-            + "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER)) WHERE CREATION_TIMESTAMP >= ? ORDER BY CREATION_TIMESTAMP")) {
-          /* CREATION_TIMESTAMP has whole seconds: start one second earlier, cut to seconds, so a quick call's file is not left out */
-          stmt.setTimestamp(1, new Timestamp(started.getTime() / 1000 * 1000 - 1000));
-          stmt.setQueryTimeout(30);
-          try (ResultSet rs = stmt.executeQuery()) {
-            while (rs.next()) files.add(new String[] { rs.getString(1).trim(), String.valueOf(rs.getInt(2)), rs.getString(3).trim() });
-          }
+      for (ObjectNode f : files) {
+        spool.add(f);
+        if (incomplete(f.path("status").asText()) || f.path("totalLines").asInt() == 0) {
+          notes.append("Spooled file ").append(f.path("file").asText()).append(" (").append(f.path("number").asInt()).append(") is ")
+              .append(f.path("status").asText()).append(" with ").append(f.path("totalLines").asInt())
+              .append(" lines after ").append(SPOOL_SETTLE_SECONDS).append(" s: its output may be incomplete")
+              .append(f.has("error") ? " (" + f.path("error").asText() + ")" : "").append(". ");
         }
-        if (!files.isEmpty()) result.put("spoolNote", "The job owns no spooled file; these are the files of this user made since the call began");
+        int widest = 0;
+        for (JsonNode line : f.path("lines")) widest = Math.max(widest, line.asText().length());
+        if (widest >= QPRINT_WIDTH) {
+          notes.append("A line of ").append(f.path("file").asText()).append(" is ").append(widest)
+              .append(" characters wide: QPRINT is ").append(QPRINT_WIDTH).append(" wide, so longer lines may be cut and the output after them lost; "
+              + "keep lines shorter or write to a stream file (--fetch) or a physical file (--sql). ");
+        }
       }
-      for (String[] f : files) spool.add(SpoolFiles.read(connection, f[0], f[2], Integer.parseInt(f[1]), 1, SpoolFiles.MAX_LINES));
+      if (files.isEmpty()) {
+        notes.append("The job ").append(job).append(" owns no spooled file (a program that prints nothing leaves none). "
+            + "Other spooled files are never read for a call, because they may belong to other jobs");
+        String others = recentFiles(connection, started);
+        if (!others.isEmpty()) notes.append(". Files of this user made since the call began, not read: ").append(others);
+        notes.append(". ");
+      }
     } catch (Exception e) {
       logger.debug("Spooled output not read", e);
-      result.put("spoolNote", "The spooled output of " + job + " could not be read: " + e.getMessage());
+      notes.append("The spooled output of ").append(job).append(" could not be read: ").append(e.getMessage()).append(". ");
     }
+    if (notes.length() > 0) result.put("spoolNote", notes.toString().trim());
+  }
+
+  private static boolean incomplete(String status) {
+    return status.equals("OPEN") || status.equals("CLOSED");
+  }
+
+  /*
+   * The job's own spooled files, oldest first (the order it wrote them), each with its status. A file still OPEN / CLOSED is
+   * not read yet (it shows no data); one that cannot be read is listed with the error, to be tried again; a complete one
+   * is read once ('read' keeps it).
+   */
+  private static List<ObjectNode> readJobFiles(Connection connection, String job, java.util.Map<String, ObjectNode> read)
+      throws java.sql.SQLException {
+    List<ObjectNode> out = new ArrayList<ObjectNode>();
+    JsonNode listed = SpoolFiles.list(connection, "", job).path("spooledFiles");
+    for (int i = listed.size() - 1; i >= 0; i--) {
+      JsonNode f = listed.get(i);
+      String name = f.path("file").asText();
+      int number = f.path("number").asInt();
+      String status = f.path("status").asText();
+      String key = name + "/" + number;
+      if (read.containsKey(key)) {
+        out.add(read.get(key));
+        continue;
+      }
+      ObjectNode file;
+      if (incomplete(status)) {
+        file = emptyFile(name, number, job, status);
+      } else {
+        try {
+          file = SpoolFiles.read(connection, name, job, number, 1, SpoolFiles.MAX_LINES);
+          file.put("status", status);
+          if (file.path("totalLines").asInt() > 0) read.put(key, file);
+        } catch (IllegalArgumentException gone) {
+          continue;  // deleted between the list and the read
+        } catch (java.sql.SQLException notYet) {
+          file = emptyFile(name, number, job, status);  // e.g. still being closed: tried again
+          file.put("error", String.valueOf(notYet.getMessage()).split("\n")[0]);
+        }
+      }
+      out.add(file);
+    }
+    return out;
+  }
+
+  private static ObjectNode emptyFile(String name, int number, String job, String status) {
+    ObjectNode file = mapper.createObjectNode();
+    file.put("file", name);
+    file.put("job", job);
+    file.put("number", number);
+    file.put("status", status);
+    file.put("totalLines", 0);
+    file.putArray("lines");
+    return file;
+  }
+
+  /* Names only: what the user could look at with the spool tool; never served as the call's output */
+  private static String recentFiles(Connection connection, Timestamp started) {
+    if (started == null) return "";
+    StringBuilder out = new StringBuilder();
+    try (PreparedStatement stmt = connection.prepareStatement("SELECT SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER, QUALIFIED_JOB_NAME, STATUS "
+        + "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER)) WHERE CREATION_TIMESTAMP >= ? ORDER BY CREATION_TIMESTAMP DESC "
+        + "FETCH FIRST 5 ROWS ONLY")) {
+      /* CREATION_TIMESTAMP has whole seconds: start one second earlier, cut to seconds */
+      stmt.setTimestamp(1, new Timestamp(started.getTime() / 1000 * 1000 - 1000));
+      stmt.setQueryTimeout(30);
+      try (ResultSet rs = stmt.executeQuery()) {
+        while (rs.next()) {
+          out.append(out.length() == 0 ? "" : "; ").append(rs.getString(1).trim()).append(" (").append(rs.getInt(2)).append(") ")
+              .append(rs.getString(3).trim()).append(' ').append(rs.getString(4).trim());
+        }
+      }
+    } catch (Exception e) {
+      logger.debug("Recent spooled files not listed", e);
+    }
+    return out.toString();
   }
 
   /* true when the job is gone; false when that could not be told (the caller says so) */
@@ -239,7 +411,8 @@ final class CallRunner {
     for (int i = 0; i < parameters.size(); i++) out.append("  parameter ").append(i + 1).append(": ").append(parameters.get(i).asText()).append('\n');
     for (JsonNode message : result.path("messages")) out.append("  message: ").append(message.asText()).append('\n');
     for (JsonNode file : result.path("spool")) {
-      out.append("--- ").append(file.path("file").asText()).append(" (").append(file.path("number").asInt()).append("), ")
+      out.append("--- ").append(file.path("file").asText()).append(" (").append(file.path("number").asInt()).append(") of job ")
+          .append(file.path("job").asText()).append(", ").append(file.path("status").asText()).append(", ")
           .append(file.path("totalLines").asInt()).append(" lines\n");
       for (JsonNode line : file.path("lines")) out.append(line.asText()).append('\n');
       if (file.has("more")) out.append("[").append(file.path("more").asText()).append("]\n");

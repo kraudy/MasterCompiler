@@ -71,6 +71,9 @@ public class ArgParser {
     TARGET        (null, "target",       Kind.VALUE, "Build only these targets of the spec (no dependents): NAME or NAME.TYPE, comma-separated, e.g. DUMPSTATIC.SRVPGM"),
     CALL          (null, "call",         Kind.VALUE, "Run a program in one job with --libl / --curlib and print its parameters, messages and spooled output: LIB/PGM or PGM"),
     CALL_PARAMS   (null, "call-params",  Kind.VALUE, "With --call: the program's parameters as a JSON array, e.g. '[{\"type\":\"char\",\"length\":10,\"value\":\"A\"}]'"),
+    INQMSGRPY     (null, "inqmsgry",     Kind.FLAG,  "With --call: answer the program's inquiry messages with their default reply (CHGJOB INQMSGRPY(*DFT)) instead of waiting for a reply forever"),
+    SQL           (null, "sql",          Kind.VALUE, "Run one read-only SELECT / VALUES / WITH query and print the rows (tab-separated; --json <file> writes them as JSON; --max-rows, --libl, --curlib)"),
+    FETCH         (null, "fetch",        Kind.VALUE, "Copy an IFS stream file to this PC: /path/file on the IBM i; -o <file or folder> (default: the current folder)"),
     JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 
     final String shortName;
@@ -146,6 +149,9 @@ public class ArgParser {
   private String target;
   private String call;
   private String callParams;
+  private boolean inqmsgry;
+  private String sql;
+  private String fetch;
   private boolean srvpgmFromExports;
   private boolean strictHostKey;
   private boolean readOnly;
@@ -264,6 +270,7 @@ public class ArgParser {
       case EXPLAIN_CONNECTION: doctor = true; break;
       case PASSWORD_STDIN: passwordStdin = true; break;
       case CLEAN_REMOTE:  cleanRemote = true; break;
+      case INQMSGRPY:     inqmsgry = true; break;
       case SRVPGM_FROM_EXPORTS: srvpgmFromExports = true; break;
       case STRICT_HOST_KEY: strictHostKey = true; break;
       case READ_ONLY:     readOnly = true; break;
@@ -320,6 +327,8 @@ public class ArgParser {
       case TARGET:        target = value; break;
       case CALL:          call = value; break;
       case CALL_PARAMS:   callParams = value; break;
+      case SQL:           sql = value; break;
+      case FETCH:         fetch = value; break;
       case LIBL:
         libl = value;
         break;
@@ -385,6 +394,28 @@ public class ArgParser {
     if (passwordStdin && mcp) {
       throw new IllegalArgumentException("--password-stdin cannot be used with --mcp: stdin is the protocol channel");
     }
+    if (inqmsgry && call == null) {
+      throw new IllegalArgumentException("--inqmsgry goes with --call");
+    }
+    if (sql != null || fetch != null) {
+      String which = sql != null ? "--sql" : "--fetch";
+      if (sql != null && fetch != null) throw new IllegalArgumentException("Use either --sql or --fetch");
+      if (mcp || setupVscode || installSkills || version || importSelection != null || yamlFile != null || scanRoot != null
+          || tobiRoot != null || push != null || generateOnly || diff || since != null || target != null || clean || keepGoing
+          || baseFile != null || srvpgmFromExports || ssh || hostServers || noMigrate || remote || call != null
+          || projectRoot != null || (sql != null && outputFile != null)) {
+        throw new IllegalArgumentException(which + " takes only " + (sql != null
+            ? "--max-rows, --libl, --curlib, --json, " : "-o <file or folder>, ")
+            + "--dry-run, --code4i, --connection, --ssh-port, --strict-host-key, --password-stdin, --password-command, -x, -v");
+      }
+      if (sql != null) {
+        SqlTools.checkReadOnly(sql);  // only a query, checked now, not after the connection
+        if (libl != null) CallRunner.libraries(libl);
+      } else {
+        DataFetch.check(fetch);
+      }
+      return;
+    }
     if (callParams != null && call == null) {
       throw new IllegalArgumentException("--call-params goes with --call");
     }
@@ -392,7 +423,7 @@ public class ArgParser {
       if (mcp || setupVscode || installSkills || version || importSelection != null || yamlFile != null || scanRoot != null
           || tobiRoot != null || push != null || generateOnly || diff || since != null || target != null || clean || keepGoing
           || baseFile != null || outputFile != null || srvpgmFromExports || ssh || hostServers || noMigrate) {
-        throw new IllegalArgumentException("--call takes only --call-params, --libl, --curlib, --json, --dry-run, --code4i, --connection, "
+        throw new IllegalArgumentException("--call takes only --call-params, --inqmsgry, --libl, --curlib, --json, --dry-run, --code4i, --connection, "
             + "--ssh-port, --strict-host-key, --password-stdin, --password-command, -x, -v; with --remote also --project <folder> "
             + "(uploaded, it carries MC) and --clean-remote");
       }
@@ -613,6 +644,21 @@ public class ArgParser {
   /** {@code --call-params}: the parameters as JSON, or null. */
   public String getCallParams() {
     return callParams;
+  }
+
+  /** {@code --inqmsgry}. */
+  public boolean isInqmsgry() {
+    return inqmsgry;
+  }
+
+  /** {@code --sql}: the query, or null. */
+  public String getSql() {
+    return sql;
+  }
+
+  /** {@code --fetch}: the IFS file, or null. */
+  public String getFetch() {
+    return fetch;
   }
 
   /** {@code --srvpgm-from-exports}. */

@@ -94,6 +94,37 @@ public class CTargetsAndSelectionTest {
   }
 
   @Test
+  void targetSelectionTakesTheSpecsOwnForm() throws Exception {
+    BuildSpec spec = scan();
+    for (String form : new String[] {"CURLIB/RUNDUMP", "CURLIB.RUNDUMP.PGM", "curlib.rundump.pgm.c", "CURLIB/RUNDUMP.PGM"}) {
+      List<TargetKey> one = TargetSelection.select(spec.targets.keySet(), TargetSelection.parse(form));
+      assertEquals(1, one.size(), form);
+      assertEquals("RUNDUMP", one.get(0).getObjectName(), form);
+    }
+    assertEquals(1, TargetSelection.select(spec.targets.keySet(), TargetSelection.parse("CURLIB.HELLO.PGM.RPGLE")).size());
+    assertThrows(IllegalArgumentException.class,
+        () -> TargetSelection.select(spec.targets.keySet(), TargetSelection.parse("OTHERLIB.RUNDUMP.PGM")), "another library");
+    assertThrows(IllegalArgumentException.class,
+        () -> TargetSelection.select(spec.targets.keySet(), TargetSelection.parse("CURLIB.RUNDUMP.PGM.RPGLE")), "another source type");
+  }
+
+  @Test
+  void targetSelectionAsksForTheLibraryWhenANameIsInTwo() throws Exception {
+    List<TargetKey> both = new ArrayList<TargetKey>(scan().targets.keySet());
+    Path other = Files.createDirectories(tempDir.resolve("other"));
+    Path qrpglesrc = Files.createDirectories(other.resolve("QRPGLESRC"));
+    Files.write(qrpglesrc.resolve("HELLO.pgm.rpgle"), "**free\nreturn;\n".getBytes(StandardCharsets.UTF_8));
+    both.addAll(new SpecGenerator(null, false, true).generate(other.toString(), "second").targets.keySet());
+
+    IllegalArgumentException ambiguous = assertThrows(IllegalArgumentException.class,
+        () -> TargetSelection.select(both, TargetSelection.parse("HELLO")));
+    assertTrue(ambiguous.getMessage().contains("CURLIB.HELLO") && ambiguous.getMessage().contains("SECOND.HELLO"), ambiguous.getMessage());
+    assertEquals("SECOND", TargetSelection.select(both, TargetSelection.parse("SECOND/HELLO")).get(0).getLibrary().toUpperCase());
+    assertEquals(1, TargetSelection.select(both, TargetSelection.parse("curlib.hello.pgm")).size());
+    assertEquals(1, TargetSelection.select(both, TargetSelection.parse("RUNDUMP")).size(), "a name in one library needs no library");
+  }
+
+  @Test
   void targetSelectionRefusesWhatTheSpecDoesNotHave() throws Exception {
     BuildSpec spec = scan();
     IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,

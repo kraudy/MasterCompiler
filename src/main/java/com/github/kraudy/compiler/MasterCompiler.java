@@ -1217,6 +1217,22 @@ public class MasterCompiler{
         return ObjectDownload.run(parser);
       }
 
+      /* One read-only query, or one IFS file down to this PC: what a probe wrote instead of the spool */
+      if (parser.getSql() != null || parser.getFetch() != null) {
+        if (parser.isDryRun() && parser.getSql() != null) {
+          System.out.println("Dry run: would run read-only: " + SqlTools.checkReadOnly(parser.getSql()) + "; nothing was run.");
+          return exitCode;
+        }
+        if (parser.isDryRun()) {
+          System.out.println("Dry run: would copy " + parser.getFetch() + " to "
+              + DataFetch.destination(parser.getFetch(), parser.getOutputFile()) + "; nothing was fetched.");
+          return exitCode;
+        }
+        quietLogs(parser.isVerbose());
+        system = signOn(parser);
+        return parser.getSql() != null ? SqlQuery.run(system, parser, code4i(parser)) : DataFetch.run(system, parser);
+      }
+
       /* Run a program in one job and print what it gave back (its output is the answer: no logger lines around it) */
       if (parser.getCall() != null) {
         if (parser.isDryRun()) {

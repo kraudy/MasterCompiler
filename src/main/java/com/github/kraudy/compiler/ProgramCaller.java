@@ -76,6 +76,11 @@ final class ProgramCaller {
   interface Around {
     void before() throws Exception;
     void after(ObjectNode result) throws Exception;
+
+    /* The call did not end in time: what is known about the job, before it is ended (null: nothing to add) */
+    default String hung(String job) {
+      return null;
+    }
   }
 
   static ObjectNode call(AS400 system, String library, String program, JsonNode parameters, List<String> libraryList,
@@ -123,10 +128,15 @@ final class ProgramCaller {
       try {
         ok = ran.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
       } catch (TimeoutException e) {
+        String why = null;
+        try {
+          if (around != null && result.has("job")) why = around.hung(result.path("job").asText());
+        } catch (Exception ignored) { /* the diagnosis is a bonus */ }
         system.disconnectService(AS400.COMMAND);  // ends the job the program hangs in
         result.put(JOB_ENDED, true);
-        throw new IllegalStateException("The call did not end in " + TIMEOUT_SECONDS + " s: its job was ended "
-            + "(waiting for a record lock, a message reply or an endless loop?)");
+        throw new IllegalStateException("The call did not end in " + TIMEOUT_SECONDS + " s: its job"
+            + (result.has("job") ? " " + result.path("job").asText() : "") + " was ended "
+            + "(waiting for a record lock, a message reply or an endless loop?)" + (why == null ? "" : "\n" + why));
       }
       result.put("success", ok);
       result.put("milliseconds", System.currentTimeMillis() - start);

@@ -83,6 +83,10 @@ final class SqlTools {
 
   private static final Pattern WRITES = Pattern.compile(
       "\\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CREATE|DROP|ALTER|CALL|GRANT|REVOKE|RENAME|COMMENT|LABEL|SET|REFRESH|LOCK)\\b");
+  /* Functions a SELECT can call that change the system (run a command, write a stream file, print). A list of known ones:
+     the profile's authority is the real limit, a read-only server should use a profile that has no more than it needs */
+  private static final Pattern SIDE_EFFECTS = Pattern.compile(
+      "(?<![A-Z0-9_$#@])(QCMDEXC|QSYS_QCMDEXC|IFS_WRITE|IFS_WRITE_UTF8|IFS_WRITE_BINARY|LPRINTF)(?![A-Z0-9_$#@])", Pattern.CASE_INSENSITIVE);
   private static final Pattern DATA_CHANGE = Pattern.compile("\\b(FINAL|NEW|OLD)\\s+TABLE\\s*\\(", Pattern.CASE_INSENSITIVE);
 
   /*
@@ -169,6 +173,13 @@ final class SqlTools {
     }
     if (outsideQuotes(text).contains(";")) {
       throw new IllegalArgumentException("One statement per call");
+    }
+    /* On the raw text, not the names-only form: comments nest in Db2, so a text filter that skips them can be walked around.
+       A harmless mention of the name in a string is refused too; that is the price of not parsing SQL here */
+    java.util.regex.Matcher effect = SIDE_EFFECTS.matcher(text);
+    if (effect.find()) {
+      throw new IllegalArgumentException(effect.group(1).toUpperCase(Locale.ROOT) + " changes the system (runs a command, writes a file "
+          + "or prints) and cannot be called from a read-only query");
     }
     return text;
   }
