@@ -47,6 +47,23 @@ public class TargetKeyTest {
   }
 
   @Test
+  void test_Pgm_C_Teraspace_Command() {
+    String cmd = new TargetKey("MYLIB.PEEK.PGM.C")
+      .put(ParamCmd.SRCSTMF, "/home/sources/PEEK.C")
+      .put(ParamCmd.TERASPACE, "*YES *TSIFC")
+      .put(ParamCmd.STGMDL, "*TERASPACE")
+      .put(ParamCmd.DTAMDL, "*LLP64")
+      .put(ParamCmd.SYSIFCOPT, "*IFS64IO")
+      .getCommandString();
+
+    assertTrue(cmd.startsWith("CRTBNDC PGM(*CURLIB/PEEK) "), cmd);
+    assertTrue(cmd.contains(" TERASPACE(*YES *TSIFC)"), cmd);
+    assertTrue(cmd.contains(" STGMDL(*TERASPACE)"), cmd);
+    assertTrue(cmd.contains(" DTAMDL(*LLP64)"), cmd);
+    assertTrue(cmd.contains(" SYSIFCOPT(*IFS64IO)"), cmd);
+  }
+
+  @Test
   void test_Pgm_Clle_Command() {
     String cmd = new TargetKey("MYLIB.HELLO.PGM.CLLE")
       .put(ParamCmd.SRCSTMF, "/home/sources/HELLO.CLLE")

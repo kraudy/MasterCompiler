@@ -1012,6 +1012,8 @@ public class SshMcpProxy {
   private String remoteCommand(String jar, Code4iConfig code4i) {
     StringBuilder command = new StringBuilder(startCommand(jar))
         .append(" --mcp --project ").append(SshTarget.quote(remoteDir));
+    /* the same spec as on the PC: --spec names a file inside the uploaded copy */
+    if (parser.getSpecName() != null) command.append(" --spec ").append(SshTarget.quote(parser.getSpecName()));
     List<String> libraries = libraryArgs(code4i, true);
     for (int i = 0; i < libraries.size(); i++) command.append(' ').append(i % 2 == 0 ? libraries.get(i) : SshTarget.quote(libraries.get(i)));
     if (parser.isVerbose()) command.append(" -v");

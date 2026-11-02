@@ -24,6 +24,7 @@ public class ArgParser {
     FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
     SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
     PROJECT       (null, "project",      Kind.VALUE, "Project root: build.yaml if present, else TOBi Rules.mk, else scan"),
+    SPEC          (null, "spec",         Kind.VALUE, "With --project: the YAML spec in the project folder to use instead of build.yaml (also over --remote), e.g. tobi.yaml"),
     CODE4I        (null, "code4i",       Kind.FLAG,  "Connect with the Code for IBM i connection from VS Code settings (password: IBMI_PASSWORD)"),
     CONNECTION    (null, "connection",   Kind.VALUE, "Code for IBM i connection name, when there are several"),
     SETUP_VSCODE  (null, "setup-vscode", Kind.FLAG,  "Write .vscode/mcp.json (MC over SSH) and .github/skills for Copilot in the --project folder (default: current)"),
@@ -131,6 +132,7 @@ public class ArgParser {
   private String importSelection;
   private String tobiRoot;
   private String projectRoot;
+  private String specName;
   private boolean code4i;
   private String connection;
   private boolean setupVscode;
@@ -321,6 +323,9 @@ public class ArgParser {
       case PROJECT:
         projectRoot = value;
         break;
+      case SPEC:
+        specName = value;
+        break;
       case PASSWORD_COMMAND: passwordCommand = value; break;
       case LOCAL_PROJECT: localProject = value; break;
       case DOWNLOAD:      download = value; break;
@@ -480,11 +485,28 @@ public class ArgParser {
       return;
     }
 
-    /* --project: pick the spec the project already has */
+    if (specName != null) {
+      if (projectRoot == null) throw new IllegalArgumentException("--spec names a YAML file in the --project folder; give --project");
+      if (yamlFile != null || scanRoot != null || tobiRoot != null) {
+        throw new IllegalArgumentException("--spec replaces build.yaml for --project; it cannot be combined with -f, --scan or --from-tobi");
+      }
+    }
+    /* --project: pick the spec the project already has (or the one --spec names) */
     if (projectRoot != null && yamlFile == null && scanRoot == null && tobiRoot == null) {
       File root = new File(projectRoot);
       if (!root.isDirectory()) throw new IllegalArgumentException("--project is not a directory: " + projectRoot);
-      if (new File(root, "build.yaml").isFile()) yamlFile = new File(root, "build.yaml").getPath();
+      if (specName != null) {
+        File spec = new File(root, specName);
+        try {
+          if (!spec.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
+            throw new IllegalArgumentException("--spec must name a file inside the --project folder: " + specName);
+          }
+        } catch (java.io.IOException e) {
+          throw new IllegalArgumentException("--spec cannot be resolved: " + specName);
+        }
+        if (!spec.isFile()) throw new IllegalArgumentException("--spec file not found in the project: " + specName);
+        yamlFile = spec.getPath();
+      } else if (new File(root, "build.yaml").isFile()) yamlFile = new File(root, "build.yaml").getPath();
       else if (new File(root, "Rules.mk").isFile()) tobiRoot = projectRoot;
       else scanRoot = projectRoot;
     }
@@ -759,6 +781,11 @@ public class ArgParser {
   }
 
   /** {@code --project} folder, or null. */
+  /** {@code --spec}: the YAML in the project folder to use instead of build.yaml, or null. */
+  public String getSpecName() {
+    return specName;
+  }
+
   public String getProjectRoot() {
     return projectRoot;
   }

@@ -31,6 +31,28 @@ public class ArgParserTest {
   }
 
   @Test
+  void testSpecPicksAnotherYamlInTheProject() throws IOException {
+    Path root = Files.createTempDirectory("mcproj");
+    Path spec = root.resolve("tobi.yaml");
+    Files.write(spec, Collections.emptyList());
+    Files.write(root.resolve("build.yaml"), Collections.emptyList());
+    ArgParser parser = new ArgParser(new String[] {"--project", root.toString(), "--spec", "tobi.yaml"});
+    parser.validate();
+    assertEquals(spec.toString(), parser.getYamlFile());
+    ArgParser remote = new ArgParser(new String[] {"--project", root.toString(), "--spec", "tobi.yaml", "--remote"});
+    assertTrue(remote.remoteArgs("/home/u/mc/p").containsAll(java.util.Arrays.asList("--spec", "tobi.yaml")));
+  }
+
+  @Test
+  void testSpecMustStayInsideTheProject() throws IOException {
+    Path root = Files.createTempDirectory("mcproj");
+    assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] {"--project", root.toString(), "--spec", "../x.yaml"}).validate());
+    assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] {"--spec", "tobi.yaml"}).validate());
+  }
+
+  @Test
   void testValidFile() {
     String filePath = this.tempYaml.toString();
  
