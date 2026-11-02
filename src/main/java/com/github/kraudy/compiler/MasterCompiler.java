@@ -717,11 +717,11 @@ public class MasterCompiler{
    * Modules and service programs this build creates are referred to in their own library (*CURLIB for
    * curlib targets), not *LIBL: a same-named object earlier in the library list must not be bound instead.
    * Covers MODULE / BNDSRVPGM params and ADDBNDDIRE OBJ in hooks; external objects keep *LIBL.
-   * ADDBNDDIRE OBJ does not take *CURLIB (CPD0078): there it is the current library's name.
+   * ADDBNDDIRE OBJ and CRTSRVPGM / CRTPGM BNDSRVPGM do not take *CURLIB (CPD0078, "Value '*CURLIB' for parameter
+   * BNDSRVPGM not a valid name"): there it is the current library's name.
    */
   private void qualifyProjectObjects() {
     java.util.Map<String, String> modules = new java.util.HashMap<String, String>();
-    java.util.Map<String, String> srvpgms = new java.util.HashMap<String, String>();
     java.util.Map<String, String> entries = new java.util.HashMap<String, String>();
     java.util.Map<String, String> bnddirs = new java.util.HashMap<String, String>();
     String curlib = null;
@@ -730,7 +730,6 @@ public class MasterCompiler{
       if (key.isModule()) modules.put(key.getObjectName().toUpperCase(), lib);
       if (key.isBndDir()) bnddirs.put(key.getObjectName().toUpperCase(), lib);
       if (key.isServiceProgram()) {
-        srvpgms.put(key.getObjectName().toUpperCase(), lib);
         if (key.isCurLib() && curlib == null) curlib = buildCurLib();
         entries.put(key.getObjectName().toUpperCase(), key.isCurLib() ? curlib : lib);
       }
@@ -738,7 +737,7 @@ public class MasterCompiler{
     for (BuildSpec.TargetSpec spec : globalSpec.targets.values()) {
       if (spec == null) continue;
       qualify(spec.params, ParamCmd.MODULE, modules);
-      qualify(spec.params, ParamCmd.BNDSRVPGM, srvpgms);
+      qualify(spec.params, ParamCmd.BNDSRVPGM, entries);
       qualify(spec.params, ParamCmd.BNDDIR, bnddirs);
       for (List<CommandObject> hooks : Arrays.asList(spec.before, spec.after, spec.success, spec.failure)) qualifyHooks(hooks, entries);
     }

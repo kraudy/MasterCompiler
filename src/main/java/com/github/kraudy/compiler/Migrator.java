@@ -156,6 +156,7 @@ public class Migrator {
             "INNER JOIN Libs " +
             "ON (SYSTEM_TABLE_SCHEMA = Libs.Libraries) " +
                 "WHERE SYSTEM_TABLE_NAME = '" + key.getSourceFile() + "' " +
+                sourceLibraryFilter(key) +
                 "AND TRIM(SOURCE_TYPE) <> '' LIMIT 1")) {
       if (validateRs.next()) {
         if (verbose) logger.info("Source PF " + key.getSourceFile() + " already exist in library " + key.getLibrary());
@@ -164,6 +165,20 @@ public class Migrator {
       if (verbose) logger.info("Source PF " + key.getSourceFile() + " does not exist in library " + key.getLibrary());
       return false;
     }
+  }
+
+  /*
+   * The source file is created and copied into key.getQualifiedSourceFile(): look there, not anywhere on the
+   * library list (a QRPGSRC in another library on the list made MC skip creating ROBKRAUDY2/QRPGSRC, and the
+   * copy into it then failed with CPFA0A9).  *LIBL / *CURLIB keep the library-list search.
+   */
+  static String sourceLibraryFilter(TargetKey key) {
+    String qualified = key.getQualifiedSourceFile();
+    int slash = qualified == null ? -1 : qualified.indexOf('/');
+    if (slash <= 0) return "";
+    String library = qualified.substring(0, slash).trim().toUpperCase();
+    if (library.startsWith("*")) return "";
+    return "AND SYSTEM_TABLE_SCHEMA = '" + library.replace("'", "''") + "' ";
   }
 
   /* Validate if Source Member exists */
@@ -178,7 +193,10 @@ public class Migrator {
             "ON (SYSTEM_TABLE_SCHEMA = Libs.Libraries) " +
             "WHERE SYSTEM_TABLE_NAME = '" + key.getSourceFile() + "' " +
             "AND SYSTEM_TABLE_MEMBER = '" + key.getSourceName() + "' " +
-            "AND TRIM(SOURCE_TYPE) <> '' ")) { 
+            /* no SOURCE_TYPE test here: the file is already known to be a source file, and the member that
+               CPYFRMSTMF MBROPT(*REPLACE) filled has a null SOURCE_TYPE, which made every rebuild try ADDPFM
+               again (CPF5812 member already exists) */
+            sourceLibraryFilter(key))) { 
       if (rs.next()) {
         if (verbose) logger.info("Member " + key.getSourceName() + " already exist in library " + key.getLibrary());
         return true;
