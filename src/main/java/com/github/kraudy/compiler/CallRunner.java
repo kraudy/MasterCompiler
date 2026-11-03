@@ -408,7 +408,8 @@ final class CallRunner {
     if (result.has("job")) out.append(", job ").append(result.path("job").asText());
     out.append('\n');
     JsonNode parameters = result.path("parameters");
-    for (int i = 0; i < parameters.size(); i++) out.append("  parameter ").append(i + 1).append(": ").append(parameters.get(i).asText()).append('\n');
+    for (int i = 0; i < parameters.size(); i++) out.append("  parameter ").append(i + 1).append(": ")
+        .append(parameters.get(i).isNull() ? "(none: the call failed)" : parameters.get(i).asText()).append('\n');
     for (JsonNode message : result.path("messages")) out.append("  message: ").append(message.asText()).append('\n');
     for (JsonNode file : result.path("spool")) {
       out.append("--- ").append(file.path("file").asText()).append(" (").append(file.path("number").asInt()).append(") of job ")

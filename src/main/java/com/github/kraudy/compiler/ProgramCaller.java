@@ -142,7 +142,12 @@ final class ProgramCaller {
       result.put("milliseconds", System.currentTimeMillis() - start);
       ArrayNode out = result.putArray("parameters");
       for (int i = 0; i < params.length; i++) {
-        Object back = types[i].toObject(params[i].getOutputData());
+        byte[] data = params[i].getOutputData();
+        if (data == null) {  // a failed call returns no parameters; its messages say why
+          out.addNull();
+          continue;
+        }
+        Object back = types[i].toObject(data);
         if (back instanceof String) out.add(((String) back).replaceAll("\\s+$", ""));
         else if (back instanceof BigDecimal) out.add((BigDecimal) back);
         else out.add(String.valueOf(back));
