@@ -21,6 +21,7 @@ import com.ibm.as400.access.AS400DataType;
 import com.ibm.as400.access.AS400Message;
 import com.ibm.as400.access.AS400PackedDecimal;
 import com.ibm.as400.access.AS400Text;
+import com.ibm.as400.access.AS400Varchar;
 import com.ibm.as400.access.AS400ZonedDecimal;
 import com.ibm.as400.access.CommandCall;
 import com.ibm.as400.access.ProgramCall;
@@ -33,7 +34,9 @@ import com.ibm.as400.access.QSYSObjectPathName;
  *   parameters: [ { "type": "char", "length": 512, "value": "..." },        a whole fixed-length buffer works too
  *                 { "type": "packed", "digits": 7, "decimals": 2, "value": 12.5 },
  *                 { "type": "zoned", "digits": 5, "decimals": 0 },          no value: output only (blanks / zero in)
- *                 { "type": "int", "bytes": 4, "value": 3 } ]
+ *                 { "type": "int", "bytes": 4, "value": 3 },
+ *                 { "type": "varchar", "length": 2000, "value": "{\"a\":1}" } ]   2-byte length + text (RPG VARCHAR(2000)), length required;
+ *                                                                              "prefix": 4 for a 4-byte length (VARCHAR(n:4))
  *
  * It runs in a host server job of its own, given the spec's library list first, so a crash or a hang
  * does not touch MC's job; a call that does not end in the time limit has that job ended.
@@ -47,18 +50,27 @@ final class ProgramCaller {
     String type = p.path("type").asText("char").toLowerCase(Locale.ROOT);
     switch (type) {
       case "char":   return new AS400Text(p.path("length").asInt(Math.max(1, p.path("value").asText("").length())), system);
+      case "varchar": {
+        /* the declared size of the RPG variable, in bytes of the job's CCSID: required, so the buffer is never guessed */
+        if (!p.has("length")) throw new IllegalArgumentException("varchar needs \"length\": the size the program declares, e.g. VARCHAR(2000)");
+        int max = p.path("length").asInt(0);
+        int prefix = p.path("prefix").asInt(2);
+        if (prefix != 2 && prefix != 4) throw new IllegalArgumentException("varchar \"prefix\" is 2 or 4 (bytes of the length), not " + prefix);
+        if (max < 1 || (prefix == 2 && max > 65535)) throw new IllegalArgumentException("varchar \"length\" is 1 to 65535 with a 2-byte prefix, not " + max);
+        return new AS400Varchar(prefix, max, 65535, system);  // 65535 + system: the system's CCSID, as AS400Text(length, system) does for char
+      }
       case "packed": return new AS400PackedDecimal(p.path("digits").asInt(15), p.path("decimals").asInt(0));
       case "zoned":  return new AS400ZonedDecimal(p.path("digits").asInt(15), p.path("decimals").asInt(0));
       case "int":
         int bytes = p.path("bytes").asInt(4);
         return bytes == 2 ? new AS400Bin2() : bytes == 8 ? new AS400Bin8() : new AS400Bin4();
-      default: throw new IllegalArgumentException("Parameter type must be char, packed, zoned or int, not " + type);
+      default: throw new IllegalArgumentException("Parameter type must be char, varchar, packed, zoned or int, not " + type);
     }
   }
 
   static Object value(JsonNode p, AS400DataType type) {
     JsonNode v = p.get("value");
-    if (type instanceof AS400Text) return v == null || v.isNull() ? "" : v.asText();
+    if (type instanceof AS400Text || type instanceof AS400Varchar) return v == null || v.isNull() ? "" : v.asText();
     if (type instanceof AS400PackedDecimal || type instanceof AS400ZonedDecimal) {
       return v == null || v.isNull() ? BigDecimal.ZERO : new BigDecimal(v.asText()).setScale(p.path("decimals").asInt(0));
     }
@@ -95,7 +107,17 @@ final class ProgramCaller {
     ProgramParameter[] params = new ProgramParameter[parameters.size()];
     for (int i = 0; i < parameters.size(); i++) {
       types[i] = type(parameters.get(i), system);
-      params[i] = new ProgramParameter(types[i].toBytes(value(parameters.get(i), types[i])), types[i].getByteLength());
+      byte[] in;
+      try {
+        in = types[i].toBytes(value(parameters.get(i), types[i]));
+      } catch (IllegalArgumentException e) {
+        if (!(types[i] instanceof AS400Varchar) || !(e instanceof com.ibm.as400.access.ExtendedIllegalArgumentException)
+            || ((com.ibm.as400.access.ExtendedIllegalArgumentException) e).getReturnCode()
+                != com.ibm.as400.access.ExtendedIllegalArgumentException.LENGTH_NOT_VALID) throw e;
+        throw new IllegalArgumentException("Parameter " + (i + 1) + ": the varchar value does not fit in its length of "
+            + parameters.get(i).path("length").asInt() + " bytes (" + e.getMessage() + ")");
+      }
+      params[i] = new ProgramParameter(in, types[i].getByteLength());
     }
 
     /* The host server job gets the spec's library list, then the program runs there */
@@ -147,6 +169,10 @@ final class ProgramCaller {
           out.addNull();
           continue;
         }
+        if (types[i] instanceof AS400Varchar) {  // the text the program left in it, exactly (no trailing-blank trim)
+          out.add(varchar((AS400Varchar) types[i], data, system));
+          continue;
+        }
         Object back = types[i].toObject(data);
         if (back instanceof String) out.add(((String) back).replaceAll("\\s+$", ""));
         else if (back instanceof BigDecimal) out.add((BigDecimal) back);
@@ -161,6 +187,19 @@ final class ProgramCaller {
       if (around != null) around.after(result);
     }
     return result;
+  }
+
+  /* A varchar as the program left it: the length prefix says how much of the buffer is text. JTOpen's toObject(byte[])
+     refuses the whole capacity-plus-prefix buffer, so the prefix is read here. */
+  static String varchar(AS400Varchar type, byte[] data, AS400 system) {
+    int prefix = type.getVarLengthSize();
+    if (data.length < prefix) return "";
+    long n = 0;
+    for (int i = 0; i < prefix; i++) n = (n << 8) | (data[i] & 0xFF);
+    int length = (int) Math.min(n, data.length - prefix);
+    if (length <= 0) return "";
+    AS400Text text = system != null ? new AS400Text(length, 65535, system) : new AS400Text(length, type.getCcsid());
+    return (String) text.toObject(data, prefix);
   }
 
   private static String messages(AS400Message[] list) {

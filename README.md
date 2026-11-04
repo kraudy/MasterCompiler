@@ -183,7 +183,27 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --generate-o
 java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources -xv
 ```
 
+A project folder works too (`--project <dir>` uses its `build.yaml`, a TOBi `Rules.mk` or a scan; `--spec <file>` picks
+another YAML spec in it), `--target NAME` builds only the matching target(s) of that name in one library (`NAME.TYPE` narrows it), without their dependencies or dependents, to repeat it after a one-line edit.
+
 [Cli doc](./docs/Cli.md) · [Scan doc](./docs/Scan.md) 
+
+## Run and probe a program
+
+`--call LIB/PGM` runs a program in one job with the library list you give (`--libl`, `--curlib`) and prints its
+parameters, its messages and the spooled output of that job (`QPRINT`, job log). Parameters are typed JSON in
+`--call-params`: `char`, `varchar` (an RPG `VARCHAR`, e.g. a JSON text), `packed`, `zoned` and `int`.
+
+```bash
+java -jar MasterCompiler.jar --call MYLIB/MYPGM --libl "MYLIB QGPL" \
+  --call-params '[{"type":"varchar","length":2000,"value":"{\"id\":1}"},{"type":"int","bytes":4}]'
+java -jar MasterCompiler.jar --sql "SELECT * FROM MYLIB.RESULTS"      # read what the probe wrote
+```
+
+Over SSH, `--remote --project <dir> --call LIB/PGM` needs no host servers. The MCP `call_program` tool takes the same
+parameters for programs the project builds in the current library, with a preview and a confirmation first; only the
+command line `--call` also collects the job's spooled output. `debug_program` adds breakpoints and reads variables at
+each stop. See the [Cli doc](./docs/Cli.md).
 
 ## Parameter resolution and validation
 

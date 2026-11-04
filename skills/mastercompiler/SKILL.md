@@ -424,7 +424,10 @@ Loop for logic changes (after the first-build check in "Edit–compile–fix loo
 `plan` shown to the user, who agreed): edit → `build` (changed files) → `call_program` without
 `confirm`, show what it would run → `confirm: true` only if the user agrees → read the returned
 parameters and messages. A fixed-length message (a data structure) is one `char`
-parameter of its full length: build the string with the fields at their positions. To check
+parameter of its full length: build the string with the fields at their positions. An RPG `VARCHAR` (for example a
+JSON text) is `{type: "varchar", length: <declared bytes, required>, prefix: 2|4, value: "..."}`: MC writes the length
+prefix and reads back exactly the text the program left, trailing blanks included; a value longer than `length` is refused.
+Omitting `value` passes blanks / zero in (every parameter is input and output). To check
 what the program did to the data, give `checkRows` with a SELECT over the rows it works on and
 their key: the answer's `rowChanges` replaces separate before / after queries.
 

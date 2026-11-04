@@ -34,6 +34,7 @@ public class CallRunnerTest {
     assertEquals(2, CallRunner.parameters("[{\"type\":\"char\",\"length\":10,\"value\":\"A\"},{\"type\":\"int\",\"bytes\":4}]").size());
     assertThrows(IllegalArgumentException.class, () -> CallRunner.parameters("{\"type\":\"char\"}"));
     assertThrows(IllegalArgumentException.class, () -> CallRunner.parameters("[{\"type\":\"float\"}]"));
+    assertEquals(1, CallRunner.parameters("[{\"type\":\"varchar\",\"length\":2000,\"value\":\"{}\"}]").size());
     assertThrows(IllegalArgumentException.class, () -> CallRunner.parameters("[\"A\"]"));
     assertThrows(IllegalArgumentException.class, () -> CallRunner.parameters("not json"));
   }

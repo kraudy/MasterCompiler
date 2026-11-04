@@ -437,8 +437,9 @@ public class McpServer {
     ObjectNode callParams = callProps.putObject("parameters");
     callParams.put("type", "array");
     callParams.putObject("items").put("type", "object");
-    callParams.put("description", "In order: {type: char, length, value} | {type: packed|zoned, digits, decimals, value} | "
-        + "{type: int, bytes: 2|4|8, value}. No value: output only. A data structure (e.g. a fixed-length message) is one char "
+    callParams.put("description", "In order: {type: char, length, value} | {type: varchar, length (the payload capacity the program declares, in bytes; required), prefix: 2|4 (bytes of the length, default 2), value} "
+        + "(an RPG VARCHAR, e.g. a JSON text) | {type: packed|zoned, digits, decimals, value} | "
+        + "{type: int, bytes: 2|4|8, value}. No value: blanks / zero are passed in (every parameter is input and output). A data structure (e.g. a fixed-length message) is one char "
         + "parameter of its full length");
     ObjectNode checkRows = callProps.putObject("checkRows");
     checkRows.put("type", "array");

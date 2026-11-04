@@ -63,7 +63,7 @@ final class CallRunner {
     return new Program(qualified ? names[0] : null, names[names.length - 1]);
   }
 
-  /* The parameters as call_program takes them: a JSON array of {type, length|digits|decimals|bytes, value} */
+  /* The parameters as call_program takes them: a JSON array of {type, length|prefix|digits|decimals|bytes, value} */
   static JsonNode parameters(String json) {
     if (json == null || json.trim().isEmpty()) return mapper.createArrayNode();
     JsonNode parsed;
@@ -76,8 +76,8 @@ final class CallRunner {
     if (parsed == null || !parsed.isArray()) throw new IllegalArgumentException("--call-params is a JSON array of parameters");
     for (JsonNode p : parsed) {
       String type = p.path("type").asText("char").toLowerCase(Locale.ROOT);
-      if (!p.isObject() || !(type.equals("char") || type.equals("packed") || type.equals("zoned") || type.equals("int"))) {
-        throw new IllegalArgumentException("--call-params: each parameter is {\"type\": char|packed|zoned|int, ...}: " + p);
+      if (!p.isObject() || !(type.equals("char") || type.equals("varchar") || type.equals("packed") || type.equals("zoned") || type.equals("int"))) {
+        throw new IllegalArgumentException("--call-params: each parameter is {\"type\": char|varchar|packed|zoned|int, ...}: " + p);
       }
     }
     return parsed;

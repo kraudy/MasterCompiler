@@ -3,7 +3,30 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## Unreleased
+
+- `call_program` / `--call`: a `varchar` parameter, `{"type":"varchar","length":2000,"value":"..."}`, passes an RPG
+  `VARCHAR` (2-byte length + text; `"prefix":4` for a 4-byte length), for a JSON text or any variable-length string.
+  `length` is required (the declared size, in bytes). It is read back as the text the program left in it, trailing blanks
+  included. `char` is unchanged (a fixed-length, blank-padded buffer).
+
 ## v0.3.25
+
+Fixes and additions that came after the first v0.3.25 notes
+- `--spec <file>` (with `--project`): build another YAML spec of the project instead of `build.yaml` (e.g. `--spec tobi.yaml`);
+  it must be a file inside the project folder. Works over `--remote` and `--mcp --ssh` too.
+- C targets accept `TERASPACE`, `DTAMDL` and `SYSIFCOPT` (`CRTCMOD`, `CRTBNDC`).
+- A rebuild no longer fails with CPF5812 (member already exists): the source-member check does not need `SOURCE_TYPE`
+  (the member `CPYFRMSTMF MBROPT(*REPLACE)` fills has none). For an explicitly qualified source file the existence checks
+  look in that library only, not in any `QRPGSRC` on the library list (that made MC skip creating the target's file and
+  the copy into it fail with CPFA0A9); `*LIBL` / `*CURLIB` keep the library-list lookup.
+- `CRTSRVPGM` / `CRTPGM` `BNDSRVPGM`: a reference to a project service program built in `*CURLIB` gets the current library's name instead of `*CURLIB` (CPD0078).
+- `--call`: a call that fails no longer crashes (NPE) reading back its parameters; they print as `(none: the call failed)`
+  and the call's messages are shown.
+- `debug_program`: variables are read as hex, up to 4096 bytes of each result. The helper is v5: on a confirmed debug run MC
+  creates a missing helper or replaces one with a different version text; an existing v5 helper is reused.
+  `call_program` / `debug_program` apply the YAML target params first, so the target's `SRCSTMF` is known when the
+  program's source is checked.
 
 Feedback from the ART200 runtime probes
 - `--call LIB/PGM [--call-params '<json>'] [--libl ...] [--curlib ...]`: run a program from the command line in one job with
