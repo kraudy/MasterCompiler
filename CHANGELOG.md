@@ -3,7 +3,7 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
-## Unreleased
+## v0.3.25
 
 Feedback from the ART200 runtime probes
 - `--call LIB/PGM [--call-params '<json>'] [--libl ...] [--curlib ...]`: run a program from the command line in one job with
