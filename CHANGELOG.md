@@ -3,7 +3,7 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
-## Unreleased
+## v0.3.26
 
 - Terminal agents (Claude Code, Codex CLI, Grok Build, OpenCode) are documented and supported next to Copilot in VS Code:
   [docs/Agents.md](./docs/Agents.md) and a new `mastercompiler-setup` skill (jar download, MCP entry per client, password
