@@ -47,7 +47,8 @@ public class ArgParser {
     SRVPGM_FROM_EXPORTS(null, "srvpgm-from-exports", Kind.FLAG, "With --scan: a module that exports procedures, and that no service program binds, gets a service program (EXPORT(*ALL))"),
     STRICT_HOST_KEY(null, "strict-host-key", Kind.FLAG, "SSH: refuse a host key that is not in known_hosts (fails with its fingerprint) instead of trusting it; IBMI_SSH_KNOWN_HOSTS names the known_hosts file"),
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
-    INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code)"),
+    INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code), or the agents --agent names"),
+    AGENT         (null, "agent",        Kind.VALUE, "With --install-skills: where to install, comma-separated: copilot (~/.copilot/skills, the default), claude (~/.claude/skills), agents (~/.agents/skills: Codex, Grok, OpenCode) or all"),
     VERSION       (null, "version",      Kind.FLAG,  "Print the MasterCompiler version"),
     HELP          ("h", "help",          Kind.FLAG,  "Print this help"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
@@ -161,6 +162,7 @@ public class ArgParser {
   private String maskColumns;
   private boolean hostServers;
   private boolean installSkills;
+  private String agent;
   private boolean version;
   private boolean help;
   private String next;
@@ -313,6 +315,7 @@ public class ArgParser {
         push = value;
         break;
       case NEXT:          next = value; break;
+      case AGENT:         agent = value; break;
       case NEXT_FILE:     next = readNextFile(value); nextFile = value; break;
       case IMPORT:
         importSelection = value;
@@ -460,6 +463,8 @@ public class ArgParser {
     if (ssh && mcp && projectRoot == null) {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
     }
+    if (agent != null && !installSkills) throw new IllegalArgumentException("--agent goes with --install-skills");
+    if (installSkills) VscodeSetup.skillDirs(agent, System.getProperty("user.home"));  // rejects an unknown agent here
     if (installSkills || version) return;  // need nothing else
     if (readOnly && !mcp) throw new IllegalArgumentException("--read-only goes with --mcp");
     if ((maxRows != 0 || maskColumns != null) && !readOnly) {
@@ -766,6 +771,11 @@ public class ArgParser {
 
   public boolean isInstallSkills() {
     return installSkills;
+  }
+
+  /** {@code --agent} with {@code --install-skills}: the agents to install for (comma-separated), or null for Copilot. */
+  public String getAgent() {
+    return agent;
   }
 
   public boolean isHostServers() {

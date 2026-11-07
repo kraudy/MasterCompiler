@@ -13,7 +13,8 @@ description: >-
 # Set up MasterCompiler for Copilot in VS Code
 
 You may be reading this because the user pointed you at https://github.com/kraudy/MasterCompiler
-and asked to install or try it: this is the guide to follow with them, step by step.
+and asked to install or try it: this is the guide to follow with them, step by step. (This one is for Copilot in
+VS Code. For Claude Code, Codex, Grok, OpenCode or another terminal agent, follow `skills/mastercompiler-setup/SKILL.md`.)
 
 **Read the newest guide, not a cached one.** If you fetched this file from `master`
 (`raw.githubusercontent.com/kraudy/MasterCompiler/master/...`), that URL can serve an older copy

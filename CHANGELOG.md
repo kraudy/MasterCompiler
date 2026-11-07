@@ -5,6 +5,14 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
 ## Unreleased
 
+- Terminal agents (Claude Code, Codex CLI, Grok Build, OpenCode) are documented and supported next to Copilot in VS Code:
+  [docs/Agents.md](./docs/Agents.md) and a new `mastercompiler-setup` skill (jar download, MCP entry per client, password
+  from `IBMI_PASSWORD_COMMAND` / `IBMI_PASSWORD_FILE`, no VS Code needed). Nothing changes for Copilot.
+- `--install-skills --agent copilot|claude|agents|all` (comma-separated): also installs the skills into `~/.claude/skills`
+  and `~/.agents/skills` (Codex, Grok Build, OpenCode). Without `--agent` it installs into `~/.copilot/skills` as before.
+  `--setup-vscode` installs the new skill into `.github/skills/` with the others.
+- The password-rejected messages also say what to do outside VS Code (change the source the MCP entry reads, restart the server).
+
 - `call_program` / `--call`: a `varchar` parameter, `{"type":"varchar","length":2000,"value":"..."}`, passes an RPG
   `VARCHAR` (2-byte length + text; `"prefix":4` for a 4-byte length), for a JSON text or any variable-length string.
   `length` is required (the declared size, in bytes). It is read back as the text the program left in it, trailing blanks

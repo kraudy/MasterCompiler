@@ -34,7 +34,7 @@ public final class VscodeSetup {
 
   static final String SERVER = "mastercompiler";
   static final List<String> SKILLS = Arrays.asList(
-      "mastercompiler/SKILL.md", "mastercompiler-vscode/SKILL.md", "ibm-i-pase/SKILL.md");
+      "mastercompiler/SKILL.md", "mastercompiler-vscode/SKILL.md", "mastercompiler-setup/SKILL.md", "ibm-i-pase/SKILL.md");
 
   private static final ObjectMapper JSONC = JsonMapper.builder()
       .enable(JsonReadFeature.ALLOW_JAVA_COMMENTS)
@@ -330,6 +330,28 @@ public final class VscodeSetup {
     } catch (Exception e) {
       return false;
     }
+  }
+
+  /*
+   * Where --install-skills puts the skills for the agents named (comma-separated copilot, claude, agents, all; null is
+   * copilot, what it always did). "agents" is ~/.agents/skills, which Codex, Grok Build and OpenCode all read.
+   */
+  static List<File> skillDirs(String agents, String home) {
+    List<File> dirs = new ArrayList<File>();
+    for (String name : (agents == null ? "copilot" : agents).split(",", -1)) {
+      String agent = name.trim().toLowerCase(java.util.Locale.ROOT);
+      List<String> subs;
+      if (agent.equals("copilot")) subs = Arrays.asList(".copilot/skills");
+      else if (agent.equals("claude")) subs = Arrays.asList(".claude/skills");
+      else if (agent.equals("agents")) subs = Arrays.asList(".agents/skills");
+      else if (agent.equals("all")) subs = Arrays.asList(".copilot/skills", ".claude/skills", ".agents/skills");
+      else throw new IllegalArgumentException("--agent: unknown agent \"" + name.trim() + "\" (copilot, claude, agents, all)");
+      for (String sub : subs) {
+        File dir = new File(home, sub);
+        if (!dirs.contains(dir)) dirs.add(dir);
+      }
+    }
+    return dirs;
   }
 
   /* MC's skills from the jar into .github/skills (MC owns these files: they are refreshed) */

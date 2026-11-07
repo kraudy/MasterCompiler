@@ -2,11 +2,13 @@
 
 > set up MasterCompiler from https://github.com/kraudy/MasterCompiler
 
-Copilot walks you through the rest. Details in [docs/Copilot.md](./docs/Copilot.md). What changed in each release: [CHANGELOG.md](./CHANGELOG.md).
+Copilot walks you through the rest. Details in [docs/Copilot.md](./docs/Copilot.md).
+**Claude Code, Codex, Grok or OpenCode?** Same idea from the terminal: [docs/Agents.md](./docs/Agents.md). What changed in each release: [CHANGELOG.md](./CHANGELOG.md).
 
 **Agents, before anything else:** read the setup guide at the latest release, not from `master` (its raw copy can be
 cached for minutes and be out of date). Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest`
-and read `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`;
+and read `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`
+(Copilot in VS Code) or `.../skills/mastercompiler-setup/SKILL.md` (Claude Code, Codex, Grok, OpenCode, any terminal agent);
 download the jar and demo files at that same tag.
 
 <div align="center">
@@ -21,7 +23,8 @@ YAML-based, sensible, open-source, modern, clean, and elegant approach to automa
 
 > **Setup guide for AI-assisted install:** `skills/mastercompiler-vscode/SKILL.md`, the step-by-step setup (Java,
 > downloading MC, connecting it to Copilot as an MCP server with the Code for IBM i connection, a demo project, and
-> what to confirm with the user before writing anything).
+> what to confirm with the user before writing anything). For Claude Code, Codex, Grok or OpenCode:
+> `skills/mastercompiler-setup/SKILL.md`.
 >
 > **Agents: read it at the latest release, not from `master`.** `raw.githubusercontent.com/.../master/...` can serve
 > a cached, older copy for several minutes. Get the release tag, then fetch the guide (and the demo files) at that tag,
@@ -259,9 +262,12 @@ Skills for AI coding agents live in [`skills/`](./skills):
 
 * [`mastercompiler`](./skills/mastercompiler/SKILL.md): specs, scan, `--dry-run`, `--json` reports and the edit-compile-fix loop.
 * [`mastercompiler-vscode`](./skills/mastercompiler-vscode/SKILL.md): setting MC up as an MCP server for Copilot in VS Code.
+* [`mastercompiler-setup`](./skills/mastercompiler-setup/SKILL.md): setting MC up as an MCP server for Claude Code, Codex, Grok Build and OpenCode.
 * [`ibm-i-pase`](./skills/ibm-i-pase/SKILL.md): working on an IBM i over SSH/PASE (CL, SQL, IFS, CCSID, EVFEVENT).
 
-Copy a skill folder into your agent's skills directory (for Claude Code: `~/.claude/skills/`).
+`java -jar MasterCompiler.jar --install-skills [--agent copilot|claude|agents|all]` copies them into your agent's skills
+directory (`~/.copilot/skills` by default, `~/.claude/skills`, `~/.agents/skills` for Codex, Grok and OpenCode), or copy
+a skill folder yourself. See [docs/Agents.md](./docs/Agents.md).
 
 ## Contributing
 

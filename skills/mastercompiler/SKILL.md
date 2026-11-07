@@ -22,20 +22,24 @@ build is a real build. For shell access to the IBM i itself see the
 | Mode | How it connects | Needs |
 |------|-----------------|-------|
 | **On the IBM i** (PASE, over SSH) | Current job's user profile | Java 8+ in PASE; no credentials file |
-| **Remote** (laptop, CI, container) | JT400 host servers | `.env` with `IBMI_HOSTNAME`, `IBMI_USERNAME`, `IBMI_PASSWORD` in the working directory |
+| **Remote** (laptop, CI, container) | JT400 host servers, or SSH with `--remote` / `--mcp --ssh` | Host servers: `.env` with `IBMI_HOSTNAME`, `IBMI_USERNAME`, `IBMI_PASSWORD` in the working directory. SSH: `IBMI_HOSTNAME`, `IBMI_USERNAME` and a password source (`IBMI_PASSWORD_FILE` / `IBMI_PASSWORD_COMMAND`), or an SSH key |
 | **Offline** (`--generate-only`) | none | Nothing; scan and spec writing only |
 
-**In VS Code, with the `mastercompiler` MCP server, use its tools** (`build`, `plan`, `sql`, ...): the
-server already has the password from VS Code's prompt. Do not run the jar from a terminal for that
+**With the `mastercompiler` MCP server registered (Copilot in VS Code, or Claude Code, Codex, Grok, OpenCode), use
+its tools** (`build`, `plan`, `sql`, ...): the server already has the password (from VS Code's prompt, or from the
+`IBMI_PASSWORD_COMMAND` / `IBMI_PASSWORD_FILE` its entry names). Do not run the jar from a terminal for that
 work, never create a `.env`, and never ask for the password in the chat, a terminal or a file. A `.env`
-is something a person sets up for command-line or CI use.
+is something a person sets up for command-line or CI use. **Without the server**, a terminal agent may run the jar
+below, with the password from `IBMI_PASSWORD_FILE` / `IBMI_PASSWORD_COMMAND` (or `--password-stdin` from a pipe),
+never typed to you; an authentication failure is not a reason to switch from the tools to the jar. To register the
+server for a terminal agent, follow the `mastercompiler-setup` skill.
 
 Get the jar from the latest release,
 `https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar`
 (`curl -LO` works in PASE too), or build it with `./mvnw clean package`
 (`target/MasterCompiler-1.0-SNAPSHOT.jar`). The examples below call it `MC.jar`.
 To update or reinstall MC in VS Code, or have the user re-enter its passwords, follow "Update,
-reinstall, or re-enter the passwords" in the `mastercompiler-vscode` skill.
+reinstall, or re-enter the passwords" in the `mastercompiler-vscode` skill (terminal agents: `mastercompiler-setup`).
 Running on the IBM i is the simplest agent path: copy the jar next to the sources and
 run it over SSH. No password ever lands in a file.
 
@@ -326,7 +330,9 @@ connections:
   company data columns in `set` before `confirm`: without that `set`, do not confirm the copy, and never
   bring those values into the chat or the repository.
 - MC opens a read-only connection on first use. Its password comes from its own VS Code password
-  prompt (`--setup-vscode` adds one per read-only connection in the spec); never ask for it in chat.
+  prompt (`--setup-vscode` adds one per read-only connection in the spec), or, outside VS Code, from the
+  `IBMI_PASSWORD_<NAME>` variable in the MCP entry's `env` (name upper case, other characters as `_`) with the host from
+  Code for IBM i's settings; never ask for it in chat.
 
 ### Sign-on failures (never lock the user's profile)
 
@@ -338,7 +344,10 @@ IBM i rejects a password it stops signing on to that system: every tool returns 
 
 After any authentication error (`rejected the password`, `Auth fail`, `CPF22E2`, `CPF22E3`, ...),
 do not call another tool on that connection and do not retry. Show the user the error and ask whether
-they want to type the password again. If they do, give them these steps (the error lists them too):
+they want to type the password again. Terminal agents (Claude Code, Codex, Grok, OpenCode): the user changes the
+password where the MCP entry reads it (`IBMI_PASSWORD_COMMAND` / `IBMI_PASSWORD_FILE`) and restarts the MCP server in
+the client; see "After an authentication error" in the `mastercompiler-setup` skill. In VS Code, give them these steps
+(the error lists them too):
 
 1. Command Palette (Ctrl+Shift+P) → **MCP: Reset Cached Inputs**.
 2. Command Palette → **MCP: List Servers** → `mastercompiler` → **Restart Server**. VS Code shows its

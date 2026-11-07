@@ -35,7 +35,8 @@ $tag = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/kraudy/M
 Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/skills/mastercompiler-vscode/SKILL.md" -OutFile "$env:USERPROFILE\.copilot\skills\mastercompiler-vscode\SKILL.md"
 ```
 
-(With MC already downloaded, `java -jar MasterCompiler.jar --install-skills` installs all of MC's skills there.)
+(With MC already downloaded, `java -jar MasterCompiler.jar --install-skills` installs all of MC's skills there. Claude Code,
+Codex, Grok and OpenCode: [Agents.md](./Agents.md).)
 
 Then open the repository, switch Copilot Chat to **Agent mode** (other modes cannot run commands) and ask:
 *"set up MasterCompiler for this repository"*. Copilot follows the skill: it downloads MC (on 64-bit Windows the zip with its own Java; elsewhere it finds a Java), shows you the

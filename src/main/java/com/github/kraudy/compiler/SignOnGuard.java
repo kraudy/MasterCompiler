@@ -46,8 +46,10 @@ final class SignOnGuard {
         + "1. Command Palette (Ctrl+Shift+P) > \"MCP: Reset Cached Inputs\"; "
         + "2. Command Palette > \"MCP: List Servers\" > mastercompiler > \"Restart Server\": VS Code shows its "
         + "password prompts again; "
-        + "3. type the current password there. If they do not know it, it is changed on the IBM i (CHGPWD, ACS, "
-        + "or the security administrator).";
+        + "3. type the current password there. Not in VS Code (Claude Code, Codex, Grok, OpenCode, another terminal "
+        + "agent): the user changes the password where the MCP entry reads it (IBMI_PASSWORD_FILE, "
+        + "IBMI_PASSWORD_COMMAND or IBMI_PASSWORD) and restarts the MCP server in their client. If they do not know "
+        + "it, it is changed on the IBM i (CHGPWD, ACS, or the security administrator).";
   }
 
   private static File file = new File(".mc/auth-blocked.json");
@@ -194,7 +196,8 @@ final class SignOnGuard {
         + "their security administrator to " + (code.equals("CPF22E4") ? "reset the password" : "enable the profile")
         + "; then delete " + file.getPath() + " in the project, Command Palette (Ctrl+Shift+P) > \"MCP: Reset "
         + "Cached Inputs\", \"MCP: List Servers\" > mastercompiler > \"Restart Server\", and type the current "
-        + "password in VS Code's prompt (never in the chat).";
+        + "password in VS Code's prompt (never in the chat). Not in VS Code: change the password where the MCP entry "
+        + "reads it (IBMI_PASSWORD_FILE, IBMI_PASSWORD_COMMAND or IBMI_PASSWORD) and restart the MCP server in the client.";
   }
 
   private static synchronized void succeeded(Target target) {
