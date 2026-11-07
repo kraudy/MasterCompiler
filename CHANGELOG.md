@@ -10,6 +10,9 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
   used as-is, so a project with no git-known file uploaded 0 files and its spec was then "not found".
   The folder is walked only when git knows no file in it; a normal repository keeps its tracked and
   non-ignored files.
+- Hooks: `Label: { Cmd: <CL command> }` is rejected when the spec is read, with the documented
+  `- Cmd: <CL command>` form in the message. Before, the label became the command name and MC ran
+  `LABEL CMD(...)` (in the run that found it, `CrtProgram:` turned into CRTPROGRAM).
 
 ## v0.3.26
 

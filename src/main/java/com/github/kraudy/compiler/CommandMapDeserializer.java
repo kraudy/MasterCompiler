@@ -80,6 +80,12 @@ public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>
       try {
         sysCmd = SysCmd.fromString(entry.getKey());
       } catch (IllegalArgumentException unknown) {
+        String nested = nestedCmd(entry.getValue());
+        if (nested != null) {
+          throw new IllegalArgumentException("Hook '" + entry.getKey() + "' puts its CL command under 'Cmd:': MC would run it as "
+              + entry.getKey().toUpperCase() + " CMD(...). Write it as '- Cmd: " + (nested.isEmpty() ? "<CL command>" : nested)
+              + "', or as a command MC knows with its params.");
+        }
         paramList.add(CommandObject.raw(rawCommand(entry.getKey(), entry.getValue())).ignore(ignore).timeout(timeout));
         continue;
       }
@@ -109,6 +115,17 @@ public class CommandMapDeserializer extends JsonDeserializer<List<CommandObject>
       throw new IllegalArgumentException("timeout takes the seconds a hook may run, e.g. timeout: 300 (got: " + text + ")");
     }
     return Integer.parseInt(text);
+  }
+
+  /* The text of a nested Cmd: under a command name that MC does not know (a label, not a CL command), or null */
+  private static String nestedCmd(JsonNode params) {
+    if (params == null || !params.isObject()) return null;
+    Iterator<Map.Entry<String, JsonNode>> it = params.fields();
+    while (it.hasNext()) {
+      Map.Entry<String, JsonNode> p = it.next();
+      if (p.getKey().equalsIgnoreCase("cmd")) return p.getValue().isTextual() ? p.getValue().asText() : "";
+    }
+    return null;
   }
 
   /* A command MC does not model, written as param: value: NAME PARAM(value) ... (values as given) */

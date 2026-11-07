@@ -128,6 +128,10 @@ before:
     DIR: /home/BIGDAWG
 ```
 
+Any other CL command is written as `- Cmd: <CL command>` (the documented list form, also in the
+mastercompiler skill). The key of a hook element is always the command name, never a label: a shape such
+as `MyLabel: { Cmd: ... }` is rejected at load time, because MC would otherwise run `MYLABEL CMD(...)`.
+
 Global default hook to set default params values for every target in the spec can also be defined. If the params is not valid for a compilation command, it is just ignored.
 
 ```yaml

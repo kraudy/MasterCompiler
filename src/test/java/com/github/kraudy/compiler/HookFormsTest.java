@@ -43,6 +43,22 @@ public class HookFormsTest {
   }
 
   @Test
+  void test_Nested_Cmd_Under_A_Map_Key_Is_Rejected(@TempDir Path dir) throws Exception {
+    Path yaml = dir.resolve("build.yaml");
+    Files.write(yaml, ("after:\n"
+        + "  CrtProgram:\n"
+        + "    Cmd: CRTPGM PGM(ROBKRAUDY2/LOG100Y) MODULE(ROBKRAUDY2/LOG100Y ROBKRAUDY2/DUMPST) "
+        + "ENTMOD(ROBKRAUDY2/LOG100Y) ACTGRP(*NEW) REPLACE(*YES) BNDSRVPGM(QSYS/QC2LE)\n"
+        + "targets:\n"
+        + "  curlib.hello.pgm.rpgle: {}\n").getBytes(StandardCharsets.UTF_8));
+
+    RuntimeException e = assertThrows(RuntimeException.class, () -> Utilities.deserializeYaml(yaml.toString()));
+    String message = messages(e);
+    assertTrue(message.contains("CrtProgram"), message);
+    assertTrue(message.contains("- Cmd:"), message);
+  }
+
+  @Test
   void test_Library_Keys_And_Overlay_Without_Targets(@TempDir Path dir) throws Exception {
     Path base = dir.resolve("mc-base.yaml");
     Files.write(base, ("curlib: devlib\n"
@@ -62,5 +78,11 @@ public class HookFormsTest {
     Files.write(yaml, "targets:\n  curlib.a.pgm.rpgle: {\n    params: [\n".getBytes(StandardCharsets.UTF_8));
     RuntimeException e = assertThrows(RuntimeException.class, () -> Utilities.deserializeYaml(yaml.toString()));
     assertTrue(e.getMessage().contains("line"), e.getMessage());
+  }
+
+  private static String messages(Throwable e) {
+    StringBuilder text = new StringBuilder();
+    for (Throwable t = e; t != null; t = t.getCause()) text.append(t.getMessage()).append('\n');
+    return text.toString();
   }
 }
