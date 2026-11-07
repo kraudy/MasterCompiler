@@ -3,6 +3,14 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## Unreleased
+
+- `--remote`: a `--project` folder that git ignores (or that is only untracked inside an enclosing
+  repository) now uploads the files the folder has. Before, the enclosing repository's file list was
+  used as-is, so a project with no git-known file uploaded 0 files and its spec was then "not found".
+  The folder is walked only when git knows no file in it; a normal repository keeps its tracked and
+  non-ignored files.
+
 ## v0.3.26
 
 - Terminal agents (Claude Code, Codex CLI, Grok Build, OpenCode) are documented and supported next to Copilot in VS Code:

@@ -225,7 +225,7 @@ public class SshMcpProxy {
     String jar = ensureRemoteJar(ssh, home);
     long jarDone = System.currentTimeMillis();
     stage("3/5 syncing the sources to " + remoteDir);
-    int uploaded = sync(projectFiles(), true);
+    int uploaded = sync(projectFiles(project), true);
     logger.info("Sources synced: {} files uploaded ({} s for MC, {} s for sources)", uploaded,
         (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
     return jar;
@@ -621,11 +621,11 @@ public class SshMcpProxy {
         return line;
       }
       if (tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export")) {
-        sync(projectFiles(), true);  // they read the sources in the IBM i copy
+        sync(projectFiles(project), true);  // they read the sources in the IBM i copy
         return line;
       }
       if (tool.equals("import_source")) {
-        sync(projectFiles(), true);  // "repo" keeps files already there: the IBM i copy must be current
+        sync(projectFiles(project), true);  // "repo" keeps files already there: the IBM i copy must be current
         pendingImports.add(request.path("id").toString());
         return line;
       }
@@ -646,9 +646,9 @@ public class SshMcpProxy {
         }
       } else if (args.has("files") && args.get("files").isArray()) {
         /* the whole copy, not only the files named: a changed spec (mc-base.yaml, build.yaml) must go up too */
-        uploaded = sync(projectFiles(), true);
+        uploaded = sync(projectFiles(project), true);
       } else {
-        uploaded = sync(projectFiles(), true);
+        uploaded = sync(projectFiles(project), true);
       }
       if (uploaded > 0) logger.info("Uploaded {} changed files before {}", uploaded, tool);
       return mapper.writeValueAsString(request);
@@ -1032,15 +1032,31 @@ public class SshMcpProxy {
     return out;
   }
 
-  /* Every file git knows in the project (tracked and not ignored), else every file under it */
-  private Set<String> projectFiles() {
+  /*
+   * Every file git knows in the project (tracked and not ignored), else every file under it. A project
+   * that sits ignored or untracked inside an enclosing repository has no files in git's list: the list
+   * is the whole repository's, so walking the project is the only way to upload what it actually has.
+   */
+  static Set<String> projectFiles(File project) {
     try {
-      return GitChanges.allFiles(project.getPath());
+      Set<String> known = GitChanges.allFiles(project.getPath());
+      if (containsProjectFile(project, known)) return known;
+      logger.info("Git has no files in {}: uploading every file under it", project);
     } catch (Exception notGit) {
-      Set<String> files = new LinkedHashSet<String>();
-      collect(project, files);
-      return files;
+      logger.info("{} is not in a git repository: uploading every file under it", project);
     }
+    Set<String> files = new LinkedHashSet<String>();
+    collect(project, files);
+    return files;
+  }
+
+  private static boolean containsProjectFile(File project, Set<String> files) throws Exception {
+    String root = project.getCanonicalPath() + File.separator;
+    for (String path : files) {
+      File file = new File(path);
+      if (file.isFile() && file.getCanonicalPath().startsWith(root)) return true;
+    }
+    return false;
   }
 
   private static void collect(File dir, Set<String> out) {
