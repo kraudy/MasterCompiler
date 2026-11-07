@@ -4,6 +4,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.IFSFile;
@@ -45,6 +48,11 @@ final class DataFetch {
       System.err.println("Fetch failed: " + path + " is not a stream file");
       return 1;
     }
+    /* The source's own time and CCSID, before the copy: a stale file is visible in the answer */
+    long modified = 0;
+    int ccsid = 0;
+    try { modified = file.lastModified(); } catch (Exception ignored) {}
+    try { ccsid = file.getCCSID(); } catch (Exception ignored) {}
     File folder = target.getAbsoluteFile().getParentFile();
     if (folder != null && !folder.isDirectory() && !folder.mkdirs()) {
       System.err.println("Fetch failed: cannot create " + folder);
@@ -67,7 +75,17 @@ final class DataFetch {
       throw e;
     }
     java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-    System.out.println("Fetched " + path + " (" + copied + " bytes) to " + target);
+    System.out.println(fetched(path, copied, target, modified, ccsid));
     return 0;
+  }
+
+  /* The line the fetch prints: source, size, when it was last changed, and its CCSID when known */
+  static String fetched(String path, long bytes, File target, long modified, int ccsid) {
+    StringBuilder line = new StringBuilder("Fetched ").append(path).append(" (").append(bytes).append(" bytes");
+    if (modified > 0) {
+      line.append(", modified ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date(modified)));
+    }
+    if (ccsid > 0) line.append(", CCSID ").append(ccsid);
+    return line.append(") to ").append(target).toString();
   }
 }

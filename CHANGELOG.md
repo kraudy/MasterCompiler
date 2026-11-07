@@ -17,6 +17,8 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
   and its own joblog messages, ordered by severity, highest first. Informational messages (severity 00,
   e.g. RNF7031) are no longer printed or counted as compile errors, and the compile command of a target
   whose hook failed no longer hides the failure. The report's `failedCommand` names the failed hook.
+- `--fetch` now prints the source file's last modification time (and its CCSID when the IFS reports
+  one) in the `Fetched ...` line, so a stale file is visible without another tool.
 
 ## v0.3.26
 
