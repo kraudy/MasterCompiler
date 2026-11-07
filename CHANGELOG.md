@@ -13,6 +13,10 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
 - Hooks: `Label: { Cmd: <CL command> }` is rejected when the spec is read, with the documented
   `- Cmd: <CL command>` form in the message. Before, the label became the command name and MC ran
   `LABEL CMD(...)` (in the run that found it, `CrtProgram:` turned into CRTPROGRAM).
+- `--remote` build summary: a failed hook now shows the hook that failed (e.g. `CRTPROGRAM CMD(...)`)
+  and its own joblog messages, ordered by severity, highest first. Informational messages (severity 00,
+  e.g. RNF7031) are no longer printed or counted as compile errors, and the compile command of a target
+  whose hook failed no longer hides the failure. The report's `failedCommand` names the failed hook.
 
 ## v0.3.26
 

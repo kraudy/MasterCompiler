@@ -428,7 +428,9 @@ public class MasterCompiler{
           String error = "compile".equals(failedAt) || "protectedLibs".equals(failedAt) ? e.getMessage() : describe(e);
           if ("tests".equals(failedAt)) error = (compileEnd != null ? "Compiled; the" : "The") + " tests failed (see tests). " + error;
           reportTarget(key, BuildReport.FAILED, command, error, targetStart);
-          report.targets.get(report.targets.size() - 1).failedAt = failedAt;
+          BuildReport.TargetResult result = report.targets.get(report.targets.size() - 1);
+          result.failedAt = failedAt;
+          if ("hook".equals(failedAt) || "tests".equals(failedAt)) result.failedCommand = failedCommand(e);
         }
 
         /* After a cancel or an ENDJOB nothing more runs: no failure hooks, no other targets */
@@ -635,6 +637,16 @@ public class MasterCompiler{
     }
     fileLibrary.put(cacheKey, library);
     return library;
+  }
+
+  /* The command that failed, from the exception chain, as it can be pasted back; null when none is named */
+  static String failedCommand(Throwable e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (!(t instanceof CompilerException)) continue;
+      String command = ((CompilerException) t).getFailedCommand();
+      if (command != null) return CommandStringParser.toPasteable(command);
+    }
+    return null;
   }
 
   /* A failure outside the targets (a global hook): the command and its own escape / diagnostic messages */

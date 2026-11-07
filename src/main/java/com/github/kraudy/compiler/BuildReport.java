@@ -49,6 +49,7 @@ public class BuildReport {
     public String target;
     public String status;
     public String command;
+    public String failedCommand;  // when a hook or test failed: that command; command is the compile's
     public String error;
     public String warning;  // destructive step, e.g. an existing PF deleted and created again
     public List<String> writes;  // database files the program can change and where they resolve: "CUSTMAST update -> APPLIB"
