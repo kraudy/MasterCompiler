@@ -203,6 +203,12 @@ public class Utilities {
         break;
     }
 
+    /* ILE C's own default is *NOIFSIO: IFS APIs (fopen, open, ...) then fail at run time. A spec can opt
+       out with SYSIFCOPT: "*NOIFSIO"; its params are applied after these defaults. */
+    if (targetKey.getCompilationCommand() == CompCmd.CRTCMOD || targetKey.getCompilationCommand() == CompCmd.CRTBNDC) {
+      targetKey.put(ParamCmd.SYSIFCOPT, "*IFS64IO");
+    }
+
   }
 
   /**

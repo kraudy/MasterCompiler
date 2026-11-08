@@ -19,6 +19,10 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
   whose hook failed no longer hides the failure. The report's `failedCommand` names the failed hook.
 - `--fetch` now prints the source file's last modification time (and its CCSID when the IFS reports
   one) in the `Fetched ...` line, so a stale file is visible without another tool.
+- C targets (`CRTCMOD`, `CRTBNDC`) now default to `SYSIFCOPT(*IFS64IO)`. ILE C's own default is
+  `*NOIFSIO`, so `fopen` / `open` on an IFS path failed at run time (CEE9901) even though the build
+  succeeded. A project that needs the legacy behaviour sets `SYSIFCOPT: "*NOIFSIO"` in the target's
+  `params:`.
 
 ## v0.3.26
 

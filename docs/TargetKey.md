@@ -18,6 +18,8 @@ This behavior, conveninently let us decribe objects in a consice, unique and int
 | mylib.cmodhello.**module.c**        | `CRTCMOD`    | **C_Mod_Pattern**
 | mylib.srvhello.**srvpgm.bnd**       | `CRTSRVPGM`  | **Bnd_Srvpgm_Pattern**
 
+`pgm.c` and `module.c` targets default to `SYSIFCOPT(*IFS64IO)`; set `SYSIFCOPT: "*NOIFSIO"` in the target's `params:` for ILE C's legacy behaviour.
+
 ## OPM keys
 
 | Target Key | Compilation command | Pattern |

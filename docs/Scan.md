@@ -110,7 +110,7 @@ Defaults when object type is omitted:
 
 - `rpgle` / `sqlrpgle` / `clle` / `rpg` / `clp` → `pgm`  
 - `bnd` → `srvpgm`  
-- DDS, SQL and C **require** the middle segment (`pf.dds`, `table.sql`, `DUMPSTATIC.module.c`, `RUNDUMP.pgm.c`). A C file without it (`helper.c`) is not a target, so C files that were in a scanned tree before are still ignored; `NAME.srvpgm.c` is a module plus its service program, like `NAME.srvpgm.rpgle`. C targets use `CRTCMOD` / `CRTBNDC` with `SRCSTMF`; their dependencies are not read from the source (name the order with a `.srvpgm.bnd` or a `before:` hook).
+- DDS, SQL and C **require** the middle segment (`pf.dds`, `table.sql`, `DUMPSTATIC.module.c`, `RUNDUMP.pgm.c`). A C file without it (`helper.c`) is not a target, so C files that were in a scanned tree before are still ignored; `NAME.srvpgm.c` is a module plus its service program, like `NAME.srvpgm.rpgle`. C targets use `CRTCMOD` / `CRTBNDC` with `SRCSTMF`; their dependencies are not read from the source (name the order with a `.srvpgm.bnd` or a `before:` hook). `CRTCMOD` and `CRTBNDC` targets default to `SYSIFCOPT(*IFS64IO)`, because ILE C's own default (`*NOIFSIO`) makes `fopen` / `open` on an IFS path fail at run time; a project that needs the legacy behaviour sets `SYSIFCOPT: "*NOIFSIO"` in the target's params.
 
 Object name must be a valid IBM i name (1–10 chars: `A-Z 0-9 $ # @ _`).  
 Descriptive middle tokens (e.g. `hello2.nomain.module.rpgle`) are ignored; the first segment is the object name.

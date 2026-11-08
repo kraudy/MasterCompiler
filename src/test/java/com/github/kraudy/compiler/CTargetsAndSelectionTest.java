@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
+import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SourceType;
 import com.github.kraudy.compiler.SourceNaming.ParsedName;
 
@@ -74,6 +75,7 @@ public class CTargetsAndSelectionTest {
         assertTrue(line.contains("DBGVIEW(*ALL)"), line);
         assertTrue(line.contains("REPLACE(*YES)"), line);
         assertTrue(line.contains("OPTION(*EVENTF)"), line);
+        assertTrue(line.contains("SYSIFCOPT(*IFS64IO)"), line);
         assertFalse(line.contains("SRCFILE("), line);
       }
     }
@@ -142,6 +144,38 @@ public class CTargetsAndSelectionTest {
     assertThrows(IllegalArgumentException.class, () -> TargetSelection.parse("A.NOTATYPE"));
     assertThrows(IllegalArgumentException.class, () -> TargetSelection.parse("A;DLTLIB LIB(X)"));
     assertThrows(IllegalArgumentException.class, () -> TargetSelection.parse(""));
+  }
+
+  @Test
+  void cTargetsDefaultToIfs64Io() {
+    String module = new TargetKey("MYLIB.DUMPSTATIC.MODULE.C")
+        .put(ParamCmd.SRCSTMF, "/home/sources/DUMPSTATIC.module.c")
+        .getCommandString();
+    assertTrue(module.contains(" SYSIFCOPT(*IFS64IO)"), module);
+
+    String program = new TargetKey("MYLIB.RUNDUMP.PGM.C")
+        .put(ParamCmd.SRCSTMF, "/home/sources/RUNDUMP.pgm.c")
+        .getCommandString();
+    assertTrue(program.contains(" SYSIFCOPT(*IFS64IO)"), program);
+  }
+
+  @Test
+  void explicitSysifcoptIsKept() {
+    String cmd = new TargetKey("MYLIB.DUMPSTATIC.MODULE.C")
+        .put(ParamCmd.SRCSTMF, "/home/sources/DUMPSTATIC.module.c")
+        .put(ParamCmd.SYSIFCOPT, "*NOIFSIO")
+        .getCommandString();
+    assertTrue(cmd.contains(" SYSIFCOPT(*NOIFSIO)"), cmd);
+    assertFalse(cmd.contains("*IFS64IO"), cmd);
+  }
+
+  @Test
+  void sysifcoptDefaultOnlyForCTargets() {
+    for (String target : new String[] {"MYLIB.HELLO.PGM.RPGLE", "MYLIB.HELLO.PGM.CLLE",
+        "MYLIB.HELLO.MODULE.SQLRPGLE"}) {
+      String cmd = new TargetKey(target).put(ParamCmd.SRCSTMF, "/home/sources/HELLO").getCommandString();
+      assertFalse(cmd.contains("SYSIFCOPT"), target + " gained a C-only default: " + cmd);
+    }
   }
 
   /* Checked against IBM's parameter tables of CRTCMOD and CRTBNDC: these keywords are not on them */
