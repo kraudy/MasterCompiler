@@ -194,7 +194,8 @@ another YAML spec in it), `--target NAME` builds only the matching target(s) of 
 ## Run and probe a program
 
 `--call LIB/PGM` runs a program in one job with the library list you give (`--libl`, `--curlib`) and prints its
-parameters, its messages and the spooled output of that job (`QPRINT`, job log). Parameters are typed JSON in
+parameters, its messages and the spooled output of that job (`QPRINT`; the job log when the user can read it).
+Parameters are typed JSON in
 `--call-params`: `char`, `varchar` (an RPG `VARCHAR`, e.g. a JSON text), `packed`, `zoned` and `int`.
 
 ```bash
@@ -202,6 +203,10 @@ java -jar MasterCompiler.jar --call MYLIB/MYPGM --libl "MYLIB QGPL" \
   --call-params '[{"type":"varchar","length":2000,"value":"{\"id\":1}"},{"type":"int","bytes":4}]'
 java -jar MasterCompiler.jar --sql "SELECT * FROM MYLIB.RESULTS"      # read what the probe wrote
 ```
+
+A program that ends in error inside the call's server job (QZRCSRVS, owned by QUSER) does not have its stderr or
+job-log line in the answer; the user's profile usually cannot read that job's log. A program that must report a
+failure should write its details to a stream file (read with `--fetch`) or to `QPRINT`.
 
 Over SSH, `--remote --project <dir> --call LIB/PGM` needs no host servers. The MCP `call_program` tool takes the same
 parameters for programs the project builds in the current library, with a preview and a confirmation first; only the

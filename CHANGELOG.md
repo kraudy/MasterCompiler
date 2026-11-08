@@ -23,6 +23,9 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
   `*NOIFSIO`, so `fopen` / `open` on an IFS path failed at run time (CEE9901) even though the build
   succeeded. A project that needs the legacy behaviour sets `SYSIFCOPT: "*NOIFSIO"` in the target's
   `params:`.
+- Docs: `--call` now says that a program ending in error inside the call's server job (QZRCSRVS,
+  owned by QUSER) does not have its stderr or job-log line in the answer; write failure details to a
+  stream file (read with `--fetch`) or to `QPRINT`.
 
 ## v0.3.26
 
