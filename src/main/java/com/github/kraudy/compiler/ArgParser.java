@@ -388,6 +388,12 @@ public class ArgParser {
         throw new IllegalArgumentException("--download takes only LIB/OBJ[,LIB/OBJ...], -o <folder>, --code4i, --connection, "
             + "--ssh-port, --strict-host-key, --password-stdin, --password-command, --curlib, -v");
       }
+      /* --download runs first and returns: a --sql, --fetch or --call beside it would be dropped without a word
+         (and the --sql read-only check would never run), so it is refused; run them as separate commands */
+      if (sql != null || !fetch.isEmpty() || call != null || callParams != null || inqmsgry) {
+        throw new IllegalArgumentException("--download cannot be combined with --sql, --fetch or --call "
+            + "(they would not run); run them as separate commands");
+      }
       ObjectDownload.parse(download);  // names checked now, not after the connection
       return;
     }

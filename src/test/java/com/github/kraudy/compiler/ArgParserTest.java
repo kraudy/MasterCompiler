@@ -282,6 +282,23 @@ public class ArgParserTest {
   }
 
   @Test
+  void testDownloadRejectsSqlFetchAndCall() {
+    String[][] combos = {
+        {"--download", "LIB/OBJ", "--sql", "SELECT 1 FROM SYSIBM.SYSDUMMY1"},
+        {"--download", "LIB/OBJ", "--sql", "DELETE FROM X"},
+        {"--download", "LIB/OBJ", "--fetch", "/x"},
+        {"--download", "LIB/OBJ", "--call", "LIB/PGM"},
+        {"--download", "LIB/OBJ", "--inqmsgry"},
+    };
+    for (String[] args : combos) {
+      ArgParser parser = new ArgParser(args);
+      IllegalArgumentException e = assertThrows(IllegalArgumentException.class, parser::validate, String.join(" ", args));
+      assertTrue(e.getMessage().startsWith("--download cannot be combined"), e.getMessage());
+    }
+    new ArgParser(new String[]{"--download", "LIB/OBJ", "-o", "savf"}).validate();
+  }
+
+  @Test
   void testFileAndScanMutuallyExclusive() {
     String filePath = this.tempYaml.toString();
     ArgParser parser = new ArgParser(new String[]{"-f", filePath, "--scan", "/tmp/src"});
