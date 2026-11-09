@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,5 +33,22 @@ public class DataFetchTest {
     assertFalse(line.contains("modified"), line);
     assertFalse(line.contains("CCSID"), line);
     assertEquals("Fetched /x.txt (1 bytes) to x.txt", line);
+  }
+
+  @Test
+  void test_FetchManyContinuesAfterAFileFails() throws Exception {
+    List<String> seen = new ArrayList<String>();
+    int status = DataFetch.run(Arrays.asList("/one/a.txt", "/two/b.txt", "/three/c.txt"), "out/", (path, output) -> {
+      seen.add(path);
+      return path.contains("two") ? 1 : 0;
+    });
+
+    assertEquals(Arrays.asList("/one/a.txt", "/two/b.txt", "/three/c.txt"), seen);
+    assertEquals(1, status);
+  }
+
+  @Test
+  void test_FetchOnePathKeepsItsStatus() throws Exception {
+    assertEquals(7, DataFetch.run(Arrays.asList("/one/a.txt"), "out/", (path, output) -> 7));
   }
 }

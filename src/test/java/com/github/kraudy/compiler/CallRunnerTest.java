@@ -2,6 +2,10 @@ package com.github.kraudy.compiler;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -126,6 +130,63 @@ public class CallRunnerTest {
     assertEquals(new java.io.File("dir", ".._.._victim.txt"), DataFetch.destination("/tmp/..\\..\\victim.txt", "dir/"));
     assertEquals(new java.io.File("fetched.file"), DataFetch.destination("/tmp/..", null));
     assertEquals(new java.io.File("C_x.txt"), DataFetch.destination("/tmp/C:x.txt", null));
+  }
+
+  @Test
+  void fetchMayBeRepeatedInOrder() throws Exception {
+    String output = dryRun("--fetch", "/home/USER/a.txt", "--fetch", "/home/USER/b.txt", "-o", "dir/", "--dry-run");
+    int first = output.indexOf("/home/USER/a.txt");
+    int second = output.indexOf("/home/USER/b.txt");
+    assertTrue(first >= 0, output);
+    assertTrue(second > first, output);
+    assertTrue(output.contains("dir/a.txt"), output);
+    assertTrue(output.contains("dir/b.txt"), output);
+  }
+
+  @Test
+  void fetchManyNeedsOutputFolder() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] {"--fetch", "/home/USER/a.txt", "--fetch", "/home/USER/b.txt"}).validate());
+  }
+
+  @Test
+  void fetchManyNeedsOutputDirectoryNotFile() throws Exception {
+    File file = File.createTempFile("mc-fetch-output", ".txt");
+    try {
+      assertThrows(IllegalArgumentException.class,
+          () -> new ArgParser(new String[] {"--fetch", "/home/USER/a.txt", "--fetch", "/home/USER/b.txt",
+              "-o", file.getAbsolutePath()}).validate());
+      assertThrows(IllegalArgumentException.class,
+          () -> new ArgParser(new String[] {"--fetch", "/home/USER/a.txt", "--fetch", "/home/USER/b.txt",
+              "-o", file.getAbsolutePath() + File.separator}).validate());
+    } finally {
+      file.delete();
+    }
+  }
+
+  @Test
+  void fetchManyRejectsDuplicateBaseNames() {
+    assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] {"--fetch", "/one/probe.txt", "--fetch", "/two/probe.txt", "-o", "dir/"}).validate());
+  }
+
+  @Test
+  void fetchKeepsEveryValueInOrder() {
+    ArgParser parser = new ArgParser(new String[] {"--fetch", "/home/USER/a.txt", "--fetch", "/home/USER/b.txt", "-o", "dir/"});
+    parser.validate();
+    assertEquals(java.util.Arrays.asList("/home/USER/a.txt", "/home/USER/b.txt"), parser.getFetches());
+  }
+
+  private static String dryRun(String... args) throws Exception {
+    PrintStream original = System.out;
+    ByteArrayOutputStream captured = new ByteArrayOutputStream();
+    try {
+      System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8.name()));
+      assertEquals(0, MasterCompiler.run(args));
+    } finally {
+      System.setOut(original);
+    }
+    return new String(captured.toByteArray(), StandardCharsets.UTF_8);
   }
 
   @Test

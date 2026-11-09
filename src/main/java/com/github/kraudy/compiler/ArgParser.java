@@ -1,6 +1,7 @@
 package com.github.kraudy.compiler;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -75,7 +76,7 @@ public class ArgParser {
     CALL_PARAMS   (null, "call-params",  Kind.VALUE, "With --call: the program's parameters as a JSON array, e.g. '[{\"type\":\"char\",\"length\":10,\"value\":\"A\"}]'"),
     INQMSGRPY     (null, "inqmsgry",     Kind.FLAG,  "With --call: answer the program's inquiry messages with their default reply (CHGJOB INQMSGRPY(*DFT)) instead of waiting for a reply forever"),
     SQL           (null, "sql",          Kind.VALUE, "Run one read-only SELECT / VALUES / WITH query and print the rows (tab-separated; --json <file> writes them as JSON; --max-rows, --libl, --curlib)"),
-    FETCH         (null, "fetch",        Kind.VALUE, "Copy an IFS stream file to this PC: /path/file on the IBM i; -o <file or folder> (default: the current folder)"),
+    FETCH         (null, "fetch",        Kind.VALUE, "Copy an IFS stream file to this PC: /path/file on the IBM i; -o <file or folder> (default: the current folder). Repeat --fetch with -o <folder> to copy several files in one run"),
     JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
 
     final String shortName;
@@ -154,7 +155,7 @@ public class ArgParser {
   private String callParams;
   private boolean inqmsgry;
   private String sql;
-  private String fetch;
+  private final List<String> fetch = new ArrayList<String>();
   private boolean srvpgmFromExports;
   private boolean strictHostKey;
   private boolean readOnly;
@@ -336,7 +337,7 @@ public class ArgParser {
       case CALL:          call = value; break;
       case CALL_PARAMS:   callParams = value; break;
       case SQL:           sql = value; break;
-      case FETCH:         fetch = value; break;
+      case FETCH:         fetch.add(value); break;
       case LIBL:
         libl = value;
         break;
@@ -405,9 +406,9 @@ public class ArgParser {
     if (inqmsgry && call == null) {
       throw new IllegalArgumentException("--inqmsgry goes with --call");
     }
-    if (sql != null || fetch != null) {
+    if (sql != null || !fetch.isEmpty()) {
       String which = sql != null ? "--sql" : "--fetch";
-      if (sql != null && fetch != null) throw new IllegalArgumentException("Use either --sql or --fetch");
+      if (sql != null && !fetch.isEmpty()) throw new IllegalArgumentException("Use either --sql or --fetch");
       if (mcp || setupVscode || installSkills || version || importSelection != null || yamlFile != null || scanRoot != null
           || tobiRoot != null || push != null || generateOnly || diff || since != null || target != null || clean || keepGoing
           || baseFile != null || srvpgmFromExports || ssh || hostServers || noMigrate || remote || call != null
@@ -420,7 +421,19 @@ public class ArgParser {
         SqlTools.checkReadOnly(sql);  // only a query, checked now, not after the connection
         if (libl != null) CallRunner.libraries(libl);
       } else {
-        DataFetch.check(fetch);
+        for (String path : fetch) DataFetch.check(path);
+        if (fetch.size() > 1) {
+          if (outputFile == null) throw new IllegalArgumentException("--fetch with more than one path needs -o <folder>: " + fetch);
+          File folder = new File(outputFile);
+          boolean namedFolder = outputFile.endsWith("/") || outputFile.endsWith(File.separator);
+          if (!folder.isDirectory() && (!namedFolder || folder.exists())) throw new IllegalArgumentException("--fetch with more than one path needs -o <folder>, not a file: " + outputFile);
+          List<String> names = new ArrayList<String>();
+          for (String path : fetch) {
+            String name = DataFetch.fileName(path);
+            if (names.contains(name)) throw new IllegalArgumentException("--fetch paths would overwrite each other in " + outputFile + ": " + name);
+            names.add(name);
+          }
+        }
       }
       return;
     }
@@ -683,9 +696,9 @@ public class ArgParser {
     return sql;
   }
 
-  /** {@code --fetch}: the IFS file, or null. */
-  public String getFetch() {
-    return fetch;
+  /** {@code --fetch}: the IFS files in the order they were given (empty when not used). */
+  public List<String> getFetches() {
+    return Collections.unmodifiableList(fetch);
   }
 
   /** {@code --srvpgm-from-exports}. */

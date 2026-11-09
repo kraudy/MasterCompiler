@@ -1231,14 +1231,16 @@ public class MasterCompiler{
       }
 
       /* One read-only query, or one IFS file down to this PC: what a probe wrote instead of the spool */
-      if (parser.getSql() != null || parser.getFetch() != null) {
+      if (parser.getSql() != null || !parser.getFetches().isEmpty()) {
         if (parser.isDryRun() && parser.getSql() != null) {
           System.out.println("Dry run: would run read-only: " + SqlTools.checkReadOnly(parser.getSql()) + "; nothing was run.");
           return exitCode;
         }
         if (parser.isDryRun()) {
-          System.out.println("Dry run: would copy " + parser.getFetch() + " to "
-              + DataFetch.destination(parser.getFetch(), parser.getOutputFile()) + "; nothing was fetched.");
+          for (String path : parser.getFetches()) {
+            System.out.println("Dry run: would copy " + path + " to "
+                + DataFetch.destination(path, parser.getOutputFile()) + "; nothing was fetched.");
+          }
           return exitCode;
         }
         quietLogs(parser.isVerbose());
