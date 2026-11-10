@@ -13,17 +13,17 @@ Instead of hand-ordering targets in a YAML file, point MasterCompiler at a **sou
 
 ```bash
 # Generate ordered YAML only (no compile)
-java -jar MasterCompiler-1.0-SNAPSHOT.jar \
+java -jar MasterCompiler.jar \
   --scan /home/USER/sources \
   --generate-only -o build.yaml -v
 
 # Scan and compile immediately (optional -o also writes the YAML)
-java -jar MasterCompiler-1.0-SNAPSHOT.jar \
+java -jar MasterCompiler.jar \
   --scan /home/USER/sources \
   --lib curlib -xv
 
 # Classic path still works
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f existing.yaml -xv
+java -jar MasterCompiler.jar -f existing.yaml -xv
 ```
 
 | Option | Meaning |

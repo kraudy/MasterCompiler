@@ -1,8 +1,8 @@
 # Cli
 
-Master compiler follows unix philosophi in various parts of its design. One of them is the CLI param validation.
+Master compiler follows unix philosophy in various parts of its design. One of them is the CLI param validation.
 
-* All params are validated at the start, so you don't have to insist later on interactive promopts. 
+* All params are validated at the start, so you don't have to insist later on interactive prompts.
 * Params format follow the short, long syntax
 * Short params can be combined
 
@@ -18,8 +18,8 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 * Default library for scanned targets `{--lib}` (default: `curlib`)
 * Generate or rewrite YAML only, no compile `{--generate-only}` (requires `-o`, and either `--scan` or `-f`)
 * Debug and verbose log output `{-x, -v, -xv}`
-* Dry run execution allows to run the compiler without executing any commands, it follows the flow of exceution and generates the command's strings. `{--dry-run}`
-* No migrate flag ommits souce files migration `{--no-migrate}`
+* Dry run execution allows to run the compiler without executing any commands, it follows the flow of execution and generates the command's strings. `{--dry-run}`
+* No migrate flag omits source files migration `{--no-migrate}`
 * Incremental build `{--diff}`: compile targets whose source is newer than the object (or whose object is missing), plus every dependent. Source time is the newest of the stream file and any `/copy`/`/include` attachments (`File` / `IFSFile`). Does not `touch` sources.
 * Clean deletes created objects after the build `{ -c, --clean }`
 * Keep going `{-k, --keep-going}`: after a failed target, skip only its dependents (`blocked` in the report) and build everything else, so one run reports every broken target. Exit code is still `1` when anything failed. MCP `build` keeps going by default.
@@ -54,41 +54,41 @@ Master compiler follows unix philosophi in various parts of its design. One of t
 
 Simplest call, just the file path
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml
 # Same as above
-java -jar MasterCompiler-1.0-SNAPSHOT.jar --file /home/user/mylib.hello.pgm.rpgle.yaml
+java -jar MasterCompiler.jar --file /home/user/mylib.hello.pgm.rpgle.yaml
 ```
 
 Add debug flag
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml -x
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml -x
 # Same as above
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -x -f /home/user/mylib.hello.pgm.rpgle.yaml
+java -jar MasterCompiler.jar -x -f /home/user/mylib.hello.pgm.rpgle.yaml
 ```
 
 Add verbose flag
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml -v
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml -v
 ```
 
 Add debug verbose flag
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml -xv
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml -xv
 ```
 
 Add dry run
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --dry-run
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --dry-run
 ```
 
 Add diff build
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --diff
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --diff
 ```
 
 Add no migrate
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --no-migrate
+java -jar MasterCompiler.jar -f /home/user/mylib.hello.pgm.rpgle.yaml --no-migrate
 ```
 
 ## Scan mode (auto YAML)
@@ -96,25 +96,25 @@ java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/user/mylib.hello.pgm.rpgle.ya
 Generate a topo-sorted spec from a source tree without writing targets by hand:
 
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --generate-only -o build.yaml -v
+java -jar MasterCompiler.jar --scan /home/user/sources --generate-only -o build.yaml -v
 ```
 
 Rewrite an existing spec (refresh paste-ready `#` comments after you edit `params:`):
 
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f build.yaml --generate-only -o build.yaml
+java -jar MasterCompiler.jar -f build.yaml --generate-only -o build.yaml
 ```
 
 Scan and compile in one step:
 
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --lib curlib -xv
+java -jar MasterCompiler.jar --scan /home/user/sources --lib curlib -xv
 ```
 
 Optional explicit base overlay (otherwise uses `<scan>/mc-base.yaml` when present):
 
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar \
+java -jar MasterCompiler.jar \
   --scan /home/user/sources --base /home/user/sources/mc-base.yaml -o build.yaml -xv
 ```
 

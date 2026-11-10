@@ -48,6 +48,8 @@ Java 8.
 
 ```bash
 curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar
+curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar.sha256
+sha256sum -c MasterCompiler.jar.sha256   # MasterCompiler.jar: OK
 ```
 
 Runs anywhere Java 8+ is installed, including PASE on the IBM i. Every release is on the [releases page](https://github.com/kraudy/MasterCompiler/releases).
@@ -55,7 +57,9 @@ Runs anywhere Java 8+ is installed, including PASE on the IBM i. Every release i
 ### Build 
 
 * `git clone git@github.com:kraudy/MasterCompiler.git`
-* `./mvnw clean package` (Maven wrapper: only Java is needed, Maven downloads on first run).
+* `./mvnw clean package` (Maven wrapper: only a JDK 11 or newer is needed for the build and its tests, Maven downloads on
+  first run; the jar it builds runs on Java 8+). The jar is
+  `target/MasterCompiler-1.0-SNAPSHOT.jar`; the examples call it `MasterCompiler.jar`, the release's name.
 
 ### Test
 
@@ -80,11 +84,11 @@ Then, run the integration test to watch a thing of beauty. Note that this is the
 
 ## Object Compilation
 
-To compile an object, it must be defined as a **target key** of the form: **mylib.hello.pgm.rgple**.
+To compile an object, it must be defined as a **target key** of the form: **mylib.hello.pgm.rpgle**.
 
 | Target key | Library | Object name | Object type | Source type |
 |----------|----------|----------|----------|----------|
-| **mylib.hello.pgm.rgple** | **MYLIB** | **HELLO** | `PGM` | `RPGLE` |
+| **mylib.hello.pgm.rpgle** | **MYLIB** | **HELLO** | `PGM` | `RPGLE` |
 
 
 The **ObjectType** and **SourceType** part of the **Target key** defines the compilation command to be executed.
@@ -119,9 +123,9 @@ before:       # optional | Global pre-compilation system commands
   CrtBndDir:              # Lets create a bind dir
     BNDDIR: BNDHELLO
 
-targets:      # Required | Ordered sequence of compilation targets. At leas one target is required in the spec
+targets:      # Required | Ordered sequence of compilation targets. At least one target is required in the spec
 
-  # Firt create the modules. We can specify curlib as the target library. Convenient.
+  # First create the modules. We can specify curlib as the target library. Convenient.
   "curlib.modhello1.module.rpgle": 
     params:                # Per-target compilation command params
       SRCSTMF: /home/sources/hello2.modhello1.module.rpgle
@@ -139,7 +143,7 @@ targets:      # Required | Ordered sequence of compilation targets. At leas one 
         - modhello2
 
   # Ile rpgle with binding dir
-  curlib.hello.pgm.rgple:  
+  curlib.hello.pgm.rpgle:
 
     before:               # optional | Per-target pre-compilation system commands
       AddBndDirE:              # Add entry to bnd dir before target compiling
@@ -168,7 +172,7 @@ after:        # optional | Global post-compilation system commands
 After defining the spec, just call **MasterCompiler** with unix style parameters
 
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
+java -jar MasterCompiler.jar -xv -f /home/user/clean_spec.yaml
 ```
 
 # Cli 
@@ -179,11 +183,11 @@ Provide either a YAML spec `{-f, --file}` **or** a source root to scan `{--scan}
 
 ```bash
 # Classic: hand-written YAML
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/user/clean_spec.yaml
+java -jar MasterCompiler.jar -xv -f /home/user/clean_spec.yaml
 
 # Scan sources → dependency order → generate YAML (and optionally build)
-java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources --generate-only -o build.yaml
-java -jar MasterCompiler-1.0-SNAPSHOT.jar --scan /home/user/sources -xv
+java -jar MasterCompiler.jar --scan /home/user/sources --generate-only -o build.yaml
+java -jar MasterCompiler.jar --scan /home/user/sources -xv
 ```
 
 A project folder works too (`--project <dir>` uses its `build.yaml`, a TOBi `Rules.mk` or a scan; `--spec <file>` picks
@@ -215,7 +219,7 @@ each stop. See the [Cli doc](./docs/Cli.md).
 
 ## Parameter resolution and validation
 
-Params are enum based, this allows for automatic param conflic resolution and validation in O(1) time along with instant validation at deserialization.
+Params are enum based, this allows for automatic param conflict resolution and validation in O(1) time along with instant validation at deserialization.
 
 Scan writes the **resolved** `params:` map (defaults + inspection + overlay), not just `SRCSTMF`, plus a paste-ready CRT* comment above each target. You can also paste a full CRT* command as `command:` (Docker-style array or CL string); MC parses it back into params. `params:` still wins.
 
@@ -237,7 +241,7 @@ If available, metadata is extracted from compiled objects to infer compilation p
 
 ## Traceability
 
-Fully transparent and traceble flow of execution and changes.
+Fully transparent and traceable flow of execution and changes.
 
 [Traceability docs](./docs/Traceability.md)
 

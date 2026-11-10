@@ -93,6 +93,12 @@ If your network allows the host servers (ports 449, 8470–8476, the ones ACS us
 | `find_source` | Where programs, service programs and files the project only uses were compiled from, with their copybooks. |
 | `import_source` | Copy those sources into `.mc/sources/` to read them (or into the project, to change them). |
 
+These are the everyday ones; the server has more (25 in all, listed in the tools table of the
+[mastercompiler skill](../skills/mastercompiler/SKILL.md)). Besides `build` and `clean`, some change things on the IBM i:
+`run_command` (a CL command), `upload_file` (a file to the IFS), `copy_rows` (table rows), `call_program` /
+`debug_program` (run a program), `screen_open` / `screen_send` (a 5250 session) and `cancel` (stop a build). Those
+with a preview act only after you agree.
+
 For SQL queries (table columns, data, catalog), Copilot uses MC's read-only `sql` tool. Not the Db2 for IBM i
 extension's tools: they sign on separately, outside MC's sign-on guard, and a rejected password there also counts
 toward disabling the profile.

@@ -27,10 +27,10 @@ success: {}   # optional | Global on success system commands
 
 failure: {}   # optional | Global on failure system commands
 
-targets:      # Required | Ordered sequence of compilation targets. At leas one target is required in the spec
+targets:      # Required | Ordered sequence of compilation targets. At least one target is required in the spec
 
   # Ile rpgle key
-  curlib.hello.pgm.rgple:  
+  curlib.hello.pgm.rpgle:
 
     before: {}            # optional | Per-target pre-compilation system commands
 
@@ -44,7 +44,7 @@ targets:      # Required | Ordered sequence of compilation targets. At leas one 
 
     failure: {}           # optional | Per-target on failure system commands
 
-  curlib.hello.module.rgple:  {} # A second compilation target
+  curlib.hello.module.rpgle:  {} # A second compilation target
 
 ```
 
@@ -63,7 +63,7 @@ targets:
 
 Call **MC**. Note how we are using `{-xv | -x: debug, -v: verbose}` flags to get the full output. And `{-f, --file: Spec file}` for the spec path.
 ```bash
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -xv -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
+java -jar MasterCompiler.jar -xv -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
 ```
 
 Full log
@@ -192,7 +192,7 @@ targets:
 Save the yaml file and call the compiler with the yaml path as parameter. Here, we omitted the `-xv` flag to get a reduced log.
 
 ```
-java -jar MasterCompiler-1.0-SNAPSHOT.jar -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
+java -jar MasterCompiler.jar -f /home/ROBKRAUDY/yaml/robkraudy1.hello.pgm.rpgle.yaml
 ```
 
 Log

@@ -13,7 +13,10 @@ description: >-
 
 You may be reading this because the user pointed you at https://github.com/kraudy/MasterCompiler and asked to install
 or try it. Goal: the `mastercompiler` MCP server is registered in your client, so you can call `plan`, `build`,
-`impact`, `find_source`, `import_source`, `joblog` and `sql`. MC runs on this machine (the MCP server) and, over SSH,
+`impact`, `find_source`, `import_source`, `joblog`, `sql` and the rest. Some tools change things on the IBM i: `build`
+compiles into the current library; `clean`, `run_command`, `upload_file`, `copy_rows`, `call_program`,
+`debug_program`, `screen_open` and `cancel` show a preview and act only with `confirm: true`, after the user agreed;
+`screen_send` types into an open 5250 session. The full list is the tools table of the `mastercompiler` skill. MC runs on this machine (the MCP server) and, over SSH,
 on the IBM i: it uploads the repository's sources to `<home>/mc/<repository>`, compiles there and returns errors with
 file and line. The local repository is the one you read and edit.
 
@@ -53,8 +56,15 @@ arrives through a new lookup; replacing the file is how MC is updated):
 mkdir -p ~/tools
 tag=$(curl -fsSL https://api.github.com/repos/kraudy/MasterCompiler/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
 curl -fL -o ~/tools/MasterCompiler.jar "https://github.com/kraudy/MasterCompiler/releases/download/$tag/MasterCompiler.jar"
-java -jar ~/tools/MasterCompiler.jar --version      # must print: MasterCompiler <tag>
+curl -fL -o ~/tools/MasterCompiler.jar.sha256 "https://github.com/kraudy/MasterCompiler/releases/download/$tag/MasterCompiler.jar.sha256"
+(cd ~/tools && sha256sum -c MasterCompiler.jar.sha256) &&   # MasterCompiler.jar: OK (macOS: shasum -a 256 -c)
+  java -jar ~/tools/MasterCompiler.jar --version          # must print: MasterCompiler <tag>
 ```
+
+Releases before the checksum was published have no `.sha256` (the second download fails); only then skip that check.
+If the check prints `FAILED`, stop: do not run the jar, and tell the user. Once the connection is set
+(step 3), `--doctor` is the real check: it signs on and prints what MC uses. It returns 1 while the connection is
+still missing, so run it after step 3, not before.
 
 On 64-bit Windows the release also has `MasterCompiler-windows-x64.zip` with its own Java (see the
 `mastercompiler-vscode` skill, step 2, for the PowerShell steps; the rest of this guide is the same there).
@@ -106,9 +116,18 @@ env = { IBMI_HOSTNAME = "<host>", IBMI_USERNAME = "<user>", IBMI_PASSWORD_COMMAN
 **Grok Build** (`~/.grok/config.toml`, or `.grok/config.toml`; `grok mcp add mastercompiler -- java -jar ...` adds it):
 the same TOML table as Codex's `[mcp_servers.mastercompiler]` (`command`, `args`, `env`).
 
-**OpenCode** (`~/.config/opencode/opencode.json` or the project's `opencode.json`; this is the long-standing flat
-`mcp.<name>` shape, still accepted by current versions, whose newer native syntax nests under `mcp.servers`. Look at an
-existing `mcp` entry in the user's file first and follow it):
+**OpenCode** (`~/.config/opencode/opencode.json` or the project's `opencode.json`). Current versions nest servers
+under `mcp.servers`:
+
+```json
+{ "mcp": { "servers": { "mastercompiler": {
+    "type": "local",
+    "command": ["java", "-jar", "<jar>", "--mcp", "--ssh", "--project", "<abs repo>"],
+    "environment": { "IBMI_HOSTNAME": "<host>", "IBMI_USERNAME": "<user>", "IBMI_PASSWORD_COMMAND": "secret-tool lookup service ibmi" } } } } }
+```
+
+Older files use the flat `mcp.<name>` shape, still accepted. Look at an existing `mcp` entry in the user's file first
+and follow it:
 
 ```json
 { "mcp": { "mastercompiler": {

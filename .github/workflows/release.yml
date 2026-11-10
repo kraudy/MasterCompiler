@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'   # builds Java 8 bytecode (maven.compiler.target 1.8)
+          java-version: '17'   # builds against the Java 8 API (release 8 in pom.xml)
           cache: maven
 
       - name: Build and run unit tests
@@ -33,6 +33,7 @@ jobs:
         run: |
           cp target/MasterCompiler-1.0-SNAPSHOT.jar MasterCompiler.jar   # stable name for releases/latest/download
           cp target/MasterCompiler-1.0-SNAPSHOT.jar .                    # name earlier releases used
+          sha256sum MasterCompiler.jar > MasterCompiler.jar.sha256       # check: sha256sum -c MasterCompiler.jar.sha256
 
       - name: Keep the jar for the Windows package
         uses: actions/upload-artifact@v4
@@ -45,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            MasterCompiler.jar MasterCompiler-1.0-SNAPSHOT.jar \
+            MasterCompiler.jar MasterCompiler.jar.sha256 MasterCompiler-1.0-SNAPSHOT.jar \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
 

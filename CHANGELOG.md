@@ -3,6 +3,22 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## Unreleased
+
+- Java 8 works again for `--scan`, `--from-tobi`, `--diff` / `--since` and the MCP `build` / `impact` tools: since
+  v0.1.1 they stopped with `NoSuchMethodError: List.of()` on Java 8 (the Java of PASE on many IBM i). The build now
+  compiles against the Java 8 API (`release 8`), so a newer API fails the build instead of a user's run.
+- No connection configured (no `--code4i`, no `IBMI_HOSTNAME` / `IBMI_USERNAME`): one line saying what to set,
+  instead of a `NullPointerException: systemName` with its stack trace (and without asking for a password first).
+  An unexpected error that reaches the command line's last catch prints one line too; `-x` adds its stack trace
+  (build, MCP and compile errors keep their own output).
+- MCP: the password and credential messages also tell terminal clients (Claude Code, Codex, Grok, OpenCode) what to
+  set (`IBMI_PASSWORD_COMMAND` / `IBMI_PASSWORD_FILE`), not only VS Code's prompt.
+- Releases publish `MasterCompiler.jar.sha256`: `sha256sum -c MasterCompiler.jar.sha256` next to the jar.
+- Docs: the setup skill shows OpenCode's `mcp.servers` form, checks the jar's checksum and uses `--doctor` once the
+  connection is set; Copilot.md names the tools that change things on the IBM i; examples call the jar
+  `MasterCompiler.jar`; typo fixes.
+
 ## v0.3.27
 
 - `--remote`: a `--project` folder that git ignores (or that is only untracked inside an enclosing
