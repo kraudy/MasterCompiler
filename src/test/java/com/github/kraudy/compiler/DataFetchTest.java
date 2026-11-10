@@ -23,7 +23,7 @@ public class DataFetchTest {
     assertTrue(line.contains("37448 bytes"), line);
     assertTrue(line.contains("modified 2026-11-03 03:53:33"), line);
     assertTrue(line.contains("CCSID 37"), line);
-    assertTrue(line.endsWith("to .work/task6/dump1.txt"), line);
+    assertTrue(line.endsWith("to " + new File(".work/task6/dump1.txt").getPath()), line);
   }
 
   @Test

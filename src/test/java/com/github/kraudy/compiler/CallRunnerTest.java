@@ -139,8 +139,8 @@ public class CallRunnerTest {
     int second = output.indexOf("/home/USER/b.txt");
     assertTrue(first >= 0, output);
     assertTrue(second > first, output);
-    assertTrue(output.contains("dir/a.txt"), output);
-    assertTrue(output.contains("dir/b.txt"), output);
+    assertTrue(output.contains(new File("dir", "a.txt").getPath()), output);   // \ on Windows
+    assertTrue(output.contains(new File("dir", "b.txt").getPath()), output);
   }
 
   @Test
