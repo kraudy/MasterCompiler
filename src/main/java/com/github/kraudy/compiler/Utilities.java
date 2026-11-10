@@ -686,11 +686,4 @@ public class Utilities {
 
     return true;
   }
-
-  public static String validParamList() {
-    return String.join(", ", 
-        java.util.Arrays.stream(ParamCmd.values())
-            .map(Enum::name)
-            .toList());
-  }
 }

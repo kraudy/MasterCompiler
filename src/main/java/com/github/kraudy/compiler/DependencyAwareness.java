@@ -6,6 +6,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -1060,7 +1061,7 @@ public class DependencyAwareness {
     // Print logs in original order
     for (Map.Entry<TargetKey, BuildSpec.TargetSpec> entry : globalSpec.targets.entrySet()) {
       TargetKey target = entry.getKey();
-      List<String> logs = targetLogs.getOrDefault(target, List.of());
+      List<String> logs = targetLogs.getOrDefault(target, Collections.emptyList());
       if (logs.size() == 0) continue;
 
       for (String log : logs) {
