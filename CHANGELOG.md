@@ -3,7 +3,7 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
-## Unreleased
+## v0.3.29
 
 - One jar name: the build writes `target/MasterCompiler.jar` and releases publish only `MasterCompiler.jar` (plus
   its `.sha256` and the Windows zip). `MasterCompiler-1.0-SNAPSHOT.jar` is no longer attached to new releases: a
