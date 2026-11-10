@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write       # artifact attestation
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -29,11 +31,15 @@ jobs:
       - name: Build and run unit tests
         run: ./mvnw -B clean package -Dmc.version="$GITHUB_REF_NAME"   # --version prints the tag
 
-      - name: Name the jar
+      - name: Checksum
         run: |
-          cp target/MasterCompiler-1.0-SNAPSHOT.jar MasterCompiler.jar   # stable name for releases/latest/download
-          cp target/MasterCompiler-1.0-SNAPSHOT.jar .                    # name earlier releases used
+          cp target/MasterCompiler.jar .
           sha256sum MasterCompiler.jar > MasterCompiler.jar.sha256       # check: sha256sum -c MasterCompiler.jar.sha256
+
+      - name: Attest the jar   # check: gh attestation verify ... --signer-workflow kraudy/MasterCompiler/.github/workflows/release.yml (README)
+        uses: actions/attest@v4
+        with:
+          subject-path: MasterCompiler.jar
 
       - name: Keep the jar for the Windows package
         uses: actions/upload-artifact@v4
@@ -46,7 +52,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            MasterCompiler.jar MasterCompiler.jar.sha256 MasterCompiler-1.0-SNAPSHOT.jar \
+            MasterCompiler.jar MasterCompiler.jar.sha256 \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
 
@@ -56,6 +62,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write       # artifact attestation
+      attestations: write
 
     steps:
       - name: Set up Java
@@ -85,6 +93,11 @@ jobs:
           $mods = & MasterCompiler/runtime/bin/java.exe --list-modules
           if (-not ($mods -match 'jdk.crypto.mscapi')) { Write-Error "The runtime has no jdk.crypto.mscapi"; exit 1 }
           Compress-Archive -Path MasterCompiler -DestinationPath MasterCompiler-windows-x64.zip
+
+      - name: Attest the zip
+        uses: actions/attest@v4
+        with:
+          subject-path: MasterCompiler-windows-x64.zip
 
       - name: Add it to the release
         shell: pwsh

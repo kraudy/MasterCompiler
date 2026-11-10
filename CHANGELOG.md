@@ -3,6 +3,22 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## Unreleased
+
+- One jar name: the build writes `target/MasterCompiler.jar` and releases publish only `MasterCompiler.jar` (plus
+  its `.sha256` and the Windows zip). `MasterCompiler-1.0-SNAPSHOT.jar` is no longer attached to new releases: a
+  script that downloads it from `releases/latest/download/` must switch to `MasterCompiler.jar`.
+- Releases carry GitHub build provenance attestations for the jar and the Windows zip:
+  `gh attestation verify MasterCompiler.jar --repo kraudy/MasterCompiler --signer-workflow kraudy/MasterCompiler/.github/workflows/release.yml`.
+- `--install-skills --skills-dir <dir>` installs the skills into that folder instead of the `--agent` ones under
+  Java's `user.home` (which can differ from `$HOME`).
+- `--setup-vscode` in a subfolder of a git repository no longer says "Not a git repository yet": it looks for `.git`
+  in the parent folders too, and does not add `.mc/` to the folder's `.gitignore` when the repository's root
+  `.gitignore` already ignores `.mc/` anywhere (and no `.gitignore` on the way has a `!` negation).
+- Docs: `--help` and Cli.md say a build's `--dry-run` still signs on to the IBM i, and point to
+  `--scan <dir> --generate-only -o build.yaml` to try MC with no IBM i; the README starts with a short quick start
+  and has one "read the release, not master" note for agents instead of two.
+
 ## v0.3.28
 
 - Java 8 works again for `--scan`, `--from-tobi`, `--diff` / `--since` and the MCP `build` / `impact` tools: since

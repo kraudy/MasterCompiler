@@ -75,6 +75,7 @@
   </dependencies>
 
   <build>
+    <finalName>MasterCompiler</finalName> <!-- target/MasterCompiler.jar, the release's name -->
     <resources>
       <resource>
         <directory>src/main/resources</directory>

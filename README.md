@@ -25,12 +25,7 @@ YAML-based, sensible, open-source, modern, clean, and elegant approach to automa
 > downloading MC, connecting it to Copilot as an MCP server with the Code for IBM i connection, a demo project, and
 > what to confirm with the user before writing anything). For Claude Code, Codex, Grok or OpenCode:
 > `skills/mastercompiler-setup/SKILL.md`.
->
-> **Agents: read it at the latest release, not from `master`.** `raw.githubusercontent.com/.../master/...` can serve
-> a cached, older copy for several minutes. Get the release tag, then fetch the guide (and the demo files) at that tag,
-> which matches the jar you download:
-> 1. `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` → `tag_name` (use it as it comes; do not reuse a version written in this text)
-> 2. `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-vscode/SKILL.md`
+> Agents: read it at the latest release tag, as said at the top.
 
 ---
 
@@ -38,28 +33,55 @@ MasterCompiler (**MC**) aims to give the whole IBM i community a standard way to
 
 ---
 
-### Requirements 
+## Quick start
 
-Java 8.
+1. Download the jar and check it. Java 8 or newer runs it, on your PC or in PASE on the IBM i.
 
----
+   ```bash
+   curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar
+   curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar.sha256
+   sha256sum -c MasterCompiler.jar.sha256   # MasterCompiler.jar: OK
+   ```
 
-### Download
+2. Try it without an IBM i: in your project folder, scan the sources and write the build spec, targets in dependency
+   order.
+
+   ```bash
+   java -jar MasterCompiler.jar --scan . --generate-only -o build.yaml
+   ```
+
+3. Connect: put `IBMI_HOSTNAME` and `IBMI_USERNAME` in a `.env` in that folder (the password is asked in the terminal,
+   or comes from `--password-command` / `IBMI_PASSWORD_FILE`), or add `--code4i [--connection <name>]` to every command
+   below to reuse your Code for IBM i connection. Check it: `java -jar MasterCompiler.jar --doctor`.
+
+4. Build from your PC over SSH: `--remote` uploads MC and the project to your IBM i home folder and builds there.
+   `--dry-run` prints the commands without running them (it already signs on); without it MC compiles into the current
+   library, so give it your own development library.
+
+   ```bash
+   java -jar MasterCompiler.jar --remote --project . --curlib MYDEVLIB --dry-run
+   java -jar MasterCompiler.jar --remote --project . --curlib MYDEVLIB
+   ```
+
+   Already in PASE on the IBM i, with the sources in the IFS: `java -jar MasterCompiler.jar -f build.yaml --curlib MYDEVLIB`.
+
+Every release is on the [releases page](https://github.com/kraudy/MasterCompiler/releases); the rest of this page
+explains the spec, the CLI and the agent setup. Each release also has a
+[build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations)
+(from v0.3.29). This checks the jar was built by this repository's release workflow:
 
 ```bash
-curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar
-curl -LO https://github.com/kraudy/MasterCompiler/releases/latest/download/MasterCompiler.jar.sha256
-sha256sum -c MasterCompiler.jar.sha256   # MasterCompiler.jar: OK
+gh attestation verify MasterCompiler.jar --repo kraudy/MasterCompiler --signer-workflow kraudy/MasterCompiler/.github/workflows/release.yml
 ```
 
-Runs anywhere Java 8+ is installed, including PASE on the IBM i. Every release is on the [releases page](https://github.com/kraudy/MasterCompiler/releases).
+---
 
 ### Build 
 
 * `git clone git@github.com:kraudy/MasterCompiler.git`
 * `./mvnw clean package` (Maven wrapper: only a JDK 11 or newer is needed for the build and its tests, Maven downloads on
   first run; the jar it builds runs on Java 8+). The jar is
-  `target/MasterCompiler-1.0-SNAPSHOT.jar`; the examples call it `MasterCompiler.jar`, the release's name.
+  `target/MasterCompiler.jar`, the same name as the release's.
 
 ### Test
 
