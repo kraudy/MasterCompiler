@@ -3,7 +3,7 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
-## Unreleased
+## v0.3.28
 
 - Java 8 works again for `--scan`, `--from-tobi`, `--diff` / `--since` and the MCP `build` / `impact` tools: since
   v0.1.1 they stopped with `NoSuchMethodError: List.of()` on Java 8 (the Java of PASE on many IBM i). The build now
