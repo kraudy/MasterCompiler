@@ -1824,6 +1824,15 @@ public class McpServer {
   }
 
   private BuildSpec loadSpec() throws Exception {
+    BuildSpec spec = readSpec();
+    /* --mcp --ssh runs this on the IBM i: a spec (or mc-base.yaml) written on the PC names the PC's project folder in CHGCURDIR */
+    if (parser.getLocalProject() != null && spec.getBaseDirectory() != null) {
+      MasterCompiler.moveCurDir(spec, parser.getLocalProject(), spec.getBaseDirectory());
+    }
+    return spec;
+  }
+
+  private BuildSpec readSpec() throws Exception {
     if (parser.hasTobi()) {
       return new TobiConverter(parser.isVerbose()).convert(parser.getTobiRoot(), parser.getLibrary());
     }

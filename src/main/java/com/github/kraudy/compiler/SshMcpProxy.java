@@ -54,8 +54,28 @@ public class SshMcpProxy {
   private File project;
   private volatile String remoteDir;
   private volatile String host;  // set once connected (the home directory may come from the IBM i)
-  private volatile ChannelExec remote;
-  private final CompletableFuture<OutputStream> remoteReady = new CompletableFuture<OutputStream>();
+
+  /*
+   * One SSH session running MC on the IBM i. When it ends (the SSH connection or MC there stops), the calls it had
+   * not answered get an error and the next call that needs the IBM i starts a new one: the server keeps running.
+   */
+  private static final class Session {
+    final CompletableFuture<OutputStream> ready = new CompletableFuture<OutputStream>();
+    final Map<String, String> inFlight = new java.util.concurrent.ConcurrentHashMap<String, String>();  // id -> request sent, not answered yet
+    volatile SshTarget ssh;
+    volatile ChannelExec remote;
+    volatile String ending;  // why it ends: set first, so no call is written to it any more
+    volatile String lost;    // the same, set once its cleanup is done: only then may a new session start
+
+    boolean usable() {
+      return ready.isDone() && !ready.isCompletedExceptionally() && ending == null;
+    }
+  }
+
+  private volatile Session session = new Session();
+  private Code4iConfig code4i;
+  private final String token = "mcp-" + randomHex(8);  // this server's MC on the IBM i: its pid file and -Dmc.session
+  private volatile boolean startedOnce;
   private final ExecutorService calls = Executors.newSingleThreadExecutor(r -> {
     Thread t = new Thread(r, "mc-ssh-calls");
     t.setDaemon(true);
@@ -80,7 +100,7 @@ public class SshMcpProxy {
     System.setOut(System.err);  // stdout is the protocol channel
     MasterCompiler.quietLogs(parser.isVerbose());
 
-    Code4iConfig code4i = MasterCompiler.code4i(parser);
+    code4i = MasterCompiler.code4i(parser);
     configure(code4i);
     router = new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
     SignOnGuard.known(buildTarget);
@@ -89,14 +109,8 @@ public class SshMcpProxy {
      * initialize and tools/list are answered here right away; connecting, the first jar upload and the
      * first sync run meanwhile, so a slow link does not hit VS Code's start timeout. Tool calls wait for them.
      */
-    Thread setup = new Thread(() -> {
-      try {
-        remoteReady.complete(startRemote(code4i));
-      } catch (Throwable e) {
-        logger.error("Could not start MasterCompiler on " + host, e);
-        remoteReady.completeExceptionally(e);
-      }
-    }, "mc-ssh-setup");
+    Session first = session;
+    Thread setup = new Thread(() -> start(first), "mc-ssh-setup");
     setup.setDaemon(true);
     setup.start();
 
@@ -122,7 +136,7 @@ public class SshMcpProxy {
         /* status before MC runs on the IBM i: answered here, with the stage it is at */
         if (result == null && "tools/call".equals(request.path("method").asText(""))
             && "status".equals(request.path("params").path("name").asText(""))
-            && (!remoteReady.isDone() || remoteReady.isCompletedExceptionally())) {
+            && !session.usable()) {
           sendResult(id, statusHere());
           continue;
         }
@@ -137,8 +151,11 @@ public class SshMcpProxy {
         String tool = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
         /* build_status, whats_running, cancel: straight to the IBM i, never behind a sync or another call */
         if (McpServer.NEVER_QUEUED.contains(tool)) {
-          if (!remoteReady.isDone() || remoteReady.isCompletedExceptionally()) {
-            sendToolError(line, "MasterCompiler is not running on the IBM i yet (stage " + stage + "): no build runs");
+          Session s = session;
+          if (!s.usable()) {
+            sendToolError(line, "MasterCompiler is not running on the IBM i (stage " + stage + "): no build to follow or cancel "
+                + "from here. The next call that needs the IBM i (plan, build, ...) connects again, and first stops the MC "
+                + "this server left running there.");
             continue;
           }
           if (tool.equals("cancel") && queuedBuilds.get() > 0 && remoteBuild == null) {
@@ -154,11 +171,7 @@ public class SshMcpProxy {
             continue;
           }
           if (!tool.equals("whats_running")) buildCalls.add(id.toString());
-          try {
-            writeRemote(remoteReady.get(), line);
-          } catch (Exception e) {
-            sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
-          }
+          forwardTo(s, line);
           continue;
         }
         /* 5250 tools on a thread of their own: one waiting for the user (a PASSCODE) does not hold up the rest */
@@ -175,8 +188,10 @@ public class SshMcpProxy {
         calls.execute(() -> forward(call));  // one at a time, in order
       }
     } finally {
-      closing = true;
-      if (remote != null) remote.disconnect();
+      closing = true;  // no new session from here on
+      calls.shutdownNow();
+      screenCalls.shutdownNow();
+      close(session);
       if (ssh != null) ssh.close();
       router.close();
       ScreenTools.closeAll();
@@ -220,6 +235,13 @@ public class SshMcpProxy {
           + SshTarget.quote(home + "/mc") + " " + SshTarget.quote(home + "/mc/.mc"));
       remoteDir = ownDirectory(home);
     }
+    if (startedOnce) {
+      stopEarlier();
+    } else {
+      /* pid files of MC servers that ended (each start writes one): only a pid whose process is gone; an empty or unreadable one stays (being written) */
+      ssh.execQuiet("for f in " + SshTarget.quote(remoteHome + "/mc/.mc") + "/mcp-*.pid; do [ -f \"$f\" ] || continue; "
+          + "p=$(cat \"$f\" 2>/dev/null); [ -n \"$p\" ] && ! kill -0 \"$p\" 2>/dev/null && rm -f \"$f\"; done");
+    }
 
     stage("2/5 checking MasterCompiler on the IBM i");
     String jar = ensureRemoteJar(ssh, home);
@@ -251,24 +273,94 @@ public class SshMcpProxy {
     return dir;
   }
 
+  /* Starts session s; a failed start leaves nothing open and the next call tries again */
+  private void start(Session s) {
+    try {
+      s.ready.complete(startRemote(s));
+    } catch (Throwable e) {
+      logger.error("Could not start MasterCompiler on " + host, e);
+      close(s);
+      if (ssh != null) ssh.close();  // signed on before the failure (the last session's is closed already)
+      s.ready.completeExceptionally(e);  // only now may the next call start another session
+    }
+  }
+
+  /*
+   * The running session, or a new one when the last one ended or did not start. Only the calls thread starts one,
+   * so a start-up never overlaps a sync; status and the other helpers only look at the current session.
+   */
+  private Session connected() throws Exception {
+    Session s = session;
+    while (s.ending != null && s.lost == null) Thread.sleep(20);  // still closing: never sync next to its cleanup
+    if (!closing && s.ready.isDone() && (s.ready.isCompletedExceptionally() || s.lost != null)) {
+      s = new Session();
+      session = s;
+      logger.info("Connecting to the IBM i again");
+      start(s);
+    }
+    s.ready.get();  // the first start-up may still run; throws when it failed
+    return s;
+  }
+
   /* SSH in, upload MC when this version is new, sync the sources and start MC there; returns its stdin */
-  private OutputStream startRemote(Code4iConfig code4i) throws Exception {
+  private OutputStream startRemote(Session s) throws Exception {
     long start = System.currentTimeMillis();
     String jar = prepareRemote(code4i);
+    s.ssh = ssh;
 
     stage("4/5 starting MasterCompiler on the IBM i");
-    remote = ssh.start(remoteCommand(jar, code4i));
+    ChannelExec remote = ssh.start(remoteCommand(jar, code4i));
+    s.remote = remote;
     remote.setErrStream(System.err, true);
     InputStream fromRemote = remote.getInputStream();
     OutputStream toRemote = remote.getOutputStream();
     remote.connect(30_000);
+    startedOnce = true;
     stage("5/5 ready: MasterCompiler running on " + host + " in " + remoteDir + " ("
         + (System.currentTimeMillis() - start) / 1000 + " s)");
 
-    Thread pump = new Thread(() -> relayResponses(fromRemote), "mc-ssh-responses");
+    Thread pump = new Thread(() -> relayResponses(s, fromRemote), "mc-ssh-responses");
     pump.setDaemon(true);
     pump.start();
     return toRemote;
+  }
+
+  /* Where MC started by this server writes its process id on the IBM i */
+  private String pidPath() {
+    return remoteHome + "/mc/.mc/" + token + ".pid";
+  }
+
+  /*
+   * MC from the session that was lost may still run on the IBM i (sshd has not noticed the drop, a build goes on):
+   * stopped before the sources change under it. Only this server's own MC: the pid in its file, and only while that
+   * process's command line has this server's -Dmc.session token (a reused pid is someone else's). When it cannot be
+   * stopped, nothing is synced: the start fails and the next call tries again.
+   */
+  private void stopEarlier() throws Exception {
+    String pid = SshTarget.quote(pidPath());
+    String alive = "kill -0 \"$p\" 2>/dev/null";
+    String out = ssh.exec("if [ ! -e " + pid + " ]; then echo gone; exit 0; fi; "
+        + "p=$(cat " + pid + ") || { echo unknown; exit 0; }; "
+        + "if [ -z \"$p\" ] || ! " + alive + "; then rm -f " + pid + "; echo gone; exit 0; fi; "
+        + "a=$(ps -p \"$p\" -o args=) || { echo unknown; exit 0; }; "
+        + "case \"$a\" in *-Dmc.session=" + token + "*) ;; '') echo unknown; exit 0 ;; *) rm -f " + pid + "; echo gone; exit 0 ;; esac; "
+        + "kill \"$p\"; for i in 1 2 3 4 5 6 7 8 9 10; do " + alive + " || break; sleep 1; done; "
+        + "if " + alive + "; then kill -9 \"$p\"; sleep 2; fi; "
+        + "if " + alive + "; then echo running; else rm -f " + pid + "; echo stopped; fi").trim();
+    if (out.endsWith("stopped")) {
+      logger.warn("MasterCompiler from the lost session was still running on the IBM i: stopped it before syncing. "
+          + "A compile its job had started on the IBM i finishes that command first.");
+    } else if (!out.endsWith("gone")) {
+      throw new IllegalStateException("MasterCompiler from the lost session " + (out.endsWith("running")
+          ? "still runs on the IBM i and did not stop" : "may still run on the IBM i (its process could not be checked)")
+          + ": the sources are not synced under it");
+    }
+  }
+
+  /* Closes what session s holds: its MC channel and its SSH connection */
+  private static void close(Session s) {
+    if (s.remote != null) s.remote.disconnect();
+    if (s.ssh != null) s.ssh.close();
   }
 
   /* --remote: the same start-up, then MC builds on the IBM i and its output comes back here; returns its exit code */
@@ -288,13 +380,9 @@ public class SshMcpProxy {
         args.add("--local-project");
         args.add(project.getPath());
         /* The build report comes back for the summary (and for --json); a file in MC's private folder, deleted after */
-        byte[] random = new byte[8];
-        new java.security.SecureRandom().nextBytes(random);
-        StringBuilder id = new StringBuilder();
-        for (byte b : random) id.append(String.format("%02x", b));
         String reportDir = remoteHome + "/mc/.mc";
         ssh.exec("umask 077 && mkdir -p " + SshTarget.quote(reportDir));
-        remoteReport = reportDir + "/report-" + id + ".json";
+        remoteReport = reportDir + "/report-" + randomHex(8) + ".json";
         args.add("--json");
         args.add(remoteReport);
       }
@@ -406,13 +494,14 @@ public class SshMcpProxy {
   private void forwardCall(String line) {
     line = routed(line);
     if (line == null) return;  // answered by a read-only connection
-    OutputStream toRemote;
+    Session s;
     try {
-      if (!remoteReady.isDone()) logger.info("Tool call waiting for the start-up, now at stage {}", stage);
-      toRemote = remoteReady.get();
+      if (!session.ready.isDone()) logger.info("Tool call waiting for the start-up, now at stage {}", stage);
+      s = connected();
     } catch (Exception e) {
       Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-      sendToolError(line, "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + cause.getMessage());
+      sendToolError(line, "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + cause.getMessage()
+          + ". The next call tries again.");
       return;
     }
     String forward = beforeForwarding(line);
@@ -426,20 +515,74 @@ public class SshMcpProxy {
       } catch (Exception ignored) { /* not JSON: no id kept */ }
       return;
     }
-    try {
-      writeRemote(toRemote, forward);
-    } catch (Exception e) {
-      sendToolError(line, "Lost the connection to MasterCompiler on the IBM i: " + e.getMessage());
-    }
+    forwardTo(s, forward);
   }
 
   private final Object writing = new Object();
 
-  private void writeRemote(OutputStream toRemote, String line) throws java.io.IOException {
+  private void writeRemote(Session s, String line) throws java.io.IOException {
     synchronized (writing) {
+      OutputStream toRemote = s.ready.join();
       toRemote.write((line + "\n").getBytes(StandardCharsets.UTF_8));
       toRemote.flush();
     }
+  }
+
+  /*
+   * A client call to MC on the IBM i, kept until it answers: each call gets exactly one answer, from MC there or,
+   * when the session ends first, the error from lost()
+   */
+  private void forwardTo(Session s, String line) {
+    String id;
+    try {
+      id = mapper.readTree(line).path("id").toString();
+    } catch (Exception e) {
+      sendToolError(line, "Could not read the call: " + e.getMessage());
+      return;
+    }
+    s.inFlight.put(id, line);
+    if (s.ending != null) {  // ending meanwhile: lost() may have answered its calls already
+      if (s.inFlight.remove(id) != null) sendToolError(line, lostMessage(s.ending));
+      return;
+    }
+    try {
+      writeRemote(s, line);
+    } catch (Exception e) {
+      lost(s, "the call could not be sent (" + e.getMessage() + ")");
+    }
+  }
+
+  /*
+   * Session s ended: the calls it had not answered get an error (they may have run there: the result is unknown, so
+   * nothing is sent again), MC's own questions to it fail, and its connection is closed. The next call starts a new one.
+   */
+  private void lost(Session s, String why) {
+    synchronized (s) {
+      if (s.ending != null) return;
+      s.ending = why;
+    }
+    stage("disconnected: " + why);
+    logger.error("Lost MasterCompiler on the IBM i: {}. The next call that needs the IBM i connects again.", why);
+    for (String id : new ArrayList<String>(s.inFlight.keySet())) {
+      String line = s.inFlight.remove(id);
+      if (line == null) continue;  // answered meanwhile
+      buildCalls.remove(id);
+      pendingStatus.remove(id);
+      pendingResults.remove(id);
+      pendingImports.remove(id);
+      sendToolError(line, lostMessage(why));
+    }
+    for (CompletableFuture<JsonNode> own : ownCalls.values()) own.completeExceptionally(new java.io.IOException(why));
+    remoteBuild = null;  // a build still running there is stopped before the next session syncs (stopEarlier)
+    close(s);
+    s.lost = why;  // cleaned up: the next call may start a new session
+  }
+
+  private static String lostMessage(String why) {
+    return "Lost MasterCompiler on the IBM i before it answered (" + why + "). The result is unknown: the call may have "
+        + "run there. The next call that needs the IBM i connects again and first stops the MC this server left running "
+        + "there (a compile command its job already started still finishes); check with plan or joblog before repeating "
+        + "anything that changes the IBM i.";
   }
 
   /*
@@ -465,6 +608,7 @@ public class SshMcpProxy {
 
   /* Asks the IBM i (build_status, not seen by VS Code) whether the build it ran last is still running */
   private boolean remoteBuildRunning() throws Exception {
+    Session s = session;
     String id = remoteBuild;
     if (id == null) return false;
     String own = "mc-proxy-" + ownIds.incrementAndGet();
@@ -478,8 +622,11 @@ public class SshMcpProxy {
     params.put("name", "build_status");
     params.putObject("arguments").put("buildId", id);
     try {
-      writeRemote(remoteReady.get(), mapper.writeValueAsString(request));
-      noteBuild(answer.get(60, java.util.concurrent.TimeUnit.SECONDS));
+      writeRemote(s, mapper.writeValueAsString(request));
+      JsonNode response = answer.get(60, java.util.concurrent.TimeUnit.SECONDS);
+      synchronized (s) {
+        if (s.ending == null) noteBuild(response);  // an ended session's build state is not the next one's
+      }
     } catch (java.util.concurrent.TimeoutException e) {
       return true;  // no answer: taken as still running (the caller says so)
     } finally {
@@ -492,7 +639,8 @@ public class SshMcpProxy {
   private volatile Integer screenCcsid;
 
   private Integer remoteScreenCcsid() {
-    if (screenCcsid != null || !remoteReady.isDone() || remoteReady.isCompletedExceptionally()) return screenCcsid;
+    Session s = session;  // asked of the running session only: never a reason to connect
+    if (screenCcsid != null || !s.usable()) return screenCcsid;
     String own = "mc-proxy-" + ownIds.incrementAndGet();
     CompletableFuture<JsonNode> answer = new CompletableFuture<JsonNode>();
     ownCalls.put(own, answer);
@@ -502,7 +650,7 @@ public class SshMcpProxy {
       request.put("id", own);
       request.put("method", "tools/call");
       request.putObject("params").put("name", "status").putObject("arguments");
-      writeRemote(remoteReady.get(), mapper.writeValueAsString(request));
+      writeRemote(s, mapper.writeValueAsString(request));
       JsonNode text = mapper.readTree(answer.get(30, java.util.concurrent.TimeUnit.SECONDS)
           .path("result").path("content").path(0).path("text").asText("{}"));
       if (text.path("screenCcsid").isInt()) screenCcsid = text.get("screenCcsid").asInt();
@@ -549,11 +697,11 @@ public class SshMcpProxy {
     String text;
     boolean error = false;
     try {
-      remoteReady.get();  // signed on (or refused) first
+      connected();  // signed on (or refused) first
       text = new ObjectMapper().enable(com.fasterxml.jackson.databind.SerializationFeature.INDENT_OUTPUT)
           .writeValueAsString(FileUpload.handle(args, project, FileUpload.over(ssh)));
     } catch (ExecutionException e) {
-      text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage();
+      text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage() + ". The next call tries again.";
       error = true;
     } catch (Exception e) {
       text = e instanceof IllegalArgumentException ? e.getMessage() : "Upload failed: " + e.getMessage();
@@ -564,43 +712,66 @@ public class SshMcpProxy {
     return result;
   }
 
-  /* Remote MC answers go straight back to VS Code; when it stops, so does this server */
-  private void relayResponses(InputStream fromRemote) {
+  /* Remote MC answers go straight back to the client; when session s ends, its calls get an error (lost) */
+  private void relayResponses(Session s, InputStream fromRemote) {
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(fromRemote, StandardCharsets.UTF_8))) {
       String line;
       while ((line = reader.readLine()) != null) {
-        if (!ownCalls.isEmpty() || !buildCalls.isEmpty()) {
-          JsonNode response = mapper.readTree(line);
-          String id = response.path("id").asText();
-          CompletableFuture<JsonNode> own = ownCalls.get(id);
-          if (own != null || id.startsWith("mc-proxy-")) {  // this server's own build_status (a late one is dropped)
-            if (own != null) own.complete(response);
-            continue;
-          }
-          if (buildCalls.remove(response.path("id").toString())) noteBuild(response);
+        JsonNode response;
+        try {
+          response = mapper.readTree(line);
+        } catch (Exception notJson) {
+          send(line);
+          continue;
         }
-        if (!pendingStatus.isEmpty()) line = afterStatus(line);
-        if (!pendingResults.isEmpty()) line = afterResults(line);
-        send(pendingImports.isEmpty() ? line : afterImport(line));
+        String id = response.path("id").asText();
+        CompletableFuture<JsonNode> own = ownCalls.get(id);
+        if (own != null || id.startsWith("mc-proxy-")) {  // this server's own build_status (a late one is dropped)
+          synchronized (s) {
+            if (own != null && s.ending == null) own.complete(response);  // once it ends, lost() fails them
+          }
+          continue;
+        }
+        /*
+         * Under the session's lock, which lost() takes to end it: once it ends, a late answer changes nothing (no build
+         * state for the next session) and is not sent, since lost() answers every call still waiting
+         */
+        synchronized (s) {
+          if (s.ending != null) continue;
+          if (!response.has("method")) s.inFlight.remove(response.path("id").toString());  // an answer, not MC's own request
+          if (buildCalls.remove(response.path("id").toString())) noteBuild(response);
+          if (!pendingStatus.isEmpty()) line = afterStatus(line);
+          if (!pendingResults.isEmpty()) line = afterResults(line);
+          send(pendingImports.isEmpty() ? line : afterImport(line));
+        }
       }
     } catch (Exception e) {
       logger.error("Lost the remote MasterCompiler", e);
     }
-    if (closing) return;
-    if (ssh != null && !ssh.isConnected()) {
-      logger.error("Lost the SSH connection to the IBM i: it stopped answering for about 60 s (network, VPN or the "
-          + "IBM i itself). Start the mastercompiler server again.");
-      System.exit(1);
-    }
-    /* Usually a start-up problem on the IBM i (Java, the folder, authority): its own messages are just above */
+    if (closing || s.ending != null) return;
+    ChannelExec remote = s.remote;
     for (int i = 0; i < 20 && remote != null && !remote.isClosed(); i++) {
       try { Thread.sleep(100); } catch (InterruptedException ignored) { break; }
     }
     int status = remote != null ? remote.getExitStatus() : -1;
-    logger.error("MasterCompiler stopped on the IBM i (exit status {}) in {}. The lines above, from the IBM i, say why; "
-        + "check that {} works there and that you can create {}.", status, remoteDir,
-        env("MC_REMOTE_JAVA", REMOTE_JAVA), remoteDir);
-    System.exit(1);
+    /*
+     * The link or MC? JSch closes the session when the link stops answering, a moment after the channel; MC ending
+     * (killed, or a start-up problem) leaves the session up. No exit status: ended by a signal.
+     */
+    boolean linkDown = s.ssh != null && !s.ssh.isConnected();
+    for (int i = 0; i < 20 && !linkDown && status < 0; i++) {
+      try { Thread.sleep(100); } catch (InterruptedException ignored) { break; }
+      linkDown = s.ssh != null && !s.ssh.isConnected();
+      status = remote != null ? remote.getExitStatus() : -1;
+    }
+    if (linkDown) {
+      lost(s, "the SSH connection to the IBM i stopped answering for about 60 s (network, VPN or the IBM i itself)");
+      return;
+    }
+    /* Usually a start-up problem on the IBM i (Java, the folder, authority): its own messages are just above */
+    lost(s, "MasterCompiler stopped on the IBM i (" + (status < 0 ? "ended by a signal" : "exit status " + status) + ") in "
+        + remoteDir + "; the lines from the IBM i in this server's log say why: check that " + env("MC_REMOTE_JAVA", REMOTE_JAVA)
+        + " works there and that you can create " + remoteDir);
   }
 
   /* Upload what a build / plan / impact call needs; null when this server answered it itself */
@@ -654,10 +825,12 @@ public class SshMcpProxy {
       return mapper.writeValueAsString(request);
     } catch (Exception e) {
       logger.error("Could not prepare tool call", e);
-      sendToolError(line, ssh != null && !ssh.isConnected()
-          ? "The SSH connection to the IBM i was lost (no answer for about 60 s): start the mastercompiler server again. "
-            + e.getMessage()
+      boolean dropped = ssh != null && !ssh.isConnected();
+      sendToolError(line, dropped
+          ? "The SSH connection to the IBM i was lost (no answer for about 60 s), so this call did not run there: the next "
+            + "call connects again. " + e.getMessage()
           : "Could not upload the sources to the IBM i: " + e.getMessage());
+      if (dropped) lost(session, "the SSH connection to the IBM i stopped answering for about 60 s (network, VPN or the IBM i itself)");
       return null;
     }
   }
@@ -693,15 +866,18 @@ public class SshMcpProxy {
   private ObjectNode statusHere() {
     ObjectNode result = mapper.createObjectNode();
     ObjectNode text = statusFields(mapper.createObjectNode());
-    String failed = null;
-    if (remoteReady.isCompletedExceptionally()) {
+    Session s = session;
+    String failed = s.ending;
+    if (failed == null && s.ready.isCompletedExceptionally()) {
       try {
-        remoteReady.get();
+        s.ready.get();
       } catch (Exception e) {
-        failed = (e.getCause() != null ? e.getCause() : e).getMessage();
+        failed = "could not start: " + (e.getCause() != null ? e.getCause() : e).getMessage();
       }
     }
-    text.put("note", failed != null ? "MasterCompiler could not start on the IBM i: " + failed
+    text.put("ibmi", failed != null ? "disconnected" : "connecting");
+    text.put("note", failed != null ? "MasterCompiler is not running on the IBM i (" + failed + "). The next tool that needs "
+        + "the IBM i (plan, build, ...) connects again; status itself does not."
         : "MasterCompiler is not running on the IBM i yet: the user, current library and library list come once it is");
     result.putArray("content").addObject().put("type", "text").put("text", text.toPrettyString());
     result.put("isError", false);
@@ -1003,17 +1179,26 @@ public class SshMcpProxy {
 
   /* umask 077 (the owner only) in MC's own folder, the folder, and the java call without arguments */
   private String startCommand(String jar) {
+    return startCommand(jar, "", "");
+  }
+
+  private String startCommand(String jar, String beforeJava, String javaOptions) {
     /* mkdir -p: an empty repository (import_source fills it) uploads nothing, so the folder may not exist yet */
     return (parser.getPush() == null ? "umask 077 && " : "") + "mkdir -p " + SshTarget.quote(remoteDir)
         + " && cd " + SshTarget.quote(remoteDir)
-        + " && " + env("MC_REMOTE_JAVA", REMOTE_JAVA) + " -jar " + SshTarget.quote(jar);
+        + " && " + beforeJava + env("MC_REMOTE_JAVA", REMOTE_JAVA) + javaOptions + " -jar " + SshTarget.quote(jar);
   }
 
   private String remoteCommand(String jar, Code4iConfig code4i) {
-    StringBuilder command = new StringBuilder(startCommand(jar))
+    /* exec: java keeps the shell's pid, written where a later session finds it (stopEarlier) */
+    String pids = SshTarget.quote(remoteHome + "/mc/.mc");
+    StringBuilder command = new StringBuilder(startCommand(jar, "(umask 077 && mkdir -p " + pids + ") && echo $$ > "
+        + SshTarget.quote(pidPath()) + " && exec ", " -Dmc.session=" + token))
         .append(" --mcp --project ").append(SshTarget.quote(remoteDir));
     /* the same spec as on the PC: --spec names a file inside the uploaded copy */
     if (parser.getSpecName() != null) command.append(" --spec ").append(SshTarget.quote(parser.getSpecName()));
+    /* The spec may name this PC's project folder (a scanned CHGCURDIR): MC there points it at the uploaded copy */
+    command.append(" --local-project ").append(SshTarget.quote(project.getPath()));
     List<String> libraries = libraryArgs(code4i, true);
     for (int i = 0; i < libraries.size(); i++) command.append(' ').append(i % 2 == 0 ? libraries.get(i) : SshTarget.quote(libraries.get(i)));
     if (parser.isVerbose()) command.append(" -v");
@@ -1135,6 +1320,14 @@ public class SshMcpProxy {
     }
     StringBuilder hex = new StringBuilder();
     for (byte b : digest.digest()) hex.append(String.format("%02x", b));
+    return hex.toString();
+  }
+
+  private static String randomHex(int bytes) {
+    byte[] random = new byte[bytes];
+    new java.security.SecureRandom().nextBytes(random);
+    StringBuilder hex = new StringBuilder();
+    for (byte b : random) hex.append(String.format("%02x", b));
     return hex.toString();
   }
 

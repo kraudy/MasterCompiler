@@ -3,6 +3,21 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.30
+
+- `--mcp --ssh`: a spec written on the PC (a scanned `build.yaml`, `mc-base.yaml` hooks) names the PC's folder in
+  `CHGCURDIR`; MC on the IBM i now points it at the uploaded copy, as `--remote` already did. The first build no longer
+  fails with the PC's path.
+- `--mcp --ssh` survives a lost SSH connection: instead of stopping, the server answers the calls that were waiting
+  with an error (their result is unknown) and the next tool that needs the IBM i connects again. It first stops the MC
+  it left running there: only its own (a token in the process's command line), and if that MC cannot be stopped,
+  nothing is synced and the next call tries again. A compile command that MC's job already started still finishes.
+  The error says whether the link dropped or MC itself stopped on the IBM i. A start-up that failed (network, a stalled
+  upload, Java on the IBM i) is also tried again by the next call instead of needing a restart. A rejected password is
+  still never retried.
+- `status` over SSH says `ibmi: connecting` or `disconnected` with the reason while MC is not running on the IBM i. The
+  docs say that "connected" in `opencode mcp list` / `claude mcp list` only means the PC side is up.
+
 ## v0.3.29
 
 - One jar name: the build writes `target/MasterCompiler.jar` and releases publish only `MasterCompiler.jar` (plus

@@ -143,6 +143,10 @@ set up by `--setup-vscode` for Copilot; a terminal agent uses SSH.
 ## 5. Start and verify
 
 Restart the client (or reload its MCP servers, e.g. `/mcp` in Claude Code) so it starts the server. Then call `plan` without arguments: a list of targets means MC reached the IBM i and understood the project.
+"Connected" in the client (`opencode mcp list`, `claude mcp list`, `/mcp`) only means MC runs on the PC: it answers at
+once and connects to the IBM i in the background. `status` says how far that got (`startup`, and `ibmi` with the error
+while it is not running there). A failed start, or an SSH connection lost later, does not need a restart: the next tool
+that needs the IBM i (`plan`, `build`, ...) connects again.
 The first start over SSH uploads MC (about 10 MB) and takes longer. Then follow the `mastercompiler` skill for the
 edit-compile-fix loop. If you cannot register or start the server yourself, give the user the exact entry and the
 steps. Never write into their config without asking.
@@ -171,4 +175,5 @@ project's `.mc/` folder (sources imported for reference). Nothing to copy to the
 | `VS Code user settings not found` | `--code4i` needs VS Code's `settings.json`: set `MC_VSCODE_SETTINGS`, or use `IBMI_HOSTNAME` / `IBMI_USERNAME` |
 | `--ssh needs --project` | Give the absolute repository path after `--project` |
 | host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator |
+| Client says connected, `status` shows an error | The PC side runs; the IBM i side did not start (`status` says why). Fix that cause; the next `plan` or `build` tries again |
 | Password command prints nothing | Run it in the user's own shell (not for you to read its output): the first output line must be the password |

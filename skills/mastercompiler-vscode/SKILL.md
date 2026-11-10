@@ -374,8 +374,8 @@ Without Code for IBM i, drop `--code4i --connection ...` and add `IBMI_HOSTNAME`
 | `--ssh`: no key and no password | Enter the password when the server starts, or create an SSH key the IBM i accepts. |
 | Java errors at start | Point `command` in `mcp.json` at a Java 8+ executable. |
 | Server seems stuck at start | Read its log: **MCP: List Servers** → `mastercompiler` → **Show Output**. It shows each start-up stage (`MC start-up 1/5 connecting` … `5/5 ready`) and, for the jar upload, progress every 5 s. A tool call that waits logs which stage it waits for. |
-| `stalled: no data moved for 60 s after X of Y MB` | The SSH link stopped carrying data (VPN, firewall, network). Start the server again; it resumes cleanly (cut uploads never stay under the real name, and a broken jar on the IBM i is detected and uploaded again). `MC_STALL_SECONDS` in the server's `env` changes the limit. |
-| `Lost the SSH connection to the IBM i` | No answer for about 60 s: start the server again once the network is back. |
+| `stalled: no data moved for 60 s after X of Y MB` | The SSH link stopped carrying data (VPN, firewall, network). The next tool call starts again (no restart needed); it resumes cleanly (cut uploads never stay under the real name, and a broken jar on the IBM i is detected and uploaded again). `MC_STALL_SECONDS` in the server's `env` changes the limit. |
+| `Lost MasterCompiler on the IBM i` | The SSH connection stopped answering for about 60 s, or MC stopped there. The server keeps running: once the network is back, the next tool that needs the IBM i connects again (it first stops the MC this server left running there; a compile command already started on the IBM i still finishes). The call that was waiting has an unknown result: check with `plan` or `joblog` before repeating anything that changes the IBM i. |
 | `Remote command did not finish in 600 s` | A command on the IBM i hung (e.g. unpacking or tagging the sources); `MC_REMOTE_TIMEOUT` changes the limit. |
 
 Once MC's tools work, follow the `mastercompiler` skill for the edit–compile–fix loop.
