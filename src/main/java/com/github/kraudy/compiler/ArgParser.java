@@ -50,6 +50,7 @@ public class ArgParser {
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
     INSTALL_SKILLS(null, "install-skills", Kind.FLAG, "Install MC's agent skills for every project: ~/.copilot/skills (Copilot in VS Code), or the agents --agent names"),
     AGENT         (null, "agent",        Kind.VALUE, "With --install-skills: where to install, comma-separated: copilot (~/.copilot/skills, the default), claude (~/.claude/skills), agents (~/.agents/skills: Codex, Grok, OpenCode) or all"),
+    SKILLS_DIR    (null, "skills-dir",   Kind.VALUE, "With --install-skills: install into this skills folder instead (it gets mastercompiler/, ...), e.g. when the agent's home is not Java's user.home"),
     VERSION       (null, "version",      Kind.FLAG,  "Print the MasterCompiler version"),
     HELP          ("h", "help",          Kind.FLAG,  "Print this help"),
     PRINT         (null, "print",        Kind.FLAG,  "With --setup-vscode: show what would be written, write nothing"),
@@ -64,7 +65,7 @@ public class ArgParser {
     DEBUG         ("x", null,            Kind.FLAG,  "Debug mode"),
     VERBOSE       ("v", null,            Kind.FLAG,  "Verbose output"),
     CLEAN         ("c", "clean",         Kind.FLAG,  "Delete created objects after build"),
-    DRY_RUN       (null, "dry-run",      Kind.FLAG,  "Show commands without executing"),
+    DRY_RUN       (null, "dry-run",      Kind.FLAG,  "Show commands without executing; a build still connects to the IBM i (--scan <dir> --generate-only -o <file> needs no connection)"),
     DIFF          (null, "diff",         Kind.FLAG,  "Only build changed objects"),
     SINCE         (null, "since",        Kind.VALUE, "Only build targets whose sources changed since this git ref, plus dependents"),
     PUSH          (null, "push",         Kind.VALUE, "Upload the local git repo's sources to this IFS directory and build from there"),
@@ -164,6 +165,7 @@ public class ArgParser {
   private boolean hostServers;
   private boolean installSkills;
   private String agent;
+  private String skillsDir;
   private boolean version;
   private boolean help;
   private String next;
@@ -317,6 +319,7 @@ public class ArgParser {
         break;
       case NEXT:          next = value; break;
       case AGENT:         agent = value; break;
+      case SKILLS_DIR:    skillsDir = value; break;
       case NEXT_FILE:     next = readNextFile(value); nextFile = value; break;
       case IMPORT:
         importSelection = value;
@@ -483,6 +486,9 @@ public class ArgParser {
       throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
     }
     if (agent != null && !installSkills) throw new IllegalArgumentException("--agent goes with --install-skills");
+    if (skillsDir != null && !installSkills) throw new IllegalArgumentException("--skills-dir goes with --install-skills");
+    if (skillsDir != null && skillsDir.trim().isEmpty()) throw new IllegalArgumentException("--skills-dir needs a folder");
+    if (skillsDir != null && agent != null) throw new IllegalArgumentException("Use either --agent or --skills-dir");
     if (installSkills) VscodeSetup.skillDirs(agent, System.getProperty("user.home"));  // rejects an unknown agent here
     if (installSkills || version) return;  // need nothing else
     if (readOnly && !mcp) throw new IllegalArgumentException("--read-only goes with --mcp");
@@ -795,6 +801,11 @@ public class ArgParser {
   /** {@code --agent} with {@code --install-skills}: the agents to install for (comma-separated), or null for Copilot. */
   public String getAgent() {
     return agent;
+  }
+
+  /** {@code --skills-dir} with {@code --install-skills}: the one skills folder to install into, or null for the --agent ones. */
+  public String getSkillsDir() {
+    return skillsDir;
   }
 
   public boolean isHostServers() {

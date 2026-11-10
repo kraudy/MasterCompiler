@@ -146,17 +146,28 @@ public final class VscodeSetup {
       }
     }
 
-    /* .gitignore: MC's working folder (.mc/: reference copies, sync files) never goes into git */
+    /*
+     * .gitignore: MC's working folder (.mc/: reference copies, sync files) never goes into git. The project folder may be
+     * a subfolder of a repository: an unanchored .mc/ in the repository's root .gitignore already covers it, unless a
+     * .gitignore on the way down to the folder has a negation (!...); otherwise the line goes into the project folder's own
+     * .gitignore (nothing outside the folder is written)
+     */
     File gitignore = new File(project, ".gitignore");
-    String ignored = gitignore.isFile() ? new String(Files.readAllBytes(gitignore.toPath()), java.nio.charset.StandardCharsets.UTF_8) : "";
-    if (!ignored.contains(".mc/")) {
+    String ignored = readText(gitignore);
+    File gitRoot = gitRoot(project);
+    boolean rootIgnores = gitRoot != null && !gitRoot.equals(project.getAbsoluteFile())
+        && ignoresMc(readText(new File(gitRoot, ".gitignore")), false);
+    for (File dir = project.getAbsoluteFile(); rootIgnores && dir != null && !dir.equals(gitRoot); dir = dir.getParentFile()) {
+      if (negatesMc(readText(new File(dir, ".gitignore")))) rootIgnores = false;
+    }
+    if (!ignoresMc(ignored, true) && !rootIgnores) {
       out.append("\n.gitignore\n  ").append(print ? "would add" : "added").append(" .mc/ (MasterCompiler's working files)\n");
       if (!print) {
         Files.write(gitignore.toPath(), ((ignored.isEmpty() || ignored.endsWith("\n") ? ignored : ignored + "\n")
             + "# MasterCompiler working files\n.mc/\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
       }
     }
-    if (!new File(project, ".git").exists()) {
+    if (gitRoot == null) {
       out.append("  Not a git repository yet: \"git init\" there lets MC build only what changed (since) and keeps history.\n");
     }
 
@@ -330,6 +341,37 @@ public final class VscodeSetup {
     } catch (Exception e) {
       return false;
     }
+  }
+
+  /* The repository the folder is in: the nearest folder upwards with .git (a folder, or a file in a worktree or submodule) */
+  static File gitRoot(File folder) {
+    for (File dir = folder.getAbsoluteFile(); dir != null; dir = dir.getParentFile()) {
+      if (new File(dir, ".git").exists()) return dir;
+    }
+    return null;
+  }
+
+  /* A .gitignore line that ignores .mc/ (anchored /.mc/ only counts in the project's own file); a later negation (!...) may bring it back */
+  static boolean ignoresMc(String gitignore, boolean anchoredCounts) {
+    boolean ignores = false;
+    for (String raw : gitignore.split("\\R")) {
+      String line = raw.replaceAll("\\s+$", "");  // git drops trailing spaces; leading ones are part of the pattern
+      if (line.equals(".mc/") || line.equals(".mc") || (anchoredCounts && (line.equals("/.mc/") || line.equals("/.mc")))) ignores = true;
+      else if (line.startsWith("!")) ignores = false;  // !.mc/, !* ...: not sure, so not covered
+    }
+    return ignores;
+  }
+
+  /* Any negation (!.mc/, !*, a folder negation ...) may bring .mc back: then a parent's .mc/ is not trusted to cover this folder */
+  static boolean negatesMc(String gitignore) {
+    for (String raw : gitignore.split("\\R")) {
+      if (raw.startsWith("!")) return true;
+    }
+    return false;
+  }
+
+  private static String readText(File file) throws java.io.IOException {
+    return file.isFile() ? new String(Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8) : "";
   }
 
   /*

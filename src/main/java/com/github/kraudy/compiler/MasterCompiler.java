@@ -1214,7 +1214,10 @@ public class MasterCompiler{
 
       /* Personal skills: Copilot in VS Code loads ~/.copilot/skills in every workspace; --agent adds the CLI agents */
       if (parser.isInstallSkills()) {
-        for (java.io.File dir : VscodeSetup.skillDirs(parser.getAgent(), System.getProperty("user.home"))) {
+        java.util.List<java.io.File> dirs = parser.getSkillsDir() != null
+            ? java.util.Collections.singletonList(new java.io.File(parser.getSkillsDir()))
+            : VscodeSetup.skillDirs(parser.getAgent(), System.getProperty("user.home"));
+        for (java.io.File dir : dirs) {
           int installed = VscodeSetup.installSkills(dir);
           logger.info("Installed {} MasterCompiler skills in {}.", installed, dir);
         }

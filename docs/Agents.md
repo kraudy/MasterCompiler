@@ -32,7 +32,8 @@ Or, with no jar yet, copy [`skills/mastercompiler-setup`](../skills/mastercompil
 | OpenCode | `~/.config/opencode/skills` or `~/.agents/skills` (`agents`) | `opencode.json` | same |
 
 `--agent all` installs to `~/.copilot/skills`, `~/.claude/skills` and `~/.agents/skills`; each client reads at least one of
-them. The exact entry for each client is in the [setup skill](../skills/mastercompiler-setup/SKILL.md) (one place, so it
+them. `~` is Java's home folder; when the agent's home is another one (`$HOME` set elsewhere), name the folder instead:
+`--install-skills --skills-dir "$HOME/.claude/skills"`. The exact entry for each client is in the [setup skill](../skills/mastercompiler-setup/SKILL.md) (one place, so it
 stays in step with the release). Config file formats change between client versions: when in doubt, the client's own
 `mcp add` command wins.
 
