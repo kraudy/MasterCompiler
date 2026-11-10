@@ -3,7 +3,7 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
-## Unreleased
+## v0.3.27
 
 - `--remote`: a `--project` folder that git ignores (or that is only untracked inside an enclosing
   repository) now uploads the files the folder has. Before, the enclosing repository's file list was
@@ -26,6 +26,11 @@ Download any release from https://github.com/kraudy/MasterCompiler/releases.
 - Docs: `--call` now says that a program ending in error inside the call's server job (QZRCSRVS,
   owned by QUSER) does not have its stderr or job-log line in the answer; write failure details to a
   stream file (read with `--fetch`) or to `QPRINT`.
+- `--fetch` can be repeated to read several IFS files over one sign-on. With more than one path, `-o` must
+  name a folder and the base names must differ. Each file prints its own `Fetched ...` line; a file that
+  fails is reported and the rest continue (exit status 1 if any failed). One path behaves as before.
+- `--download` now refuses `--sql`, `--fetch` and `--call` given beside it. Before, `--download` ran
+  alone and the other options were silently dropped (and the `--sql` read-only check was skipped).
 
 ## v0.3.26
 
