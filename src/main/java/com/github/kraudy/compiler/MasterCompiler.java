@@ -1083,6 +1083,7 @@ public class MasterCompiler{
     if (IBMiDotEnv.isIBMi()) return IBMiDotEnv.getNewSystemConnection(true);
     /* A password from --password-stdin, IBMI_PASSWORD_FILE, --password-command, SSH_ASKPASS or the terminal: IBMiDotEnv only knows IBMI_PASSWORD */
     io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
+    requireHostAndUser(env);
     String password = dotenvPassword(env);
     if (password.isEmpty() || (Passwords.provided() == null && !env.get("IBMI_PASSWORD", "").isEmpty())) {
       return IBMiDotEnv.getNewSystemConnection(true);
@@ -1111,7 +1112,16 @@ public class MasterCompiler{
       return new SignOnGuard.Target(code4i.name, code4i.host, code4i.username, Passwords.get(code4i.username + "@" + code4i.host));
     }
     io.github.cdimascio.dotenv.Dotenv env = IBMiDotEnv.getDotEnv();
+    requireHostAndUser(env);
     return new SignOnGuard.Target(null, env.get("IBMI_HOSTNAME", ""), env.get("IBMI_USERNAME", ""), dotenvPassword(env));
+  }
+
+  /* Neither --code4i nor IBMI_HOSTNAME / IBMI_USERNAME: one line, as --doctor says it, before any password is asked */
+  private static void requireHostAndUser(io.github.cdimascio.dotenv.Dotenv env) {
+    if (env.get("IBMI_HOSTNAME", "").isEmpty() || env.get("IBMI_USERNAME", "").isEmpty()) {
+      throw new IllegalArgumentException("No IBM i connection. Use --code4i [--connection <name>], or set IBMI_HOSTNAME and "
+          + "IBMI_USERNAME (environment or .env); --doctor shows what MC finds.");
+    }
   }
 
   /*
@@ -1171,6 +1181,7 @@ public class MasterCompiler{
     MasterCompiler compiler = null;
     Connection connection = null;
     int exitCode = 0;
+    boolean debug = false;
     try {
       /* Invalid arguments: one line saying what is wrong, then the usage (no stack trace) */
       if (ArgParser.wantsHelp(args)) {
@@ -1189,6 +1200,7 @@ public class MasterCompiler{
         System.err.println(ArgParser.getUsage());
         return 2;
       }
+      debug = parser.isDebug();
 
       if (parser.isVersion()) {
         System.out.println("MasterCompiler " + version());
@@ -1393,7 +1405,10 @@ public class MasterCompiler{
       exitCode = 1;
 
     } catch (Exception e) {
-      logger.error("Unhandled  exception", e);
+      /* the stack trace only with -x */
+      if (debug) logger.error("Unhandled exception", e);
+      else logger.error("Unhandled exception: {}{} (run again with -x for the stack trace)", e.getClass().getSimpleName(),
+          e.getMessage() != null ? ": " + e.getMessage().split("\\R", 2)[0] : "");
       exitCode = 1;
     } finally {
        try {
