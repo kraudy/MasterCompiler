@@ -61,11 +61,12 @@ final class ScreenTools {
   private static ObjectNode open(JsonNode args, SignOnGuard.Target buildTarget) throws Exception {
     SignOnGuard.Target build = buildTarget;
     if (build == null || build.host.isEmpty()) {
-      return result("screen_open runs on the PC (the mastercompiler server VS Code starts); it is not available here.", true);
+      return result("screen_open runs on the PC (the mastercompiler server your client starts); it is not available here.", true);
     }
     if (build.password.isEmpty()) {
-      return result("screen_open signs on with the IBM i password, and this server has none (IBMI_PASSWORD, VS Code's "
-          + "password prompt; an SSH key alone is not enough for a 5250 sign-on).", true);
+      return result("screen_open signs on with the IBM i password, and this server has none (VS Code's password prompt, "
+          + "or IBMI_PASSWORD_COMMAND / IBMI_PASSWORD_FILE in a terminal client's server entry; an SSH key alone is not "
+          + "enough for a 5250 sign-on).", true);
     }
     if (session != null && !session.closed()) {
       return result("A 5250 session is already open: use screen / screen_send, or screen_close first.", true);

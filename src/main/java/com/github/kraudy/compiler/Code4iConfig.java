@@ -137,6 +137,12 @@ public final class Code4iConfig {
   /* The same with the password in another variable (a read-only connection's IBMI_PASSWORD_<NAME>) */
   public AS400 connect(String passwordVariable) throws Exception {
     String password = passwordVariable.equals("IBMI_PASSWORD") ? Passwords.get(username + "@" + host) : System.getenv(passwordVariable);
+    if ((password == null || password.isEmpty()) && passwordVariable.equals("IBMI_PASSWORD")) {
+      throw new IllegalArgumentException("No IBM i password for " + username + "@" + host + ". In VS Code: .vscode/mcp.json "
+          + "gives the server \"env\": { \"IBMI_PASSWORD\": \"${input:...}\" } with a password input (java -jar "
+          + "MasterCompiler.jar --setup-vscode writes it). In a terminal client or shell: IBMI_PASSWORD_COMMAND or "
+          + "IBMI_PASSWORD_FILE in the server entry's env, or --password-stdin / --password-command on the command line.");
+    }
     if (password == null || password.isEmpty()) {
       throw new IllegalArgumentException(passwordVariable + " is not set. In .vscode/mcp.json give the server "
           + "\"env\": { \"" + passwordVariable + "\": \"${input:...}\" } with a password input "

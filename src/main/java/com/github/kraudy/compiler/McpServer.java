@@ -222,7 +222,8 @@ public class McpServer {
         "Call joblog for the IBM i job's recent messages. Before the first build of a session, " +
         "call status and plan and show the user the current library and the targets; build once they agree. Tools that " +
         "write or stop (clean, call_program, debug_program, run_command, copy_rows, upload_file, screen_open, cancel) first show a preview: call them with confirm: true only " +
-        "after the user agreed. The IBM i password is typed only in VS Code's prompt, never in the chat; after an " +
+        "after the user agreed. The IBM i password never goes in the chat: in VS Code the user types it in VS Code's prompt; " +
+        "in a terminal client it comes from IBMI_PASSWORD_COMMAND or IBMI_PASSWORD_FILE in the server entry's env; after an " +
         "authentication error, do not retry: follow the error's steps." + pendingRequest());
     return result;
   }
@@ -1867,8 +1868,10 @@ public class McpServer {
     if (!parser.isCode4i() && !IBMiDotEnv.isIBMi() && Passwords.source() == null && !new File(".env").isFile()) {
       throw new IllegalArgumentException("No IBM i credentials. In VS Code the password comes from the password prompt "
           + "in .vscode/mcp.json (--setup-vscode writes it): ask the user to run MasterCompiler's setup or start the server "
-          + "from VS Code; never ask for the password in the chat or put it in a file. A .env (IBMI_HOSTNAME, "
-          + "IBMI_USERNAME, IBMI_PASSWORD) is only for a person running the jar in a terminal or CI.");
+          + "from VS Code. In a terminal client (Claude Code, Codex, Grok, OpenCode) the server entry's env names "
+          + "IBMI_HOSTNAME, IBMI_USERNAME and IBMI_PASSWORD_COMMAND or IBMI_PASSWORD_FILE (the mastercompiler-setup skill): "
+          + "ask the user to add them and restart the server. Never ask for the password in the chat or put it in a file "
+          + "yourself. A .env (IBMI_HOSTNAME, IBMI_USERNAME, IBMI_PASSWORD) is only for a person running the jar in a terminal or CI.");
     }
     if (signOn == null) signOn = buildSignOn();
     connection = signedOn(() -> {
