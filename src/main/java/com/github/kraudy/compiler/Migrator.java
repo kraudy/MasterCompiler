@@ -1,6 +1,8 @@
 package com.github.kraudy.compiler;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.ResultSet;
@@ -9,6 +11,10 @@ import java.sql.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
 import com.ibm.as400.access.User;
@@ -24,8 +30,14 @@ public class Migrator {
   private final boolean verbose;
   private final User currentUser;
   private CommandExecutor commandExec;
-  static final String MEMBER_TEXT = "MasterCompiler: copy of the stream file";  // marks the members MC writes
+  static final String MEMBER_TEXT = "MasterCompiler: copy of the stream file";  // for people: MC wrote this member
+  static final String MEMBER_REFUSAL = "Did not replace";
+  /* Members this project's builds wrote, with their timestamps then: any other existing member is someone else's */
+  static final String MEMBERS_FILE = ".mc/members.json";
+  private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
   private String replacedMember;
+  private File project;            // where MEMBERS_FILE is kept; null: none, every existing member counts as foreign
+  private Boolean replaceMembers;  // null: replace and warn (CLI); false: refuse (MCP); true: replace (MCP, user agreed)
 
   public Migrator(Connection connection, boolean debug, boolean verbose, User currentUser, CommandExecutor commandExec) {
     this.connection = connection;
@@ -33,6 +45,14 @@ public class Migrator {
     this.verbose = verbose;
     this.currentUser = currentUser;
     this.commandExec = commandExec;
+  }
+
+  public void setProject(File project) {
+    this.project = project;
+  }
+
+  public void setReplaceMembers(Boolean replaceMembers) {
+    this.replaceMembers = replaceMembers;
   }
 
   public void migrateSource(TargetKey key) throws Exception, SQLException{
@@ -78,23 +98,28 @@ public class Migrator {
           //TODO: Should this be migrated to QTEMP?
           if(verbose) logger.info("Migrating stream file to source member");
           if (!sourcePfExists(key)) createSourcePf(key);
-          String foreign = foreignMember(key);
-          boolean created = false;
+          Member before = member(key);
+          String foreign = before != null && !written(before) ? before.describe() : null;
           if (foreign != null) {
-            replacedMember = (commandExec.isDryRun() ? "Would replace" : "Replaced") + " source member " + foreign
-                + " with " + key.getStreamFile() + ": MasterCompiler did not create it (or an MC before v0.3.31 did; "
-                + "its members are marked from then on)";
+            boolean refuse = Boolean.FALSE.equals(replaceMembers);
+            String what = " source member " + foreign + " with " + key.getStreamFile() + ": this project's builds did "
+                + "not write it, or it changed since";
+            if (refuse && !commandExec.isDryRun()) {
+              throw new CompilerException(MEMBER_REFUSAL + what + ". Show the user; build again with replaceMembers: "
+                  + "true only if they agree (it replaces every such member of that build)");
+            }
+            replacedMember = (commandExec.isDryRun() ? "Would replace" : "Replaced") + what
+                + (refuse ? " (build replaces it only with replaceMembers: true, after the user agreed)" : "");
             logger.warn(replacedMember);
-          } else if (!sourceMemberExists(key)) {
+          } else if (before == null && !sourceMemberExists(key)) {
             createSourceMember(key);
-            created = true;
           }
           migrateStreamFileToMember(key);
-          /* MC's members carry its text: a replaced one is reported once, not at every build */
-          if (foreign != null || created) {
+          if (before == null || !MEMBER_TEXT.equals(before.text)) {
             commandExec.executeCommand("CHGPFM FILE(" + key.getQualifiedSourceFile() + ") MBR(" + key.getSourceName()
                 + ") TEXT(''" + MEMBER_TEXT + "'')", commandExec.getCurrentTime());  // inside QCMDEXC('...'): quotes doubled
           }
+          if (!commandExec.isDryRun()) record(member(key));
           key.put(ParamCmd.SRCFILE, key.getQualifiedSourceFile())
             .put(ParamCmd.SRCMBR, key.getObjectName())
             .removeStreamFile();
@@ -205,18 +230,33 @@ public class Migrator {
     return replaced;
   }
 
-  /*
-   * LIB/FILE(MEMBER), changed ..., text '...' when the member exists and its text is not MC's: someone else's source
-   * (a member from an older MC, with no text, counts as someone else's once)
-   */
-  String foreignMember(TargetKey key) throws SQLException {
+  /* A source member as SYSPARTITIONSTAT has it */
+  static final class Member {
+    String server;         // CURRENT SERVER: the same library names on another IBM i are other members
+    String name;           // LIB/FILE(MBR), the library it resolved to
+    String text;
+    String changed;        // LAST_CHANGE_TIMESTAMP
+    String sourceUpdated;  // LAST_SOURCE_UPDATE_TIMESTAMP: an edit of its lines
+
+    String id() {
+      return server + " " + name;
+    }
+
+    String describe() {
+      return name + ", changed " + changed + (text.isEmpty() || text.equals(MEMBER_TEXT) ? "" : ", text '" + text + "'");
+    }
+  }
+
+  /* The member the stream file goes into, null when it does not exist yet */
+  Member member(TargetKey key) throws SQLException {
     try (Statement stmt = connection.createStatement();
          ResultSet rs = stmt.executeQuery(
             "With " +
             Utilities.CteLibraryList +
             "SELECT CAST(SYSTEM_TABLE_SCHEMA AS VARCHAR(10) CCSID " + MasterCompiler.INVARIANT_CCSID + ") AS Lib, " +
             "COALESCE(CAST(PARTITION_TEXT AS VARCHAR(50) CCSID " + MasterCompiler.INVARIANT_CCSID + "), '') AS Text, " +
-            "LAST_CHANGE_TIMESTAMP AS Changed " +
+            "VARCHAR(LAST_CHANGE_TIMESTAMP) AS Changed, VARCHAR(LAST_SOURCE_UPDATE_TIMESTAMP) AS SourceUpdated, " +
+            "CAST(CURRENT SERVER AS VARCHAR(18) CCSID " + MasterCompiler.INVARIANT_CCSID + ") AS Server " +
             "FROM QSYS2.SYSPARTITIONSTAT " +
             "INNER JOIN Libs " +
             "ON (SYSTEM_TABLE_SCHEMA = Libs.Libraries) " +
@@ -224,10 +264,57 @@ public class Migrator {
             "AND SYSTEM_TABLE_MEMBER = '" + key.getSourceName() + "' " +
             sourceLibraryFilter(key) + "LIMIT 1")) {
       if (!rs.next()) return null;
-      String text = rs.getString("Text").trim();
-      if (text.equals(MEMBER_TEXT)) return null;
-      return rs.getString("Lib").trim() + "/" + key.getSourceFile() + "(" + key.getSourceName() + "), changed "
-          + rs.getTimestamp("Changed") + (text.isEmpty() ? "" : ", text '" + text + "'");
+      Member m = new Member();
+      m.server = rs.getString("Server").trim();
+      m.name = rs.getString("Lib").trim() + "/" + key.getSourceFile() + "(" + key.getSourceName() + ")";
+      m.text = rs.getString("Text").trim();
+      m.changed = rs.getString("Changed");
+      m.sourceUpdated = rs.getString("SourceUpdated");
+      return m;
+    }
+  }
+
+  /* This project's builds wrote it, and nobody changed it since: both timestamps as recorded (unknown: not ours) */
+  boolean written(Member m) {
+    JsonNode recorded = readMembers().path(m.id());
+    return m.changed != null && m.sourceUpdated != null
+        && m.changed.equals(recorded.path("changed").asText(null))
+        && m.sourceUpdated.equals(recorded.path("sourceUpdated").asText(null));
+  }
+
+  private ObjectNode readMembers() {
+    if (project == null) return mapper.createObjectNode();
+    File file = new File(project, MEMBERS_FILE);
+    try {
+      if (file.isFile()) {
+        JsonNode all = mapper.readTree(file);
+        if (all.isObject()) return (ObjectNode) all;
+      }
+    } catch (Exception e) {
+      logger.warn("Could not read {}: {}", MEMBERS_FILE, e.getMessage());
+    }
+    return mapper.createObjectNode();
+  }
+
+  /* After MC wrote the member: its timestamps now, written to a temporary file first so a crash leaves the old record */
+  private void record(Member m) {
+    if (project == null || m == null) return;
+    ObjectNode all = readMembers();
+    ObjectNode entry = all.putObject(m.id());
+    entry.put("changed", m.changed);
+    entry.put("sourceUpdated", m.sourceUpdated);
+    File file = new File(project, MEMBERS_FILE);
+    try {
+      file.getParentFile().mkdirs();
+      File temp = File.createTempFile("members", ".tmp", file.getParentFile());  // its own: another build's is not touched
+      mapper.writeValue(temp, all);
+      try {
+        Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+        Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+      }
+    } catch (Exception e) {
+      logger.warn("Could not write {}: {}", MEMBERS_FILE, e.getMessage());
     }
   }
 

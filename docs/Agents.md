@@ -3,8 +3,8 @@
 MC's agent side is an MCP server (`--mcp`) plus skills (`SKILL.md` files). Copilot in VS Code has its own one-command
 setup ([Copilot.md](./Copilot.md)); terminal agents register the same server by hand or by asking the agent.
 
-**Agents, before anything else:** read the setup guide at the latest release, not from `master` (its raw copy can be
-cached for minutes). Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` and read
+**Agents, before anything else:** read the setup guide at the latest release, not from `master` (the only branch; there
+is no `main`, and a raw copy of `master` can be cached for minutes). Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` and read
 `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-setup/SKILL.md`
 (Copilot in VS Code: `skills/mastercompiler-vscode/SKILL.md`).
 
@@ -25,6 +25,9 @@ Or, with no jar yet, copy the setup skill of that release into your agent's skil
 curl -fL --create-dirs -o ~/.claude/skills/mastercompiler-setup/SKILL.md \
   "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/skills/mastercompiler-setup/SKILL.md"
 ```
+
+**Clone the repository first.** The MCP entry runs `--mcp --ssh --project <absolute repository path>`: the project
+must be on disk when you register the server, and one entry serves one repository.
 
 **Register the MCP server before you start the agent.** Clients load their MCP servers when they start: a server added
 mid-session (`claude mcp add`, an edit to `opencode.json` or `config.toml`) has no tools until the client is restarted,

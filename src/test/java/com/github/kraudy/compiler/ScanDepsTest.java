@@ -312,6 +312,16 @@ public class ScanDepsTest {
       assertTrue(hasChildNamed(depsLOADCUSTR, "SRV_BASE36"),
           "LOADCUSTR should depend on SRV_BASE36");
 
+      /* A changed module rebuilds what impact lists: its binder-less EXPORT(*ALL) srvpgm, the bnddir, the callers */
+      TargetKey base36Mod = spec.getTargetKey(new TargetKey("CURLIB.SRV_BASE36.MODULE.RPGLE"));
+      assertNotNull(base36Mod, "SRV_BASE36 module should be scanned");
+      java.util.Set<TargetKey> rebuild = DiffPlanner.expand(spec, java.util.Collections.singleton(base36Mod));
+      for (String key : new String[] {"CURLIB.SRV_BASE36.SRVPGM.BND", "CURLIB.SRV_BASE36.BNDDIR.BNDDIR",
+          "CURLIB.BTIR.PGM.RPGLE", "CURLIB.LOADCUSTR.PGM.SQLRPGLE"}) {
+        assertTrue(rebuild.contains(spec.getTargetKey(new TargetKey(key))),
+            "a changed SRV_BASE36 module should rebuild " + key + "; rebuild set has " + rebuild.size());
+      }
+
       assertNull(spec.getTargetKey(new TargetKey("CURLIB.SRV_MSG_P.PGM.RPGLE")),
           "*.include.RPGLE must not become a *PGM target");
 

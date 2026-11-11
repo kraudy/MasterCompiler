@@ -3,6 +3,27 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.32
+
+- `build` and `plan` with `files` (or `since`) now include a binder-less service program (`EXPORT(*ALL)`, `MODULE`
+  in the spec) when its module changed, and so its binding directory and the programs that bind it: the same chain
+  `impact` lists. Before, only service programs with a binder source were linked to their modules, and a changed
+  module could leave a new export out of its service program.
+- The dependency scan ignores comments, and reads table names only inside SQL statements (`EXEC SQL`, string literals,
+  `FETCH`/`PREPARE`, cursors and CTE names left out); fixed-format F-specs need their file type column. On McOnSJLennon
+  the objects listed as used but not built went from 125, mostly words from comments and free-form lines, to 17 real
+  ones. Some build orders change where a comment made up a dependency.
+- MCP build reports give `externalCount`; the list itself (`external`) comes with `showExternal: true`.
+- Source members (DDS and OPM sources compile from one): MC records the members it writes in `.mc/members.json`
+  (IBM i, library, file, member, change timestamps). An existing member that this project's builds did not write, or
+  that changed since, is no longer replaced by an MCP `build`: the target fails with `failedAt: replaceMember`, `plan`
+  warns first, and `replaceMembers: true` replaces them once the user agreed. The command line still replaces them
+  with a warning. Before, the member text marked MC's members, so a member left by any earlier MC run was replaced
+  without a word.
+- `screen_open`: a Display Messages screen right after the sign-on is left with F3; its lines are in `skipped`.
+- Docs: clone the repository before registering the MCP server (`--mcp --ssh` needs `--project`); the branch is
+  `master`, links point at the release tag.
+
 ## v0.3.31
 
 - `build` and `plan` take `targets`: exactly those targets (names, `NAME.TYPE` or the keys `impact` returns), like

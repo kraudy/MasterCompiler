@@ -20,8 +20,8 @@ compiles into the current library; `clean`, `run_command`, `upload_file`, `copy_
 on the IBM i: it uploads the repository's sources to `<home>/mc/<repository>`, compiles there and returns errors with
 file and line. The local repository is the one you read and edit.
 
-**Read the newest guide, not a cached one.** `raw.githubusercontent.com/.../master/...` can serve an older copy for
-minutes. Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` and read this guide at
+**Read the newest guide, not a cached one.** The repository's branch is `master` (there is no `main`), and
+`raw.githubusercontent.com/.../master/...` can serve an older copy for minutes. Get `tag_name` from `https://api.github.com/repos/kraudy/MasterCompiler/releases/latest` and read this guide at
 `https://raw.githubusercontent.com/kraudy/MasterCompiler/<tag_name>/skills/mastercompiler-setup/SKILL.md`. Download the
 jar and anything else at that same tag. (Copilot in VS Code: `skills/mastercompiler-vscode/SKILL.md` instead.)
 
@@ -85,7 +85,9 @@ the default). Ask the user first.
 - **Where objects go**: builds replace objects in the current library. It must be the user's own development library,
   never a shared or production one. Preview before writing anything, and get the user's OK.
 - **The repository**: the absolute path of the git repository (the MCP server runs with `--project <that path>`).
-  Without a `build.yaml` MC scans the sources (see the `mastercompiler` skill).
+  **Clone it before you register the server**: `--mcp --ssh` needs `--project`, and the entry names one repository
+  (another repository is another entry, or the same one edited). Without a `build.yaml` MC scans the sources (see the
+  `mastercompiler` skill).
 
 ## 4. Register the server (show the user the entry first)
 

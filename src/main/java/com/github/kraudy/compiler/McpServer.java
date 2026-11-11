@@ -313,7 +313,7 @@ public class McpServer {
     tools.add(tool("find_source",
         "Where the IBM i says objects were compiled from: source file members (ILE programs: per bound module), "
         + "stream files, binder source, and the /COPY members they include. Use it for programs, service programs "
-        + "and files the project uses but does not build (the build report's 'external' list), e.g. to read the "
+        + "and files the project uses but does not build (the 'external' list of plan with showExternal: true), e.g. to read the "
         + "parameters of a called program. Flags members changed after the compile (changed_since_compile) and "
         + "missing ones. Reads only.",
         find));
@@ -683,7 +683,7 @@ public class McpServer {
     objects.put("type", "array");
     objects.putObject("items").put("type", "string");
     objects.put("description", "Objects: NAME (looked up on the library list) or LIB/NAME, optionally followed "
-        + "by the type, e.g. \"CUSTSRV *SRVPGM\" as the build report's external list names them");
+        + "by the type, e.g. \"CUSTSRV *SRVPGM\" as plan's external list (showExternal: true) names them");
   }
 
   private ObjectNode buildSchema() {
@@ -758,6 +758,13 @@ public class McpServer {
     keepGoing.put("description", "build only (default true): false stops at the first failed target");
     props.putObject("showSkipped").put("type", "boolean").put("description",
         "true: list the unchanged (skipped) targets too; by default they are only counted");
+    props.putObject("replaceMembers").put("type", "boolean").put("description",
+        "build only (default false): DDS and OPM sources compile from a source member; one that exists and this "
+        + "project's builds did not write (or that changed since) is not replaced: its target fails with failedAt "
+        + "replaceMember, and plan warns first. true replaces every such member of this build: only after the user agreed");
+    props.putObject("showExternal").put("type", "boolean").put("description",
+        "true: list the objects the sources use that the project does not build ('external': \"CUSTSRV *SRVPGM\" -> "
+        + "the targets using it); by default only externalCount");
     return schema;
   }
 
@@ -1118,6 +1125,8 @@ public class McpServer {
     compiler.setPush(MasterCompiler.pushDir(parser, code4i, spec));
     /* One round trip should show every error: keep going unless the agent asks otherwise */
     compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));
+    /* A source member this project did not write is replaced only once the user agreed */
+    compiler.setReplaceMembers(args.path("replaceMembers").asBoolean(false));
 
     Set<String> files = files(args, spec);
     List<String> targets = new java.util.ArrayList<String>();
@@ -1132,6 +1141,8 @@ public class McpServer {
     BuildReport report = compiler.getReport();
     FormerTargets.update(projectDir(), report);  // before compact: every current target is still listed
     report.compact(args.path("minSeverity").asInt(20), args.path("showSkipped").asBoolean(false));
+    report.externalCount = report.external.size();
+    if (!args.path("showExternal").asBoolean(false)) report.hideExternal();
     if (progress == null) return toolResult(pretty.writeValueAsString(report), !report.success);
     progress.report = report;
     ObjectNode text = mapper.createObjectNode();

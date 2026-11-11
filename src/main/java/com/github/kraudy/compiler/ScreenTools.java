@@ -168,12 +168,35 @@ final class ScreenTools {
     }
     session = screen;
     if (codeRefused(target) != null) codeRefused(target, null);  // password and code accepted
+    /* The messages waiting at sign-on (Display Messages) are read once and left with F3, as a user does */
+    List<String> messages = null;
+    if (displayMessages(screen.lines())) {
+      messages = new java.util.ArrayList<String>();
+      for (String line : screen.lines()) if (!line.trim().isEmpty()) messages.add(line.trim());
+      screen.press(Screen5250.aid("F3"));
+      boolean left = screen.waitForInput(wait) && !displayMessages(screen.lines());
+      if (!left) messages.add(0, "(F3 did not leave it: the screen below is where the session is)");
+    }
     writeWatch();
     ObjectNode answer = view(screen);
+    if (messages != null) {
+      ObjectNode skipped = answer.putObject("skipped");
+      skipped.put("screen", "Display Messages, shown after the sign-on: MasterCompiler pressed F3");
+      ArrayNode shown = skipped.putArray("text");
+      for (String line : messages) shown.add(line);
+    }
     answer.put("signedOn", target.user + "@" + target.name);
     answer.put("note", "Signed on with the user profile's own library list, not the spec's: run CHGLIBL / CHGCURLIB on "
         + "a command line first when the program needs them. Sign off (SIGNOFF) before screen_close so the job ends.");
     return result(mapper.writeValueAsString(answer), false);
+  }
+
+  /* The Display Messages screen (DSPMSG) a sign-on shows when messages wait: its title is in the first rows */
+  static boolean displayMessages(List<String> lines) {
+    for (int r = 0; r < Math.min(3, lines.size()); r++) {
+      if (lines.get(r).trim().startsWith("Display Messages")) return true;  // "System: X" may follow on its row
+    }
+    return false;
   }
 
   /* The screens' CCSID when screen_open names none: MC_5250_CCSID, else the system's (QCHRID's code page, what a

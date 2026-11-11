@@ -44,6 +44,12 @@ public class BuildReport {
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
   public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
+  public Integer externalCount;  // MCP: how many there are; the list itself only with showExternal: true
+
+  /* The external list only on request: an agent rarely needs it, and it can be long */
+  public void hideExternal() {
+    external = null;
+  }
 
   public static class TargetResult {
     public String target;

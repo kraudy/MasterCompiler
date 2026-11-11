@@ -56,6 +56,7 @@ public class MasterCompiler{
   private String compileBaseDir = null; // where the IBM i job resolves relative SRCSTMF (spec dir or pushed dir)
   private boolean collectReport = false; // keep the report in memory (MCP) even without --json
   private Set<String> changedFiles = null; // explicit changed sources (MCP build/plan files), like --since
+  private Boolean replaceMembers = null;   // MCP: false refuses to replace a source member the project did not write
   private List<TargetSelection> onlyTargets = null;  // --target: build just these, no dependents
   private boolean keepGoing = false;  // --keep-going: after a failure, build everything that does not depend on it
   private List<CommandObject> libraryHooks = new ArrayList<CommandObject>(); // --code4i / --libl / --curlib
@@ -127,6 +128,10 @@ public class MasterCompiler{
   }
 
   /* Canonical absolute paths of changed sources; targets built = those + dependents */
+  public void setReplaceMembers(Boolean replaceMembers) {
+    this.replaceMembers = replaceMembers;
+  }
+
   public void setChangedFiles(Set<String> changedFiles) {
     this.changedFiles = changedFiles;
   }
@@ -176,7 +181,11 @@ public class MasterCompiler{
     commandExec.watch(progress, watch, globalSpec != null ? globalSpec.hookTimeout : null);
 
     /* Init migrator */
-    if (!noMigrate) migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
+    if (!noMigrate) {
+      migrator = new Migrator(connection, debug, verbose, currentUser, commandExec);
+      if (globalSpec.getBaseDirectory() != null) migrator.setProject(new java.io.File(globalSpec.getBaseDirectory()));
+      migrator.setReplaceMembers(replaceMembers);
+    }
 
     /* Init dependency awareness */
     if (needsDependencies()) depAwareness = new DependencyAwareness(system, debug, verbose);
@@ -427,12 +436,14 @@ public class MasterCompiler{
         if (verbose) logger.error("Target compilation failed: " + key.asString());
         if (reporting()) {
           /* Compiled, then a hook failed (tests among them): say which, apart from compile errors */
-          String failedAt = String.valueOf(e.getMessage()).startsWith(PROTECTED_REFUSAL) ? "protectedLibs" : stage;
+          String failedAt = String.valueOf(e.getMessage()).startsWith(PROTECTED_REFUSAL) ? "protectedLibs"
+              : String.valueOf(e.getMessage()).startsWith(Migrator.MEMBER_REFUSAL) ? "replaceMember" : stage;
           boolean testsFailed = assignTests(key, testsBefore);
           if ("hook".equals(failedAt) && testsFailed) failedAt = "tests";
           if (commandExec.timedOut()) failedAt = "timeout";
           if (progress.cancelRequested) failedAt = "cancelled";
-          String error = "compile".equals(failedAt) || "protectedLibs".equals(failedAt) ? e.getMessage() : describe(e);
+          String error = "hook".equals(failedAt) || "tests".equals(failedAt) || "timeout".equals(failedAt)
+              || "cancelled".equals(failedAt) ? describe(e) : e.getMessage();
           if ("tests".equals(failedAt)) error = (compileEnd != null ? "Compiled; the" : "The") + " tests failed (see tests). " + error;
           reportTarget(key, BuildReport.FAILED, command, error, targetStart);
           BuildReport.TargetResult result = report.targets.get(report.targets.size() - 1);

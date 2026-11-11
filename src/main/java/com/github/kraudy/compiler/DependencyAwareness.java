@@ -6,6 +6,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,6 +23,7 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.kraudy.compiler.CompilationPattern.CompCmd;
 import com.github.kraudy.compiler.CompilationPattern.ObjectType;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 import com.github.kraudy.compiler.CompilationPattern.SysCmd;
@@ -51,21 +53,13 @@ public class DependencyAwareness {
     private static final Pattern EXTNAME_PATTERN = Pattern.compile(
     "\\bEXTNAME\\s*\\(\\s*['\"]?([A-Z0-9$#@_]{1,10})['\"]?\\s*\\)", Pattern.CASE_INSENSITIVE);
 
-  /* Fixed-format F-spec: strict column logic
-   * - Exactly 5 characters (usually blanks) before the F (column 6)
-   * - F/f in column 6
-   * - Capture up to 10 characters for the file name (columns 7-16)
-   */
-  private static final Pattern FIXED_F_SPEC = Pattern.compile(
-      "^.{5}[fF]\\s*([A-Z0-9$#@_]{1,10})\\b", Pattern.CASE_INSENSITIVE);
-
   // Pattern for free-format DCL-F (captures the file name, possibly qualified)
   private static final Pattern FREE_DCL_F = Pattern.compile(
       "DCL-F\\s+([A-Z0-9$#@_./]+?)\\s+", Pattern.CASE_INSENSITIVE);
 
   // Pattern for embedded SQL table references (FROM, JOIN, INTO, UPDATE, DELETE FROM, INSERT INTO)
   private static final Pattern SQL_TABLE = Pattern.compile(
-    "(FROM|JOIN|INTO|UPDATE|DELETE FROM|INSERT INTO)\\s+([\"']?[\\w$#@_./]+[\"']?)",
+    "\\b(FROM|JOIN|UPDATE|(?:INSERT|MERGE)\\s+INTO)\\s+([\"']?[\\w$#@_./]+[\"']?)",  // a bare INTO names variables
     Pattern.CASE_INSENSITIVE);
 
   // Improved: captures table + optional implicit alias, stops before comma or explicit join parts
@@ -272,6 +266,9 @@ public class DependencyAwareness {
     /* Infer MODULE lists for srvpgms from binder EXPORT symbols + export map */
     inferSrvpgmModules(globalSpec, baseDir);
 
+    /* SRVPGM → its modules, binder source or not (EXPORT(*ALL) has none) */
+    applySrvpgmModuleDeps(globalSpec);
+
     this.includeBaseDir = baseDir;
     buildExportToSrvpgmMap(globalSpec, baseDir);
     collectBnddirMembership(globalSpec);
@@ -364,6 +361,27 @@ public class DependencyAwareness {
         }
       } catch (Exception e) {
         logger.warn("Failed to infer MODULE for {}: {}", target.asString(), e.getMessage());
+      }
+    }
+  }
+
+  /*
+   * Each *SRVPGM depends on the project modules it binds: its MODULE list, or the module of its own name when the
+   * list is empty or *SRVPGM (CRTSRVPGM's default). Every service program, not only those with a binder source, so a
+   * changed module also rebuilds a binder-less EXPORT(*ALL) one and what binds that.
+   */
+  private void applySrvpgmModuleDeps(BuildSpec globalSpec) {
+    for (TargetKey target : globalSpec.targets.keySet()) {
+      if (!target.isServiceProgram()) continue;
+      List<String> modules = new ArrayList<>(target.getModulesNameList());
+      if (modules.isEmpty()) modules.add(target.getObjectName());
+      for (String mod : modules) {
+        String name = mod.equalsIgnoreCase("*SRVPGM") ? target.getObjectName() : mod.toUpperCase();
+        TargetKey modDep = keyLookup.get(name + "." + ObjectType.MODULE.name());
+        if (modDep == null || !modDep.isModule()) continue;
+        target.addChild(modDep);
+        modDep.addFather(target);
+        if (verbose) logger.info("Dependency: {} depends on {}", target.asString(), modDep.asString());
       }
     }
   }
@@ -1081,7 +1099,7 @@ public class DependencyAwareness {
     try{ 
       if (verbose) logs.add("Scannig sources for exports: " + target.asString());
 
-      String sourceCode = readSource(fullPath);
+      String sourceCode = withoutComments(readSource(fullPath), target.getCompilationCommand());
 
       logs.add("Dependencies of " + target.asString());
 
@@ -1138,31 +1156,14 @@ public class DependencyAwareness {
     try {
       if (verbose) logs.add("Scannig sources: " + target.asString());
 
-      String sourceCode = readSource(fullPath);
+      /* Comments name objects too ("read from the file"): they are not references */
+      String sourceCode = withoutComments(readSource(fullPath), target.getCompilationCommand());
 
       logs.add("Dependencies of " + target.asString());
 
       //TODO: Improve this.
       /* Get srvpgm module dependencies */
       switch (target.getCompilationCommand()) {
-        /* Get srvpgm modules */
-        case CRTSRVPGM:
-          List<String> modulesList = target.getModulesNameList();
-          if (modulesList.isEmpty()) break;
-
-          for (String mod : modulesList) {
-            TargetKey modDep = keyLookup.getOrDefault(mod + "." + ObjectType.MODULE.name(), null);
-            if (modDep == null) continue;
-            if (!modDep.isModule()) continue;
-
-              /* Add module dependency to SrvPgm */
-            target.addChild(modDep);
-            /* Add SrvPgm dependency to module */
-            modDep.addFather(target);
-            if (verbose) logs.add("Dependency: " + target.asString() + " depends on " + modDep.asString());
-          }
-          break;
-      
         case CRTBNDRPG:
         case CRTSQLRPGI:
         case CRTRPGMOD:
@@ -1620,28 +1621,179 @@ public class DependencyAwareness {
     }
   }
 
-  /* 1. Fixed-format F-specs */
+  /* 1. Fixed-format F-specs: none in a **FREE source */
   private void getFixedFormatFilesDependencies(TargetKey target, String sourceCode, List<String> logs){
+    if (isFullyFree(sourceCode)) return;
     Set<String> depFileNames = new HashSet<>();
+    boolean rpg3 = target.getCompilationCommand() == CompCmd.CRTRPGPGM;
+    for (String line : sourceCode.split("\\r?\\n")) {
+      String fileName = fixedFileSpec(line, rpg3);
+      if (fileName != null) depFileNames.add(fileName);
+    }
+    addFileDependencies(target, depFileNames, logs);
+  }
 
-    /* 1. Fixed-format F-specs */
-    try (java.util.Scanner scanner = new java.util.Scanner(sourceCode)) {
-      while (scanner.hasNextLine()) {
-        String line = scanner.nextLine();
-        Matcher fixedMatcher = FIXED_F_SPEC.matcher(line);
-        if (!fixedMatcher.find())  continue;
-        String fileName = fixedMatcher.group(1).trim().toUpperCase();
-        fileName = fileName.replaceAll("[\\t\\n]", ""); // Remove /t /n
-        if (fileName.isEmpty()) continue;
-        // Skip non-files
-        //if (fileName.matches("(?i)SFL.*|CTL.*|KEY.*|INFO.*|INDDS|INFDS|RENAME|SFILE|RRN.*|OPT.*")) {
-        //  continue;
-        //}
-        depFileNames.add(fileName);
+  /*
+   * The file an F-spec declares: F in column 6, the name from column 7 (no blank before it) and a file type (I, O, U,
+   * C) in column 17 (RPG III: 15). A free-form line indented to column 6 ("     First = ...") is not one.
+   */
+  static String fixedFileSpec(String line, boolean rpg3) {
+    int type = rpg3 ? 14 : 16;
+    if (line.length() <= type || Character.toUpperCase(line.charAt(5)) != 'F') return null;
+    if ("IOUC".indexOf(Character.toUpperCase(line.charAt(type))) < 0) return null;
+    String name = line.substring(6, type).replaceAll("\\s+$", "").toUpperCase();  // columns 7-16 (RPG III: 7-14)
+    return name.matches("[A-Z$#@][A-Z0-9$#@_]{0,9}") ? name : null;
+  }
+
+  static boolean isFullyFree(String sourceCode) {
+    return sourceCode.trim().toUpperCase(java.util.Locale.ROOT).startsWith("**FREE");
+  }
+
+  /*
+   * The source without its comments, by language: RPG // (outside strings) and fixed-format comment lines (* in
+   * column 7), CL and SQL slash-star blocks, SQL --, DDS * in column 7. Line breaks stay, so line positions do too.
+   */
+  static String withoutComments(String code, CompCmd command) {
+    switch (command) {
+      case CRTBNDRPG: case CRTRPGMOD: case CRTSQLRPGI: case CRTRPGPGM: {
+        boolean free = isFullyFree(code);
+        StringBuilder out = new StringBuilder(code.length());
+        for (String line : code.split("\\r?\\n", -1)) {
+          if (!free && line.length() > 6 && line.charAt(6) == '*') line = "";  // fixed-format comment line
+          else line = cutOutsideStrings(line, "//", '\'');
+          out.append(line).append('\n');
+        }
+        return out.toString();
+      }
+      case CRTBNDCL: case CRTCLPGM: case CRTCLMOD:
+        return blockComments(code, '\'');
+      case RUNSQLSTM:
+        return sqlClean(code);
+      case CRTPF: case CRTLF: case CRTDSPF: case CRTPRTF: {
+        StringBuilder out = new StringBuilder(code.length());
+        for (String line : code.split("\\r?\\n", -1)) out.append(line.length() > 6 && line.charAt(6) == '*' ? "" : line).append('\n');
+        return out.toString();
+      }
+      default:
+        return code;
+    }
+  }
+
+  /* The line up to the first marker that is not inside a quote */
+  private static String cutOutsideStrings(String line, String marker, char quote) {
+    boolean inString = false;
+    for (int i = 0; i < line.length(); i++) {
+      char c = line.charAt(i);
+      if (c == quote) inString = !inString;  // a doubled quote toggles twice: still inside
+      else if (!inString && line.startsWith(marker, i)) return line.substring(0, i);
+    }
+    return line;
+  }
+
+  /* Slash-star blocks outside strings blanked; their line breaks kept */
+  private static String blockComments(String code, char quote) {
+    StringBuilder out = new StringBuilder(code.length());
+    boolean inString = false;
+    for (int i = 0; i < code.length(); i++) {
+      char c = code.charAt(i);
+      if (!inString && code.startsWith("/*", i)) {
+        int end = code.indexOf("*/", i + 2);
+        int stop = end < 0 ? code.length() : end + 2;
+        for (int j = i; j < stop; j++) if (code.charAt(j) == '\n') out.append('\n');
+        out.append(' ');
+        i = stop - 1;
+        continue;
+      }
+      if (c == quote) inString = !inString;
+      out.append(c);
+    }
+    return out.toString();
+  }
+
+  /* SQL in one pass: -- and slash-star comments out, string literals emptied (''); a quote in a comment or a comment
+     marker in a string is just text. Line breaks stay. */
+  static String sqlClean(String sql) {
+    StringBuilder out = new StringBuilder(sql.length());
+    int i = 0;
+    while (i < sql.length()) {
+      char c = sql.charAt(i);
+      if (c == '\'') {
+        int end = i + 1;
+        while (end < sql.length() && !(sql.charAt(end) == '\'' && (end + 1 >= sql.length() || sql.charAt(end + 1) != '\''))) {
+          end += sql.charAt(end) == '\'' ? 2 : 1;  // '' inside a string
+        }
+        out.append("''");
+        i = end + 1;
+      } else if (sql.startsWith("--", i)) {
+        int end = sql.indexOf('\n', i);
+        i = end < 0 ? sql.length() : end;
+      } else if (sql.startsWith("/*", i)) {
+        int end = sql.indexOf("*/", i + 2);
+        int stop = end < 0 ? sql.length() : end + 2;
+        for (int j = i; j < stop; j++) if (sql.charAt(j) == '\n') out.append('\n');
+        out.append(' ');
+        i = stop;
+      } else {
+        out.append(c);
+        i++;
       }
     }
+    return out.toString();
+  }
 
-    addFileDependencies(target, depFileNames, logs);
+  /* String literals emptied: their words are text, not table names */
+  private static String withoutStrings(String sql) {
+    return sql.replaceAll("'(?:[^']|'')*'", "''");
+  }
+
+  /* Free EXEC SQL ... ; and fixed C/EXEC SQL ... C/END-EXEC */
+  private static final Pattern FREE_EXEC_SQL = Pattern.compile("(?<!/)\\bEXEC\\s+SQL\\b", Pattern.CASE_INSENSITIVE);  // not C/EXEC SQL
+  /* FETCH ... FROM a cursor, PREPARE ... FROM a variable: statements that name no table. Not FETCH FIRST / FETCH NEXT
+     n ROWS, the row limit of a query, whose tables follow */
+  private static final Pattern SQL_NO_TABLE_STATEMENT = Pattern.compile(
+      "\\b(?:FETCH(?!\\s+(?:FIRST|NEXT\\s+[0-9:]))|PREPARE)\\b[^;]*", Pattern.CASE_INSENSITIVE);
+  /* WITH x AS (...), y (a, b) AS (...): common table expressions, not files */
+  private static final Pattern SQL_CTE_NAME = Pattern.compile(
+      "(?:\\bWITH|,)\\s*([A-Z$#@][A-Z0-9$#@_]*)\\s*(?:\\([^()]*\\))?\\s+AS\\s*\\(", Pattern.CASE_INSENSITIVE);
+  /* Words that follow FROM / JOIN / UPDATE without being a table */
+  private static final Set<String> SQL_NOT_TABLES = new HashSet<>(Arrays.asList(
+      "TABLE", "LATERAL", "FINAL", "NEW", "OLD", "UNNEST", "XMLTABLE", "JSON_TABLE", "SELECT", "VALUES", "DESCRIPTOR", "OF"));
+
+  /* The SQL statements of an RPG source, comments and strings removed: the only text where tables are named */
+  static String embeddedSql(String rpg) {
+    rpg = sqlClean(rpg);  // before looking for the ; that ends a statement: a string or an SQL comment may hold one
+    StringBuilder sql = new StringBuilder();
+    Matcher free = FREE_EXEC_SQL.matcher(rpg);
+    while (free.find()) {
+      int end = rpg.indexOf(';', free.end());
+      sql.append(rpg, free.end(), end < 0 ? rpg.length() : end).append(";\n");
+    }
+    boolean inFixed = false;
+    for (String line : rpg.split("\\r?\\n")) {
+      String spec = line.length() > 6 ? line.substring(5).toUpperCase(java.util.Locale.ROOT) : "";
+      if (spec.startsWith("C/EXEC SQL")) {
+        inFixed = true;
+        sql.append(line.substring(Math.min(line.length(), 16))).append('\n');
+      } else if (spec.startsWith("C/END-EXEC")) {
+        inFixed = false;
+        sql.append(";\n");
+      } else if (inFixed && spec.startsWith("C+")) {
+        sql.append(line.substring(Math.min(line.length(), 7))).append('\n');
+      }
+    }
+    return sql.toString();
+  }
+
+  /* The SQL where a FROM names a table: FETCH and PREPARE statements left out */
+  static String sqlForTables(String sql) {
+    return SQL_NO_TABLE_STATEMENT.matcher(withoutStrings(sql)).replaceAll(" ");
+  }
+
+  private static Set<String> sqlCteNames(String sql) {
+    Set<String> names = new HashSet<>();
+    Matcher m = SQL_CTE_NAME.matcher(sql);
+    while (m.find()) names.add(m.group(1).toUpperCase());
+    return names;
   }
 
   /* 2. Free-format DCL-F */
@@ -1662,18 +1814,21 @@ public class DependencyAwareness {
     addFileDependencies(target, depFileNames, logs);
   }
 
-  /* 3. Embedded SQL table references */
+  /* 3. Embedded SQL table references: only inside the SQL statements (RUNSQLSTM: the whole source) */
   private void getEmbeddedSqlDependencies(TargetKey target, String sourceCode, List<String> logs){
     Set<String> depFileNames = new HashSet<>();
+    String sql = sqlForTables(target.getCompilationCommand() == CompCmd.RUNSQLSTM ? sourceCode : embeddedSql(sourceCode));
+    Set<String> ctes = sqlCteNames(sql);
 
-    Matcher sqlMatcher = SQL_TABLE.matcher(sourceCode);
+    Matcher sqlMatcher = SQL_TABLE.matcher(sql);
     while (sqlMatcher.find()) {
       String rawName = sqlMatcher.group(2).trim().toUpperCase();
       rawName = rawName.replaceAll("^[\"']|[\"']$", "");
       if (rawName.isEmpty()) continue;
 
       String tableName = rawName.replaceAll("^.*[\\/.]", "");
-      if (tableName.isEmpty()) continue;
+      if (tableName.isEmpty() || !tableName.matches("[A-Z$#@][A-Z0-9$#@_]{0,9}")) continue;
+      if ((ctes.contains(tableName) && tableName.equals(rawName)) || SQL_NOT_TABLES.contains(tableName)) continue;  // MYLIB.X is a table
       depFileNames.add(tableName);
 
     }
@@ -1683,6 +1838,8 @@ public class DependencyAwareness {
 
   private void getSqlDdlTableDependencies(TargetKey target, String sourceCode, List<String> logs) {
     Set<String> tableNames = new HashSet<>();
+    Set<String> qualified = new HashSet<>();  // named LIB.X somewhere: a table, even with a CTE X
+    sourceCode = sqlForTables(sourceCode);
 
     Matcher fromMatcher = SQL_FROM_JOIN_PATTERN.matcher(sourceCode);
     while (fromMatcher.find()) {
@@ -1691,24 +1848,28 @@ public class DependencyAwareness {
       String tableName = rawTable.replaceAll("^.*[\\/.]", "");  // Strip schema/lib
       if (!tableName.isEmpty() && tableName.matches("[A-Z0-9$#@_]{1,10}")) {
           tableNames.add(tableName);
+          if (!tableName.equals(rawTable)) qualified.add(tableName);
       }
 
       // Chain comma-separated tables from current position
       int pos = fromMatcher.end();
       Matcher commaMatcher = SQL_COMMA_TABLE_PATTERN.matcher(sourceCode);
       commaMatcher.region(pos, sourceCode.length());
-      while (commaMatcher.find()) {
+      while (commaMatcher.lookingAt()) {  // only a list right after FROM t [alias], not every ", x" further on
         String rawCommaTable = commaMatcher.group(1).trim().toUpperCase();
         rawCommaTable = rawCommaTable.replaceAll("^[\"']|[\"']$", "");
         String commaTableName = rawCommaTable.replaceAll("^.*[\\/.]", "");
         if (!commaTableName.isEmpty() && commaTableName.matches("[A-Z0-9$#@_]{1,10}")) {
             tableNames.add(commaTableName);
+            if (!commaTableName.equals(rawCommaTable)) qualified.add(commaTableName);
         }
         pos = commaMatcher.end();
         commaMatcher.region(pos, sourceCode.length());
       }
     }
 
+    tableNames.removeAll(SQL_NOT_TABLES);
+    for (String cte : sqlCteNames(sourceCode)) if (!qualified.contains(cte)) tableNames.remove(cte);
     // Add as file deps
     for (String tableName : tableNames) {
       TargetKey tableKey = keyLookup.getOrDefault(tableName + "." + ParamCmd.FILE.name(), null);

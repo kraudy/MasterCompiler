@@ -483,7 +483,7 @@ public class ArgParser {
       if (hostServers) throw new IllegalArgumentException("Use either --remote or --host-servers");
     }
     if (ssh && mcp && projectRoot == null) {
-      throw new IllegalArgumentException("--ssh needs --project <local folder> to upload");
+      throw new IllegalArgumentException("--ssh needs --project <local folder> to upload: clone the repository first, then register the MCP server with its absolute path");
     }
     if (agent != null && !installSkills) throw new IllegalArgumentException("--agent goes with --install-skills");
     if (skillsDir != null && !installSkills) throw new IllegalArgumentException("--skills-dir goes with --install-skills");
