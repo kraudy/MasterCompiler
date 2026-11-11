@@ -36,23 +36,42 @@ final class ScreenTools {
   private ScreenTools() {}
 
   /*
-   * Service programs a build rebuilt while the 5250 session was open (not under the tools' lock: a tool may be waiting
+   * Programs and service programs a build rebuilt while the 5250 session was open (not under the tools' lock: a tool may be waiting
    * for a screen while the build ends). A job keeps the copy it activated, so the screens say so until a new session.
    */
   private static final Set<String> rebuiltSinceOpen = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-  /* A build's report targets ([{target, status}]): its built *SRVPGMs count for the open session */
-  static void built(JsonNode targets) {
+  /* Object types a job keeps activated: a session that ran one before its rebuild still runs the old copy */
+  private static final Set<String> ACTIVATED = new java.util.HashSet<String>(java.util.Arrays.asList("PGM", "SRVPGM"));
+
+  /*
+   * A build's report targets ([{target, status}]): the programs and service programs it replaced while a 5250 session
+   * is open (NAME *TYPE), also kept for that session's screens; empty with no session open
+   */
+  static List<String> built(JsonNode targets) {
     Screen5250 open = session;
-    if (open == null || open.closed()) return;
+    if (open == null || open.closed()) return new java.util.ArrayList<String>();
+    List<String> names = replacedObjects(targets);
+    rebuiltSinceOpen.addAll(names);
+    return names;
+  }
+
+  /* The programs and service programs a build's report targets replaced, as NAME *TYPE */
+  static List<String> replacedObjects(JsonNode targets) {
+    List<String> names = new java.util.ArrayList<String>();
     for (JsonNode t : targets) {
       String[] parts = t.path("target").asText("").split("\\.");
       for (int i = 1; i < parts.length; i++) {
-        if (parts[i].equalsIgnoreCase("SRVPGM") && replaced(t)) {
-          rebuiltSinceOpen.add(parts[i - 1].toUpperCase(java.util.Locale.ROOT));
-        }
+        String type = parts[i].toUpperCase(java.util.Locale.ROOT);
+        if (ACTIVATED.contains(type) && replaced(t)) names.add(parts[i - 1].toUpperCase(java.util.Locale.ROOT) + " *" + type);
       }
     }
+    return names;
+  }
+
+  /* The build report's line for names built() returned, null for none */
+  static String sessionHint(List<String> names) {
+    return names.isEmpty() ? null : String.join(", ", names) + REBUILT_NOTE;
   }
 
   /* Failures after the compile (a hook, its tests, a timeout) leave the new object in place */
@@ -505,7 +524,7 @@ final class ScreenTools {
     ObjectNode v = mapper.createObjectNode();
     List<String> lines = screen.lines();
     int cols = screen.cols();
-    if (!rebuiltSinceOpen.isEmpty()) v.put("rebuiltServicePrograms", String.join(", ", rebuiltSinceOpen) + REBUILT_NOTE);
+    if (!rebuiltSinceOpen.isEmpty()) v.put("rebuiltObjects", String.join(", ", rebuiltSinceOpen) + REBUILT_NOTE);
     v.put("state", screen.closed() ? "closed: " + screen.closedBy()
         : screen.inputError() ? "input error (the bottom line says why; the next screen_send resets it)"
         : screen.waitingForInput() ? "waiting for input" : "busy");

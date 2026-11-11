@@ -7,6 +7,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -119,7 +121,9 @@ public class Migrator {
             commandExec.executeCommand("CHGPFM FILE(" + key.getQualifiedSourceFile() + ") MBR(" + key.getSourceName()
                 + ") TEXT(''" + MEMBER_TEXT + "'')", commandExec.getCurrentTime());  // inside QCMDEXC('...'): quotes doubled
           }
-          if (!commandExec.isDryRun()) record(member(key));
+          /* created: MC added it (now, or at an earlier build and nobody changed it since): clean may remove it */
+          boolean created = before == null || (foreign == null && readMembers().path(before.id()).path("created").asBoolean(false));
+          if (!commandExec.isDryRun()) record(member(key), created, key.asString());
           key.put(ParamCmd.SRCFILE, key.getQualifiedSourceFile())
             .put(ParamCmd.SRCMBR, key.getObjectName())
             .removeStreamFile();
@@ -297,12 +301,18 @@ public class Migrator {
   }
 
   /* After MC wrote the member: its timestamps now, written to a temporary file first so a crash leaves the old record */
-  private void record(Member m) {
+  private void record(Member m, boolean created, String target) {
     if (project == null || m == null) return;
     ObjectNode all = readMembers();
     ObjectNode entry = all.putObject(m.id());
     entry.put("changed", m.changed);
     entry.put("sourceUpdated", m.sourceUpdated);
+    if (created) entry.put("created", true);
+    entry.put("target", target);  // two targets of one name (X.PGM, X.DSPF) have members in different source files
+    writeMembers(all);
+  }
+
+  private void writeMembers(ObjectNode all) {
     File file = new File(project, MEMBERS_FILE);
     try {
       file.getParentFile().mkdirs();
@@ -316,6 +326,87 @@ public class Migrator {
     } catch (Exception e) {
       logger.warn("Could not write {}: {}", MEMBERS_FILE, e.getMessage());
     }
+  }
+
+  private static final java.util.regex.Pattern MEMBER_ID = java.util.regex.Pattern.compile("^(\\S+) ([^/]+)/([^(]+)\\(([^)]+)\\)$");
+
+  /*
+   * clean: the members MC created for this target (its key) in library on this IBM i and nobody changed since, as
+   * LIB/FILE(MBR). A member MC replaced, one changed after MC wrote it, or one recorded before MC kept these (no
+   * created / target) is never listed. A record whose member is gone is forgotten.
+   */
+  List<String> createdMembers(String library, String target) throws SQLException {
+    List<String> out = new java.util.ArrayList<String>();
+    String server = currentServer();
+    ObjectNode all = readMembers();
+    List<String> gone = new java.util.ArrayList<String>();
+    java.util.Iterator<Map.Entry<String, JsonNode>> entries = all.fields();
+    while (entries.hasNext()) {
+      Map.Entry<String, JsonNode> entry = entries.next();
+      if (!cleanable(entry.getKey(), entry.getValue(), server, library, target)) continue;
+      java.util.regex.Matcher id = MEMBER_ID.matcher(entry.getKey());
+      id.matches();
+      Member now = memberAt(id.group(2), id.group(3), id.group(4));
+      if (now == null) gone.add(entry.getKey());
+      else if (written(now)) out.add(now.name);
+    }
+    if (!gone.isEmpty()) {
+      all.remove(gone);
+      writeMembers(all);
+    }
+    return out;
+  }
+
+  /* A members.json record clean may remove for this target: MC created it, for this target, on this IBM i, in library */
+  static boolean cleanable(String id, JsonNode record, String server, String library, String target) {
+    java.util.regex.Matcher m = MEMBER_ID.matcher(id);
+    return m.matches() && record.path("created").asBoolean(false) && target.equals(record.path("target").asText())
+        && m.group(1).equals(server) && m.group(2).equalsIgnoreCase(library);
+  }
+
+  /* clean: removes a member createdMembers listed (unless it changed meanwhile), and forgets it */
+  void removeMember(String name) throws Exception {
+    java.util.regex.Matcher id = MEMBER_ID.matcher(currentServer() + " " + name);
+    if (!id.matches()) throw new IllegalArgumentException("Not a member name: " + name);
+    /* checked again right before: an edit since the list was made keeps the member */
+    Member now = memberAt(id.group(2), id.group(3), id.group(4));
+    if (now != null && !written(now)) throw new IllegalStateException("it changed since MC wrote it: not removed");
+    if (now != null) commandExec.executeCommand("RMVM FILE(" + id.group(2) + "/" + id.group(3) + ") MBR(" + id.group(4) + ")", commandExec.getCurrentTime());
+    ObjectNode all = readMembers();
+    all.remove(currentServer() + " " + name);
+    writeMembers(all);
+  }
+
+  private String currentServer() throws SQLException {
+    try (Statement stmt = connection.createStatement();
+         ResultSet rs = stmt.executeQuery("SELECT CAST(CURRENT SERVER AS VARCHAR(18) CCSID " + MasterCompiler.INVARIANT_CCSID
+             + ") FROM SYSIBM.SYSDUMMY1")) {
+      return rs.next() ? rs.getString(1).trim() : "";
+    }
+  }
+
+  /* LIB/FILE(MBR) as SYSPARTITIONSTAT has it now, null when it is gone */
+  private Member memberAt(String library, String file, String member) throws SQLException {
+    try (Statement stmt = connection.createStatement();
+         ResultSet rs = stmt.executeQuery(
+            "SELECT COALESCE(CAST(PARTITION_TEXT AS VARCHAR(50) CCSID " + MasterCompiler.INVARIANT_CCSID + "), '') AS Text, " +
+            "VARCHAR(LAST_CHANGE_TIMESTAMP) AS Changed, VARCHAR(LAST_SOURCE_UPDATE_TIMESTAMP) AS SourceUpdated, " +
+            "CAST(CURRENT SERVER AS VARCHAR(18) CCSID " + MasterCompiler.INVARIANT_CCSID + ") AS Server " +
+            "FROM QSYS2.SYSPARTITIONSTAT WHERE SYSTEM_TABLE_SCHEMA = '" + sql(library) + "' " +
+            "AND SYSTEM_TABLE_NAME = '" + sql(file) + "' AND SYSTEM_TABLE_MEMBER = '" + sql(member) + "'")) {
+      if (!rs.next()) return null;
+      Member m = new Member();
+      m.server = rs.getString("Server").trim();
+      m.name = library.toUpperCase() + "/" + file.toUpperCase() + "(" + member.toUpperCase() + ")";
+      m.text = rs.getString("Text").trim();
+      m.changed = rs.getString("Changed");
+      m.sourceUpdated = rs.getString("SourceUpdated");
+      return m;
+    }
+  }
+
+  private static String sql(String name) {
+    return name.toUpperCase().replace("'", "''");
   }
 
   /* Validate if Source Member exists */

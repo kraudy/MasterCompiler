@@ -3,6 +3,23 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.34
+
+- A build that replaces a program or service program while a 5250 session is open says so in `screenSession` (also
+  over SSH, where the session runs on the PC): a job keeps the copy it activated, so SIGNOFF, `screen_close` and
+  `screen_open` (or RCLACTGRP for a named group) load the new one. The screens' `rebuiltServicePrograms` is now
+  `rebuiltObjects` and includes programs.
+- protectedLibs: the refusal names the exact file on the PC (also over SSH) and the line to add; `--doctor` shows
+  whether the project sets it (`--project`, or the repository it runs in), and the next steps ask for it at setup.
+- `impact` checks the library: `sourceOnly` lists targets whose object is not there (never built, or deleted),
+  `presenceUnknown` SQL objects it cannot tell by name; `deployedOnly: true` leaves `sourceOnly` out. A failed check
+  leaves the lists as before, with `presence` saying why.
+- `clean` also removes the source members MC's builds created for the targets it cleans (the QDSPFSRC member of a
+  display file, ...): `.mc/members.json` now records which target created a member. A member that was there before MC
+  wrote it, that changed since, or that an earlier version recorded, is never removed; a member a lock kept is retried
+  by the next `clean`. `clean` now deletes only in the current library: a target with a library of its own was
+  checked there but deleted from `*CURLIB`, so another object of that name in the current library could go.
+
 ## v0.3.33
 
 - `--mcp` (also `--mcp --ssh`) no longer needs `--project`: one server entry, registered once at user scope, serves

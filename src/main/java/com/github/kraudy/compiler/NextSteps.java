@@ -77,6 +77,9 @@ final class NextSteps {
     String run = WINDOWS && !word(java(), false).equals(java()) ? "& " : "";
     out.append("  Copilot    : ").append(run).append(word(java(), false)).append(" -jar ").append(word(VscodeSetup.jarPath(), false))
         .append(" --setup-vscode --project <repository> (in VS Code, per repository)\n");
+    out.append("In each repository, set protectedLibs at setup (" + ProtectedLibs.REFUSALS + "): the top-level line "
+        + ProtectedLibs.EXAMPLE + " in build.yaml, or in mc-base.yaml for a scanned project; --doctor --project <repository> "
+        + "shows it.\n");
     out.append("Then restart the client (Claude Code: /mcp reconnects): a server registered while it runs has no tools "
         + "until then. The password itself never goes in these commands or in the chat.");
     return out.toString();

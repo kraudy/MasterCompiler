@@ -30,6 +30,7 @@ public class BuildReport {
   public int blocked;
   public String error;  // failure outside a target (global hooks, connection, ...)
   public List<String> warnings;  // from reading the sources, e.g. two files building the same object
+  public String screenSession;   // MCP: programs rebuilt while a 5250 session is open, and how to load the new copy
   public Integer warningsShownEarlier;  // MCP: warnings already in an earlier answer of this session, left out
   public String spec;            // spec files and a short hash of each: which spec this report was built from
   public String currentLibrary;  // after the global hooks ran: where *CURLIB targets go

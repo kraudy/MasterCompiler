@@ -280,10 +280,14 @@ public class McpServer {
     object.put("description", "A target as plan and build name it (ARTICLE, SRV_BASE36.MODULE, LIB/NAME or the full key "
         + "curlib.ARTICLE.pf.dds), or a source or copybook file (BASE36_H, qrpgleref/base36_h.rpgleinc, QRPGLEREF,BASE36_H): "
         + "then the targets that compile it or copy it in, and their dependents");
+    ((ObjectNode) impact.get("properties")).putObject("deployedOnly").put("type", "boolean").put("description",
+        "true: leave out the targets whose object is not in the library (sourceOnly)");
     impact.putArray("required").add("object");
     tools.add(tool("impact",
         "Everything that would have to be rebuilt if this object changed: the targets that depend " +
-        "on it, directly or transitively, in build order. Reads sources only; compiles nothing.",
+        "on it, directly or transitively, in build order. Reads the sources, then checks the library: sourceOnly lists "
+        + "the targets whose object is not there (never built, or deleted), presenceUnknown the SQL objects it cannot "
+        + "tell. Compiles nothing.",
         impact));
 
     ObjectNode open = mapper.createObjectNode();
@@ -309,7 +313,9 @@ public class McpServer {
         "Delete this project's objects from the current library, e.g. to remove a demo. Only when the user asks. "
         + "First call it without confirm: it lists the target objects that exist there and deletes nothing. Show "
         + "that list to the user (it includes any object with a target's name and type, even one MC did not build) "
-        + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members. With "
+        + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members, and the source "
+        + "members MC's builds created for them (DDS and OPM sources: membersWouldRemove / membersRemoved; never a member "
+        + "MC did not create or that changed since). Only the current library. With "
         + "formerTargets: true it deletes the objects MC built for targets taken out of the spec instead.",
         clean));
     if (parser.isSsh()) {
@@ -1166,7 +1172,7 @@ public class McpServer {
     compiler.build();
     BuildReport report = compiler.getReport();
     FormerTargets.update(projectDir(), report);  // before compact: every current target is still listed
-    if (!dryRun) ScreenTools.built(pretty.valueToTree(report.targets));
+    if (!dryRun) report.screenSession = ScreenTools.sessionHint(ScreenTools.built(pretty.valueToTree(report.targets)));
     report.compact(args.path("minSeverity").asInt(20), args.path("showSkipped").asBoolean(false));
     report.externalCount = report.external.size();
     if (!args.path("showExternal").asBoolean(false)) report.hideExternal();
@@ -1218,12 +1224,49 @@ public class McpServer {
     }
     ArrayNode targets = result.putArray("targets");
     ArrayNode dependents = result.putArray("dependents");
-    for (TargetKey key : spec.targets.keySet()) {  // spec order = build order
-      if (!rebuild.contains(key)) continue;
+    List<TargetKey> listed = new java.util.ArrayList<TargetKey>();
+    for (TargetKey key : spec.targets.keySet()) if (rebuild.contains(key)) listed.add(key);  // spec order = build order
+
+    /* Which of them exist in the library: after the graph, so a failed check leaves the answer as it was (unknown) */
+    Set<TargetKey> sourceOnly = new HashSet<TargetKey>();
+    boolean checked = false;
+    try {
+      connectWithLibraryList();
+      result.put("library", currentLibrary());
+      ObjectDescriptor objects = new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose());
+      ArrayNode notThere = result.putArray("sourceOnly");    // built from the sources, never in the library (or deleted)
+      ArrayNode unknown = result.putArray("presenceUnknown"); // SQL objects: their SQL name need not be the object's
+      for (TargetKey key : listed) {
+        if (!PRESENCE_CHECKED.contains(key.getObjectTypeEnum())) {
+          unknown.add(key.asString());
+          continue;
+        }
+        objects.objectExists(key);
+        if (key.objectExists()) continue;
+        sourceOnly.add(key);
+        notThere.add(key.asString());
+      }
+      checked = true;
+    } catch (Exception e) {
+      result.remove(java.util.Arrays.asList("library", "sourceOnly", "presenceUnknown"));
+      result.put("presence", "Not checked on the IBM i (" + e.getMessage() + "): the lists are the sources' only");
+    }
+    boolean deployedOnly = args.path("deployedOnly").asBoolean(false);
+    if (deployedOnly && !checked) result.put("deployedOnly", "ignored: the library could not be checked");
+    for (TargetKey key : listed) {
+      if (deployedOnly && checked && sourceOnly.contains(key)) continue;
       (seeds.contains(key) ? targets : dependents).add(key.asString());
     }
     return toolResult(pretty.writeValueAsString(result), false);
   }
+
+  /* Types whose object name is the target's name: impact can tell whether they are in the library */
+  static final Set<CompilationPattern.ObjectType> PRESENCE_CHECKED = java.util.EnumSet.of(
+      CompilationPattern.ObjectType.PGM, CompilationPattern.ObjectType.SRVPGM, CompilationPattern.ObjectType.MODULE,
+      CompilationPattern.ObjectType.PF, CompilationPattern.ObjectType.LF, CompilationPattern.ObjectType.DSPF,
+      CompilationPattern.ObjectType.PRTF, CompilationPattern.ObjectType.CMD, CompilationPattern.ObjectType.MNU,
+      CompilationPattern.ObjectType.QMQRY, CompilationPattern.ObjectType.DTAARA, CompilationPattern.ObjectType.DTAQ,
+      CompilationPattern.ObjectType.BNDDIR, CompilationPattern.ObjectType.MSGF);
 
   /* Lists (confirm false) or deletes (confirm true) the targets that exist in the current library, dependents first */
   private ObjectNode clean(JsonNode args) throws Exception {
@@ -1257,13 +1300,28 @@ public class McpServer {
         targets.add(key);
       }
     } else {
-      targets.addAll(spec.targets.keySet());
+      /* the current library only, as the tool says: a target with a library of its own is left alone */
+      for (TargetKey key : spec.targets.keySet()) {
+        if (key.isCurLib() || key.getLibrary().equalsIgnoreCase(curlib)) targets.add(key);
+        else elsewhere.add(key.asString() + ": in " + key.getLibrary() + ", not the current library (" + curlib + "): not deleted here");
+      }
       java.util.Collections.reverse(targets);  // dependents first
     }
+    /* Source members the builds created for these targets (DDS, OPM sources), as they left them: also when the object
+       is gone already, so a member a lock kept the last time is removed now */
+    Migrator migrator = new Migrator(connection, parser.isDebug(), parser.isVerbose(), null, executor);
+    migrator.setProject(projectDir());
+    java.util.Map<TargetKey, List<String>> members = new java.util.LinkedHashMap<TargetKey, List<String>>();
+    List<TargetKey> forgetFormer = new java.util.ArrayList<TargetKey>();  // forgotten once nothing of theirs is left
+    Set<TargetKey> membersLeft = new HashSet<TargetKey>();
     for (TargetKey key : targets) {
       objects.objectExists(key);
       if (key.objectExists()) existing.add(key);
-      else if (former) FormerTargets.forget(projectDir(), key.asString());  // already gone
+      else if (former) forgetFormer.add(key);  // already gone
+      String resolved = key.asString();
+      if (key.isCurLib()) resolved = curlib + resolved.substring(resolved.indexOf('.'));
+      List<String> own = migrator.createdMembers(curlib, resolved);
+      if (!own.isEmpty()) members.put(key, own);
     }
 
     boolean confirmed = args.path("confirm").asBoolean(false);
@@ -1273,6 +1331,7 @@ public class McpServer {
     ArrayNode listed = result.putArray(confirmed ? "deleted" : "wouldDelete");
     ArrayNode failed = result.putArray("notDeleted");
     failed.addAll(elsewhere);
+    Set<TargetKey> deleted = new HashSet<TargetKey>();
     for (TargetKey key : existing) {
       String name = key.getObjectName() + " *" + key.getObjectTypeEnum().name();
       if (!confirmed) {
@@ -1281,15 +1340,36 @@ public class McpServer {
       }
       try {
         executor.deleteObject(key);
+        deleted.add(key);
         listed.add(name);
         removeEventMember(key.getObjectName());
-        if (former) FormerTargets.forget(projectDir(), key.asString());
+        if (former) forgetFormer.add(key);
       } catch (Exception e) {
         failed.add(name + ": " + e.getMessage());
       }
     }
+    ArrayNode memberList = result.putArray(confirmed ? "membersRemoved" : "membersWouldRemove");
+    for (java.util.Map.Entry<TargetKey, List<String>> own : members.entrySet()) {
+      if (!confirmed || (existing.contains(own.getKey()) && !deleted.contains(own.getKey()))) membersLeft.add(own.getKey());
+      if (confirmed && existing.contains(own.getKey()) && !deleted.contains(own.getKey())) continue;  // its object stays
+      for (String member : own.getValue()) {
+        if (!confirmed) {
+          memberList.add(member);
+          continue;
+        }
+        try {
+          migrator.removeMember(member);
+          memberList.add(member);
+        } catch (Exception e) {
+          membersLeft.add(own.getKey());
+          failed.add(member + ": " + e.getMessage() + " (kept in .mc/members.json: the next clean tries again)");
+        }
+      }
+    }
+    /* a former target stays recorded while a member of its is left, so the next clean formerTargets finds it again */
+    for (TargetKey key : forgetFormer) if (!membersLeft.contains(key)) FormerTargets.forget(projectDir(), key.asString());
     if (!confirmed) {
-      result.put("next", existing.isEmpty() ? "Nothing to delete."
+      result.put("next", existing.isEmpty() && members.isEmpty() ? "Nothing to delete."
           : "Nothing deleted yet. Show this list to the user; if they agree, call clean again with confirm: true.");
     }
     return toolResult(pretty.writeValueAsString(result), false);
@@ -1523,12 +1603,23 @@ public class McpServer {
     }
   }
 
-  /* What a refusal for missing protectedLibs asks for: the line, and the file it goes in */
+  /* What a refusal for missing protectedLibs asks for: the line, and the file on the user's PC it goes in */
   private String protectedLibsHint() {
-    String file = parser.hasScan() ? (parser.getBaseFile() != null ? new File(parser.getBaseFile()).getName() : "mc-base.yaml")
-        + " in the scanned source folder (create it if missing)" : new File(specName()).getName();
-    return "Ask the user which libraries hold production data, then add a top-level line such as "
-        + "protectedLibs: [PRODLIB1, PRODLIB2] to " + file + " and call again (the spec is read at each call: no restart).";
+    /* the file this server reads the spec from: --base, the scan's mc-base.yaml, the -f / build.yaml spec (TOBi: none) */
+    File file = parser.getBaseFile() != null ? new File(parser.getBaseFile())
+        : parser.hasScan() ? new File(parser.getScanRoot(), SpecGenerator.DEFAULT_BASE_NAME)
+        : parser.hasFile() ? new File(parser.getYamlFile()) : null;
+    if (file == null) return ProtectedLibs.howToSet(null);
+    boolean exists = file.isFile();
+    String path = file.getAbsolutePath();
+    /* --mcp --ssh: this runs on the IBM i, in the uploaded copy; the user edits the file in the project on the PC */
+    String local = parser.getLocalProject();
+    String copy = projectDir().getAbsolutePath();
+    if (local != null && path.startsWith(copy)) {
+      String rest = path.substring(copy.length());
+      path = local + (local.contains("\\") ? rest.replace('/', '\\') : rest);  // a Windows PC keeps its separators
+    }
+    return ProtectedLibs.howToSet(path, exists);
   }
 
   private List<String> protectedLibs() {

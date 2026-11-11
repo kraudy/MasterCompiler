@@ -394,7 +394,7 @@ public class CommandExecutor {
 
     /* This also finds procedures which are of type PGM, and tables of type FILE */
     CommandObject dlt = new CommandObject(SysCmd.DLTOBJ)
-      .put(ParamCmd.OBJ, key.getQualifiedObject(ValCmd.CURLIB))
+      .put(ParamCmd.OBJ, key.isCurLib() ? key.getQualifiedObject(ValCmd.CURLIB) : key.getQualifiedObject())  // where objectExists looked
       .put(ParamCmd.OBJTYPE, ValCmd.fromString(key.getObjectType()));
 
     executeCommand(dlt);

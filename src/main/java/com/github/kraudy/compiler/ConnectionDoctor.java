@@ -31,12 +31,24 @@ final class ConnectionDoctor {
   static int run(ArgParser parser) throws Exception {
     found = null;
     int status = check(parser);
+    System.out.println("protectedLibs     : " + protectedLibs(parser));  // the project's, whatever the connection did
     System.out.println();
     System.out.println(NextSteps.text(found));
     return status;
   }
 
   private static NextSteps.Known found;
+
+  /* The project's protectedLibs (--project, else the repository this runs in), or how to set them */
+  static String protectedLibs(ArgParser parser) {
+    File project = parser.getProjectRoot() != null ? new File(parser.getProjectRoot())
+        : ArgParser.workingProject(new File(System.getProperty("user.dir")), System.getProperty("user.home"));
+    if (project == null) return "no project here (--project <repository> checks one)";
+    File file = ProtectedLibs.file(project, parser.getSpecName());
+    java.util.List<String> libs = ProtectedLibs.read(file);
+    return libs.isEmpty() ? "NOT SET in " + project + ". " + ProtectedLibs.howToSet(file)
+        : String.join(" ", libs) + " (" + file + ")";
+  }
 
   private static int check(ArgParser parser) throws Exception {
     PrintStream out = System.out;

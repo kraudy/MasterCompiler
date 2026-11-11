@@ -86,6 +86,10 @@ the default). Ask the user first. If a folder cannot be written (a sandbox), MC 
   user, transport and where the password would come from, never the password.
 - **Where objects go**: builds replace objects in the current library. It must be the user's own development library,
   never a shared or production one. Preview before writing anything, and get the user's OK.
+- **Which libraries are production**: ask now, and add them to the repository's spec as the top-level line
+  `protectedLibs: [PRODLIB1, PRODLIB2]` (in `build.yaml`, or `mc-base.yaml` for a scanned project; create it if
+  missing). MC never touches them, and without the line `run_command` refuses and `call_program` refuses programs that
+  change files. `--doctor --project <repository>` shows whether it is set and which file it belongs in.
 - **The repository**: no need to name it in the entry. Registered without `--project` (user scope), one entry serves
   every repository: MC uses the folder the client runs in (Claude Code's project folder, or a folder with `build.yaml`,
   `Rules.mk` or `.git`, a subfolder's repository included; never the home folder). Started anywhere else, `status`

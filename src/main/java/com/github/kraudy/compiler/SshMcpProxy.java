@@ -692,6 +692,27 @@ public class SshMcpProxy {
   private final java.util.concurrent.atomic.AtomicInteger ownIds = new java.util.concurrent.atomic.AtomicInteger();
 
   private final Set<String> finishedBuilds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  /* buildId -> its screenSession line: every answer about that build carries it (also after this server's own probe) */
+  private final Map<String, String> screenHints = new java.util.concurrent.ConcurrentHashMap<String, String>();
+
+  /* A build or build_status answer: its screenSession line, from this PC where the 5250 session runs */
+  String withScreenHint(String line) {
+    if (screenHints.isEmpty()) return line;
+    try {
+      JsonNode response = mapper.readTree(line);
+      ObjectNode content = (ObjectNode) response.path("result").path("content").path(0);
+      JsonNode text = mapper.readTree(content.path("text").asText("{}"));
+      ObjectNode build = !text.isObject() ? null : text.has("buildId") ? (ObjectNode) text
+          : text.path("build").isObject() ? (ObjectNode) text.get("build") : null;
+      String hint = build != null ? screenHints.get(build.path("buildId").asText()) : null;
+      if (hint == null) return line;
+      build.put("screenSession", hint);
+      content.put("text", text.toPrettyString());
+      return mapper.writeValueAsString(response);
+    } catch (Exception e) {
+      return line;
+    }
+  }
 
   void noteBuild(JsonNode response) {
     try {
@@ -702,8 +723,11 @@ public class SshMcpProxy {
       if ("running".equals(build.path("state").asText())) remoteBuild = build.get("buildId").asText();
       else if (build.get("buildId").asText().equals(remoteBuild)) remoteBuild = null;
       /* 5250 runs on this PC: a finished build's service programs, once (build_status may repeat it later) */
-      if (!"running".equals(build.path("state").asText()) && finishedBuilds.add(build.get("buildId").asText())) {
-        ScreenTools.built(build.path("targets"));
+      /* a cancel answer may end it without the report: the build_status that brings the targets counts */
+      if (!"running".equals(build.path("state").asText()) && build.path("targets").isArray()
+          && finishedBuilds.add(build.get("buildId").asText())) {
+        String hint = ScreenTools.sessionHint(ScreenTools.built(build.path("targets")));
+        if (hint != null) screenHints.put(build.get("buildId").asText(), hint);
       }
     } catch (Exception notJson) { /* an error text: no build state in it */ }
   }
@@ -891,7 +915,10 @@ public class SshMcpProxy {
         synchronized (s) {
           if (s.ending != null) continue;
           if (!response.has("method")) s.inFlight.remove(response.path("id").toString());  // an answer, not MC's own request
-          if (buildCalls.remove(response.path("id").toString())) noteBuild(response);
+          if (buildCalls.remove(response.path("id").toString())) {
+            noteBuild(response);
+            line = withScreenHint(line);
+          }
           if (!pendingStatus.isEmpty()) line = afterStatus(line);
           if (!pendingResults.isEmpty()) line = afterResults(line);
           send(pendingImports.isEmpty() ? line : afterImport(line));
