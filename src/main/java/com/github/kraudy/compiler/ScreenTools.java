@@ -7,6 +7,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,40 @@ final class ScreenTools {
   private static volatile File watchFile;
 
   private ScreenTools() {}
+
+  /*
+   * Service programs a build rebuilt while the 5250 session was open (not under the tools' lock: a tool may be waiting
+   * for a screen while the build ends). A job keeps the copy it activated, so the screens say so until a new session.
+   */
+  private static final Set<String> rebuiltSinceOpen = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  /* A build's report targets ([{target, status}]): its built *SRVPGMs count for the open session */
+  static void built(JsonNode targets) {
+    Screen5250 open = session;
+    if (open == null || open.closed()) return;
+    for (JsonNode t : targets) {
+      String[] parts = t.path("target").asText("").split("\\.");
+      for (int i = 1; i < parts.length; i++) {
+        if (parts[i].equalsIgnoreCase("SRVPGM") && replaced(t)) {
+          rebuiltSinceOpen.add(parts[i - 1].toUpperCase(java.util.Locale.ROOT));
+        }
+      }
+    }
+  }
+
+  /* Failures after the compile (a hook, its tests, a timeout) leave the new object in place */
+  private static final Set<String> FAILED_AFTER_COMPILE = new java.util.HashSet<String>(java.util.Arrays.asList("hook", "tests", "timeout"));
+
+  private static boolean replaced(JsonNode target) {
+    String status = target.path("status").asText();
+    return BuildReport.BUILT.equals(status)
+        || (BuildReport.FAILED.equals(status) && FAILED_AFTER_COMPILE.contains(target.path("failedAt").asText()));
+  }
+
+  private static final String REBUILT_NOTE = " rebuilt while this 5250 session was open. A program that already ran in "
+      + "this job keeps the copy it activated: in the default activation group (e.g. ACTGRP(*CALLER) called from the "
+      + "command line) until sign-off, in a named one until that group ends (RCLACTGRP, once nothing in it runs). To "
+      + "run the new code: screen_send SIGNOFF, screen_close, then screen_open.";
 
   /* A tool result for one of TOOLS; target is the build connection's sign-on (null: not available here) */
   static synchronized ObjectNode handle(String tool, JsonNode args, SignOnGuard.Target target, File project) {
@@ -167,6 +202,7 @@ final class ScreenTools {
       throw e;
     }
     session = screen;
+    rebuiltSinceOpen.clear();  // a new job: it activates what is there now
     if (codeRefused(target) != null) codeRefused(target, null);  // password and code accepted
     /* The messages waiting at sign-on (Display Messages) are read once and left with F3, as a user does */
     List<String> messages = null;
@@ -469,6 +505,7 @@ final class ScreenTools {
     ObjectNode v = mapper.createObjectNode();
     List<String> lines = screen.lines();
     int cols = screen.cols();
+    if (!rebuiltSinceOpen.isEmpty()) v.put("rebuiltServicePrograms", String.join(", ", rebuiltSinceOpen) + REBUILT_NOTE);
     v.put("state", screen.closed() ? "closed: " + screen.closedBy()
         : screen.inputError() ? "input error (the bottom line says why; the next screen_send resets it)"
         : screen.waitingForInput() ? "waiting for input" : "busy");

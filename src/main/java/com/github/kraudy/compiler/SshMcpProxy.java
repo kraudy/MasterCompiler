@@ -51,7 +51,8 @@ public class SshMcpProxy {
   private final ObjectMapper mapper = new ObjectMapper();
   private PrintStream protocolOut;
   private volatile SshTarget ssh;
-  private File project;
+  private volatile File project;  // null until open_project when the server started with none
+  private volatile boolean setupStarted;
   private volatile String remoteDir;
   private volatile String host;  // set once connected (the home directory may come from the IBM i)
 
@@ -88,7 +89,7 @@ public class SshMcpProxy {
     t.setDaemon(true);
     return t;
   });
-  private ReadOnlyConnections.Router router;  // calls for the spec's read-only connections
+  private volatile ReadOnlyConnections.Router router;  // calls for the spec's read-only connections
   private SignOnGuard.Target buildTarget;      // the build connection's sign-on
   private final Set<String> pendingImports = java.util.concurrent.ConcurrentHashMap.newKeySet();  // import_source call ids  // VS Code closed the session: the remote end stopping is expected
 
@@ -104,17 +105,15 @@ public class SshMcpProxy {
     code4i = MasterCompiler.code4i(parser);
     configure(code4i);
     TrustStores.warnIfNone();  // screen_open runs from here
-    router =new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
+    router = new ReadOnlyConnections.Router(McpServer.folderOf(project), true, code4i != null ? code4i.name : null);
     SignOnGuard.known(buildTarget);
 
     /*
      * initialize and tools/list are answered here right away; connecting, the first jar upload and the
      * first sync run meanwhile, so a slow link does not hit VS Code's start timeout. Tool calls wait for them.
+     * With no project yet that waits for open_project.
      */
-    Session first = session;
-    Thread setup = new Thread(() -> start(first), "mc-ssh-setup");
-    setup.setDaemon(true);
-    setup.start();
+    if (project != null) startSetup();
 
     McpServer local = new McpServer(parser);
     SecretPrompt.sender(this::send);
@@ -134,6 +133,13 @@ public class SshMcpProxy {
         if (SecretPrompt.answer(request)) continue;  // the client's answer to a 5250 secret request from here
         JsonNode id = request.get("id");
         if (id == null) continue;  // notifications: the remote server ignores them as well
+        String called = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
+        /* open_project after the calls already queued, so none of them meets a half-changed project */
+        if (called.equals("open_project")) {
+          String open = line;
+          calls.execute(() -> openProject(open));
+          continue;
+        }
         JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
         /* status before MC runs on the IBM i: answered here, with the stage it is at */
         if (result == null && "tools/call".equals(request.path("method").asText(""))
@@ -212,8 +218,8 @@ public class SshMcpProxy {
     SshTarget.Port sshPort = SshTarget.Port.of(parser, code4i);
     port = sshPort.number;
     logger.info("SSH port {} ({})", port, sshPort.origin);
-    project = new File(parser.getProjectRoot()).getCanonicalFile();
-    SignOnGuard.project(project);
+    project = parser.getProjectRoot() != null ? new File(parser.getProjectRoot()).getCanonicalFile() : null;
+    SignOnGuard.project(McpServer.folderOf(project));
     buildTarget = new SignOnGuard.Target(code4i != null ? code4i.name : host, host, user, Passwords.get(user + "@" + host));
   }
 
@@ -273,6 +279,61 @@ public class SshMcpProxy {
     }
     if (owner == null || !owner.trim().equals(id)) ssh.upload(id.getBytes(StandardCharsets.UTF_8), dir + marker);
     return dir;
+  }
+
+  /* The first session, in the background */
+  private void startSetup() {
+    setupStarted = true;
+    Session first = session;
+    Thread setup = new Thread(() -> start(first), "mc-ssh-setup");
+    setup.setDaemon(true);
+    setup.start();
+  }
+
+  /*
+   * open_project, on the calls thread (after the calls sent before it): the first project starts MC on the IBM i; another
+   * one ends the session of the last (its MC there is stopped at the next start, which syncs the new folder). Refused
+   * while anything of the last project is still on its way, so no answer of one project lands in the other.
+   */
+  private void openProject(String line) {
+    String text;
+    boolean error = true;
+    try {
+      String path = mapper.readTree(line).path("params").path("arguments").path("path").asText("");
+      Session s = session;
+      /* builds still queued were sent after open_project (the calls thread runs in order): they run in the new project */
+      boolean busy = !s.inFlight.isEmpty() || remoteBuild != null || !pendingImports.isEmpty()
+          || !pendingResults.isEmpty();  // a status queued after it only reads
+      if (project != null && parser.getPush() != null) {
+        text = "This server uploads to --push " + parser.getPush() + ": another project would be synced over this one there. "
+            + "Register another server entry for it.";
+      } else if (project != null && (busy || (setupStarted && !s.ready.isDone()))) {
+        text = "Calls of " + project + " are still running on the IBM i (or MC is still starting there): call open_project "
+            + "again once they answered.";
+      } else {
+        parser.openProject(path);
+        File next = new File(parser.getProjectRoot()).getCanonicalFile();
+        boolean same = next.equals(project);
+        if (!same) {
+          if (project != null && setupStarted && s.ready.isDone()) lost(s, "the project changed to " + next);
+          project = next;
+          SignOnGuard.project(next);
+          router.close();
+          router = new ReadOnlyConnections.Router(next, true, code4i != null ? code4i.name : null);
+          if (!setupStarted) startSetup();
+        }
+        text = McpServer.projectOpened(next, same);
+        error = false;
+      }
+    } catch (Exception e) {
+      text = e.getMessage();
+    }
+    ObjectNode result = mapper.createObjectNode();
+    result.putArray("content").addObject().put("type", "text").put("text", text);
+    result.put("isError", error);
+    try {
+      sendResult(mapper.readTree(line).get("id"), result);
+    } catch (Exception ignored) { /* not JSON: no id to answer */ }
   }
 
   /* Starts session s; a failed start leaves nothing open and the next call tries again */
@@ -500,6 +561,14 @@ public class SshMcpProxy {
     }
   }
 
+  private String toolName(String line) {
+    try {
+      return mapper.readTree(line).path("params").path("name").asText("");
+    } catch (Exception e) {
+      return "";
+    }
+  }
+
   private boolean isBuild(String line) {
     try {
       JsonNode request = mapper.readTree(line);
@@ -514,6 +583,11 @@ public class SshMcpProxy {
   private volatile boolean dropQueuedBuilds;
 
   private void forwardCall(String line) {
+    /* on the calls thread, after an open_project sent before it: every call MC on the IBM i answers needs a project */
+    if (project == null && !ScreenTools.TOOLS.contains(toolName(line))) {  // 5250 sessions run from this PC, project or not
+      sendToolError(line, McpServer.NO_PROJECT);
+      return;
+    }
     line = routed(line);
     if (line == null) return;  // answered by a read-only connection
     Session s;
@@ -617,6 +691,8 @@ public class SshMcpProxy {
   private final Map<String, CompletableFuture<JsonNode>> ownCalls = new java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<JsonNode>>();
   private final java.util.concurrent.atomic.AtomicInteger ownIds = new java.util.concurrent.atomic.AtomicInteger();
 
+  private final Set<String> finishedBuilds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
   void noteBuild(JsonNode response) {
     try {
       JsonNode text = mapper.readTree(response.path("result").path("content").path(0).path("text").asText("{}"));
@@ -625,6 +701,10 @@ public class SshMcpProxy {
       if (!build.isObject() || !build.has("buildId")) return;
       if ("running".equals(build.path("state").asText())) remoteBuild = build.get("buildId").asText();
       else if (build.get("buildId").asText().equals(remoteBuild)) remoteBuild = null;
+      /* 5250 runs on this PC: a finished build's service programs, once (build_status may repeat it later) */
+      if (!"running".equals(build.path("state").asText()) && finishedBuilds.add(build.get("buildId").asText())) {
+        ScreenTools.built(build.path("targets"));
+      }
     } catch (Exception notJson) { /* an error text: no build state in it */ }
   }
 
@@ -692,7 +772,7 @@ public class SshMcpProxy {
       ObjectNode params = (ObjectNode) request.path("params");
       if (ScreenTools.TOOLS.contains(params.path("name").asText())) {  // a 5250 session from this PC
         sendResult(request.get("id"), ScreenTools.handle(params.path("name").asText(), params.path("arguments"),
-            buildTarget, project));
+            buildTarget, McpServer.folderOf(project)));
         return null;
       }
       if ("upload_file".equals(params.path("name").asText())) {  // the file is on this PC: SFTP from here
@@ -948,6 +1028,13 @@ public class SshMcpProxy {
       } catch (Exception e) {
         failed = "could not start: " + (e.getCause() != null ? e.getCause() : e).getMessage();
       }
+    }
+    if (project == null) {
+      text.put("state", "no project");
+      text.put("note", McpServer.NO_PROJECT);
+      result.putArray("content").addObject().put("type", "text").put("text", text.toPrettyString());
+      result.put("isError", false);
+      return result;
     }
     text.put("state", failed != null ? "failed" : "starting");
     text.put("ibmi", failed != null ? "disconnected" : "connecting");

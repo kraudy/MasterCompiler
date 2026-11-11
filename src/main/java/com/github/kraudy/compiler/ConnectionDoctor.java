@@ -27,7 +27,18 @@ final class ConnectionDoctor {
 
   private ConnectionDoctor() {}
 
+  /* The checks, then the registration commands for the agent, filled in with what the checks found */
   static int run(ArgParser parser) throws Exception {
+    found = null;
+    int status = check(parser);
+    System.out.println();
+    System.out.println(NextSteps.text(found));
+    return status;
+  }
+
+  private static NextSteps.Known found;
+
+  private static int check(ArgParser parser) throws Exception {
     PrintStream out = System.out;
     Code4iConfig code4i = MasterCompiler.code4i(parser);
     String host;
@@ -61,6 +72,7 @@ final class ConnectionDoctor {
     }
 
     SshTarget.Port port = SshTarget.Port.of(parser, code4i);
+    found = new NextSteps.Known(host, user.toUpperCase(), code4i != null ? code4i.name : null, port.number);
     String key = code4i != null && code4i.privateKeyPath != null && new File(code4i.privateKeyPath).isFile() ? code4i.privateKeyPath : null;
     String password;
     try {

@@ -26,8 +26,11 @@ curl -fL --create-dirs -o ~/.claude/skills/mastercompiler-setup/SKILL.md \
   "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/skills/mastercompiler-setup/SKILL.md"
 ```
 
-**Clone the repository first.** The MCP entry runs `--mcp --ssh --project <absolute repository path>`: the project
-must be on disk when you register the server, and one entry serves one repository.
+**One entry serves every repository.** The MCP entry runs `--mcp --ssh` (with `--ssh-port` for a port other than 22):
+MC works on the repository the client runs in. Started outside one, `status` says `no project`; clone the repository
+and call `open_project` with its absolute path, no restart needed. `--project <absolute path>` pins one repository.
+`--help`, `--doctor` and `--install-skills` end with "Next steps for your agent": the command that registers MC in
+Claude Code, Codex, OpenCode and Copilot, with this jar's path filled in.
 
 **Register the MCP server before you start the agent.** Clients load their MCP servers when they start: a server added
 mid-session (`claude mcp add`, an edit to `opencode.json` or `config.toml`) has no tools until the client is restarted,
@@ -47,7 +50,8 @@ those from its start. MC's own `clean_remote` tool needs no restart.
 
 `--agent all` installs to `~/.copilot/skills`, `~/.claude/skills` and `~/.agents/skills`; each client reads at least one of
 them. `~` is Java's home folder; when the agent's home is another one (`$HOME` set elsewhere), name the folder instead:
-`--install-skills --skills-dir "$HOME/.claude/skills"`. The exact entry for each client is in the setup skill at the
+`--install-skills --skills-dir "$HOME/.claude/skills"`. A folder MC cannot write is reported with the reason; a
+repository's own `.claude/skills` (or `.agents/skills`, `.github/skills`) works for that repository. The exact entry for each client is in the setup skill at the
 latest release tag, `https://github.com/kraudy/MasterCompiler/blob/<tag_name>/skills/mastercompiler-setup/SKILL.md`
 (one place, so it stays in step with the release). Config file formats change between client versions: when in doubt, the client's own
 `mcp add` command wins.

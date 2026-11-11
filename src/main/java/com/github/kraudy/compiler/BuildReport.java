@@ -30,6 +30,7 @@ public class BuildReport {
   public int blocked;
   public String error;  // failure outside a target (global hooks, connection, ...)
   public List<String> warnings;  // from reading the sources, e.g. two files building the same object
+  public Integer warningsShownEarlier;  // MCP: warnings already in an earlier answer of this session, left out
   public String spec;            // spec files and a short hash of each: which spec this report was built from
   public String currentLibrary;  // after the global hooks ran: where *CURLIB targets go
   public String libraryList;     // after the global hooks ran
@@ -49,6 +50,20 @@ public class BuildReport {
   /* The external list only on request: an agent rarely needs it, and it can be long */
   public void hideExternal() {
     external = null;
+  }
+
+  /*
+   * MCP: a source warning once, while it lasts: those the last answer had ('shown') are only counted. 'shown' becomes
+   * this answer's list, so a warning that went away and came back is shown again.
+   */
+  public void dropShownWarnings(java.util.Set<String> shown) {
+    List<String> all = warnings != null ? warnings : new ArrayList<String>();
+    List<String> fresh = new ArrayList<String>();
+    for (String warning : all) if (!shown.contains(warning)) fresh.add(warning);
+    if (fresh.size() < all.size()) warningsShownEarlier = all.size() - fresh.size();
+    warnings = fresh.isEmpty() ? null : fresh;
+    shown.clear();
+    shown.addAll(all);
   }
 
   public static class TargetResult {

@@ -66,6 +66,12 @@ public class McpServer {
    */
   static final Set<String> NEVER_QUEUED = new HashSet<String>(java.util.Arrays.asList("build_status", "whats_running", "cancel"));
   static final Set<String> READS_ELSEWHERE = new HashSet<String>(java.util.Arrays.asList("sql", "find_object", "find_source"));
+  /* With no project open (--mcp started outside a repository), only these answer; the rest say how to open one */
+  static final Set<String> WITHOUT_PROJECT = new HashSet<String>(java.util.Arrays.asList("status", "open_project", "sql",
+      "find_object", "find_source", "joblog", "spool", "build_status", "whats_running", "cancel", "screen_open", "screen",
+      "screen_send", "screen_close"));
+  static final String NO_PROJECT = "No project is open: MasterCompiler started outside a repository. Clone the repository "
+      + "(git clone ...), then call open_project with its absolute path; or start the client in the repository folder.";
   static final int DEFAULT_BUILD_WAIT = 20;
   static final int MAX_WAIT = 120;
   private final java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newCachedThreadPool(r -> {
@@ -78,6 +84,8 @@ public class McpServer {
   private volatile String laneCall;  // the call using the build connection now, and since when
   private volatile long laneSince;
   private volatile BuildProgress lastBuild;
+  private volatile boolean objectsChanged;  // a build ran since the last call_program: its job may hold old activations
+  private final Set<String> shownWarnings = java.util.concurrent.ConcurrentHashMap.newKeySet();  // source warnings already answered
   private final java.util.Map<String, BuildProgress> builds = java.util.Collections.synchronizedMap(
       new java.util.LinkedHashMap<String, BuildProgress>() {
         @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, BuildProgress> eldest) { return size() > 10; }
@@ -214,7 +222,8 @@ public class McpServer {
     info.put("name", "mastercompiler");
     info.put("version", MasterCompiler.version());
     result.put("instructions",
-        "Builds IBM i objects from the MasterCompiler spec " + specName() + ". " +
+        (specName() != null ? "Builds IBM i objects from the MasterCompiler spec " + specName() + ". "
+            : "Builds IBM i objects from a repository. " + NO_PROJECT + " ") +
         "Call plan to see what would compile, build to compile (errors come back with file, line, " +
         "column, message id and severity; severity 20 and up stop a compile), impact to see what " +
         "depends on an object. A build that takes longer than its 'wait' returns a buildId: tell the user what runs " +
@@ -268,12 +277,25 @@ public class McpServer {
     impact.put("type", "object");
     ObjectNode object = impact.putObject("properties").putObject("object");
     object.put("type", "string");
-    object.put("description", "Object name (e.g. ARTICLE) or target key (e.g. curlib.ARTICLE.pf.dds)");
+    object.put("description", "A target as plan and build name it (ARTICLE, SRV_BASE36.MODULE, LIB/NAME or the full key "
+        + "curlib.ARTICLE.pf.dds), or a source or copybook file (BASE36_H, qrpgleref/base36_h.rpgleinc, QRPGLEREF,BASE36_H): "
+        + "then the targets that compile it or copy it in, and their dependents");
     impact.putArray("required").add("object");
     tools.add(tool("impact",
         "Everything that would have to be rebuilt if this object changed: the targets that depend " +
         "on it, directly or transitively, in build order. Reads sources only; compiles nothing.",
         impact));
+
+    ObjectNode open = mapper.createObjectNode();
+    open.put("type", "object");
+    open.putObject("properties").putObject("path").put("type", "string").put("description",
+        "Absolute path of the repository on this machine (clone it first)");
+    open.putArray("required").add("path");
+    tools.add(tool("open_project",
+        "Open or switch the project (repository) the other tools work on. Needed when MasterCompiler started outside a "
+        + "repository (status says 'no project'); with a project open it switches, once no call is running. Over SSH "
+        + "the next call uploads the new project's sources.",
+        open));
 
     ObjectNode clean = mapper.createObjectNode();
     clean.put("type", "object");
@@ -789,6 +811,7 @@ public class McpServer {
     String name = params.path("name").asText("");
     JsonNode args = params.path("arguments");
     if (readOnlyMode) return callReadOnly(name, args);
+    if (!parser.hasProject() && !WITHOUT_PROJECT.contains(name)) return toolResult(NO_PROJECT, true);
     if (ScreenTools.TOOLS.contains(name)) {
       synchronized (screenLock) {
         return ScreenTools.handle(name, args, screenSignOn(), projectDir());
@@ -859,6 +882,8 @@ public class McpServer {
   }
 
   private ObjectNode callInLane(String name, JsonNode args) throws Exception {
+    /* before the last project's read-only connections and sign-on state: they must not keep another one from opening */
+    if (name.equals("open_project")) return openProject(args);
     if (router() != null) {
       ObjectNode ready = args.isObject() ? (ObjectNode) args : mapper.createObjectNode();
       ObjectNode routed;
@@ -1137,12 +1162,15 @@ public class McpServer {
     } else if (files != null) compiler.setChangedFiles(files);
     else if (args.hasNonNull("since")) compiler.setSince(args.get("since").asText());
 
+    if (!dryRun) objectsChanged = true;  // also when it fails: what it compiled before is replaced
     compiler.build();
     BuildReport report = compiler.getReport();
     FormerTargets.update(projectDir(), report);  // before compact: every current target is still listed
+    if (!dryRun) ScreenTools.built(pretty.valueToTree(report.targets));
     report.compact(args.path("minSeverity").asInt(20), args.path("showSkipped").asBoolean(false));
     report.externalCount = report.external.size();
     if (!args.path("showExternal").asBoolean(false)) report.hideExternal();
+    report.dropShownWarnings(shownWarnings);
     if (progress == null) return toolResult(pretty.writeValueAsString(report), !report.success);
     progress.report = report;
     ObjectNode text = mapper.createObjectNode();
@@ -1159,16 +1187,35 @@ public class McpServer {
     BuildSpec spec = loadSpec();
     new DependencyAwareness(system, parser.isDebug(), parser.isVerbose()).detectDependencies(spec);
 
-    String name = object.contains(".") ? object.split("\\.")[1] : object;
+    /* A target as plan and build name it (NAME, NAME.TYPE, LIB/NAME, the full key), else a source or copybook file */
     Set<TargetKey> seeds = new HashSet<TargetKey>();
-    for (TargetKey key : spec.targets.keySet()) {
-      if (key.getObjectName().equalsIgnoreCase(name)) seeds.add(key);
+    Set<String> sources = new java.util.TreeSet<String>();
+    String notTarget = null;
+    try {
+      seeds.addAll(TargetSelection.select(spec.targets.keySet(), TargetSelection.parse(object)));
+    } catch (IllegalArgumentException e) {
+      notTarget = e.getMessage().replace("--target ", "");
+      for (TargetKey key : spec.targets.keySet()) {
+        List<String> files = new java.util.ArrayList<String>(key.getIncludeFiles());
+        if (key.containsStreamFile()) files.add(SourceDescriptor.resolveFullPath(spec.getBaseDirectory(), key.getStreamFile()));
+        for (String file : files) {
+          if (!SourceNaming.namesFile(object, file)) continue;
+          seeds.add(key);
+          sources.add(file);
+        }
+      }
     }
-    if (seeds.isEmpty()) return toolResult("No target named " + name + " in " + specName(), true);
+    if (seeds.isEmpty()) {
+      return toolResult(notTarget + ". No source or copybook (/copy, /include) of a target is named " + object + " either", true);
+    }
 
     Set<TargetKey> rebuild = DiffPlanner.expand(spec, seeds);
     ObjectNode result = mapper.createObjectNode();
-    result.put("object", name.toUpperCase());
+    result.put("object", object.toUpperCase());
+    if (!sources.isEmpty()) {
+      ArrayNode files = result.putArray("sources");  // the files it named: the targets below compile them or copy them in
+      for (String file : sources) files.add(file);
+    }
     ArrayNode targets = result.putArray("targets");
     ArrayNode dependents = result.putArray("dependents");
     for (TargetKey key : spec.targets.keySet()) {  // spec order = build order
@@ -1419,8 +1466,13 @@ public class McpServer {
       if (!mask.isEmpty()) result.put("maskColumns", String.join(" ", mask));
       return toolResult(pretty.writeValueAsString(result), false);
     }
-    result.put("projectFolder", projectDir().getAbsolutePath());
-    result.put("spec", specName());
+    if (parser.hasProject()) {
+      result.put("projectFolder", projectDir().getAbsolutePath());
+      result.put("spec", specName());
+    } else {
+      result.put("project", "none");
+      result.put("note", NO_PROJECT);
+    }
     ArrayNode prot = result.putArray("protectedLibs");
     for (String lib : protectedLibs()) prot.add(lib);
     try {
@@ -1598,6 +1650,13 @@ public class McpServer {
       result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
       return toolResult(pretty.writeValueAsString(result), false);
     }
+    /* The calls' job (the COMMAND host server) keeps the service programs it activated: after a build, a new job */
+    if (objectsChanged) {
+      objectsChanged = false;
+      system.disconnectService(AS400.COMMAND);
+      result.put("newJob", "A build ran since the last call: this call starts a new job, so it activates the objects as they "
+          + "are now (unless the system reuses its remote command jobs)");
+    }
     ProgramCaller.Around around = null;
     if (debug) {
       String helper = ProgramDebugger.ensureHelper(system, connection, curlib);
@@ -1610,6 +1669,7 @@ public class McpServer {
     if (debug) ran.put("debugHelper", result.path("debugHelper").asText());
     /* What it printed (QPRINT): the call's batch job has no display, so DSPLY shows nothing */
     else CallRunner.collectSpool(system, connection, ran, started);
+    if (result.has("newJob")) ran.set("newJob", result.get("newJob"));
     ran.set("writes", writes);
     ran.set("otherEffects", effects);
     if (!checks.isEmpty()) {
@@ -1844,11 +1904,54 @@ public class McpServer {
 
   /* The project folder: --project, else the scanned folder, the spec's folder or the TOBi root */
   private File projectDir() {
+    if (!parser.hasProject()) return folderOf(null);
     if (parser.getProjectRoot() != null) return new File(parser.getProjectRoot());
     if (parser.hasTobi()) return new File(parser.getTobiRoot());
     if (parser.hasScan()) return new File(parser.getScanRoot());
     File spec = new File(parser.getYamlFile()).getAbsoluteFile();
     return spec.getParentFile();
+  }
+
+  /*
+   * Where MC keeps its own files (.mc: rejected sign-ons, 5250 watch file) for a project, or with none open yet, a
+   * folder of its own in the home folder
+   */
+  static File folderOf(File project) {
+    return project != null ? project : new File(System.getProperty("user.home"), ".mastercompiler");
+  }
+
+  /* open_project's answer */
+  static String projectOpened(File project, boolean same) {
+    return (same ? "Already the project: " : "Project open: ") + project + ". Call status, then plan to see its targets"
+        + " (over SSH the first call uploads its sources).";
+  }
+
+  /*
+   * open_project (in the lane, so never during a build or another call): the project from now on. What belonged to the
+   * last one goes: its connection (a spec hook may have changed its library list), read-only connections, warnings shown
+   */
+  private ObjectNode openProject(JsonNode args) throws Exception {
+    File before = parser.hasProject() ? projectDir().getCanonicalFile() : null;
+    if (before != null && parser.getPush() != null) {
+      return toolResult("This server pushes the sources to --push " + parser.getPush() + ": another project would be "
+          + "pushed over this one. Register another server entry for it.", true);
+    }
+    try {
+      parser.openProject(args.path("path").asText(""));
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage(), true);
+    }
+    File now = projectDir().getCanonicalFile();
+    boolean same = now.equals(before);
+    if (!same) {
+      disconnect();
+      if (router != null) router.close();
+      router = null;
+      signOn = null;
+      shownWarnings.clear();
+      SignOnGuard.project(now);
+    }
+    return toolResult(projectOpened(now, same), false);
   }
 
   private String currentLibrary() throws Exception {
@@ -1913,6 +2016,7 @@ public class McpServer {
   }
 
   private String specName() {
+    if (!parser.hasProject()) return null;
     if (parser.hasTobi()) return parser.getTobiRoot();
     return parser.hasScan() ? parser.getScanRoot() : parser.getYamlFile();
   }

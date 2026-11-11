@@ -81,11 +81,20 @@ public class SshHardeningTest {
     assertThrows(IllegalArgumentException.class, () -> validate("--remote", "--project", ".", "-f", "x.yaml"));
     assertThrows(IllegalArgumentException.class, () -> validate("--remote", "--project", ".", "--since", "HEAD~1"));
     assertThrows(IllegalArgumentException.class, () -> validate("--mcp", "--password-stdin", "--project", "."));
-    assertThrows(IllegalArgumentException.class, () -> validate("--ssh-port", "2222", "--mcp", "--project", "."));
+    assertThrows(IllegalArgumentException.class, () -> validate("--ssh-port", "2222", "--setup-vscode", "--host-servers"));
     assertThrows(IllegalArgumentException.class, () -> validate("--ssh"));                              // still needs --mcp
     validate("--doctor", "--code4i", "--ssh-port", "2222");
     validate("--explain-connection");
     validate("--mcp", "--ssh", "--ssh-port", "2222", "--project", ".");
+  }
+
+  /* --ssh-port names SSH: with --mcp it means --ssh, as IBMI_SSH_PORT does not need --ssh either */
+  @Test
+  void test_Ssh_Port_Implies_Ssh_For_Mcp() {
+    ArgParser parser = new ArgParser(new String[] { "--mcp", "--ssh-port", "2222", "--project", "." });
+    parser.validate();
+    assertTrue(parser.isSsh());
+    validate("--sql", "SELECT 1 FROM SYSIBM.SYSDUMMY1", "--ssh-port", "2222");  // accepted where it is not used
   }
 
   @Test

@@ -24,7 +24,7 @@ public class ArgParser {
   private enum Option {
     FILE          ("f", "file",          Kind.VALUE, "YAML build file"),
     SCAN          (null, "scan",         Kind.VALUE, "Scan source root and generate ordered YAML / build"),
-    PROJECT       (null, "project",      Kind.VALUE, "Project root: build.yaml if present, else TOBi Rules.mk, else scan"),
+    PROJECT       (null, "project",      Kind.VALUE, "Project root: build.yaml if present, else TOBi Rules.mk, else scan. Optional with --mcp: the folder the client starts MC in when it is a repository, else the open_project tool"),
     SPEC          (null, "spec",         Kind.VALUE, "With --project: the YAML spec in the project folder to use instead of build.yaml (also over --remote), e.g. tobi.yaml"),
     CODE4I        (null, "code4i",       Kind.FLAG,  "Connect with the Code for IBM i connection from VS Code settings (password: IBMI_PASSWORD)"),
     CONNECTION    (null, "connection",   Kind.VALUE, "Code for IBM i connection name, when there are several"),
@@ -35,7 +35,7 @@ public class ArgParser {
     MAX_ROWS      (null, "max-rows",     Kind.VALUE, "With --read-only: most rows one query or copy may read"),
     MASK_COLUMNS  (null, "mask-columns", Kind.VALUE, "With --read-only: columns (comma-separated) sql shows masked and copy_rows must replace"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
-    SSH_PORT      (null, "ssh-port",     Kind.VALUE, "SSH port; wins over the Code for IBM i connection's port and IBMI_SSH_PORT (default 22)"),
+    SSH_PORT      (null, "ssh-port",     Kind.VALUE, "SSH port; wins over the Code for IBM i connection's port and IBMI_SSH_PORT (default 22). With --mcp or --setup-vscode it implies --ssh"),
     REMOTE        (null, "remote",       Kind.FLAG,  "Build over SSH: upload MC and the --project folder, run the build on the IBM i and stream its output (no host servers needed)"),
     SSH_BUILD     (null, "ssh-build",    Kind.FLAG,  "Same as --remote"),
     DOCTOR        (null, "doctor",       Kind.FLAG,  "Explain and test the connection (where it comes from, SSH, host servers, libraries); never prints the password"),
@@ -115,8 +115,8 @@ public class ArgParser {
     LONG_OPTIONS = Collections.unmodifiableMap(longs);
   }
 
-  private String yamlFile;
-  private String scanRoot;
+  private volatile String yamlFile;
+  private volatile String scanRoot;
   private String baseFile;
   private String outputFile;
   private String library = SpecGenerator.DEFAULT_LIBRARY;
@@ -133,8 +133,8 @@ public class ArgParser {
   private boolean mcp;
   private boolean keepGoing;
   private String importSelection;
-  private String tobiRoot;
-  private String projectRoot;
+  private volatile String tobiRoot;
+  private volatile String projectRoot;
   private String specName;
   private boolean code4i;
   private String connection;
@@ -403,8 +403,11 @@ public class ArgParser {
     if (ssh && !mcp && !setupVscode && !remote) {
       throw new IllegalArgumentException("--ssh goes with --mcp (or --setup-vscode); to build over SSH use --remote");
     }
-    if (sshPort != 0 && !ssh && !remote) {
-      throw new IllegalArgumentException("--ssh-port goes with --ssh, --remote or --doctor");
+    /* --ssh-port names SSH: with --mcp or --setup-vscode it means --ssh; elsewhere it is used where SSH is (--doctor,
+       --download, --remote) and ignored otherwise, as IBMI_SSH_PORT is */
+    if (sshPort != 0 && !ssh && !remote && (mcp || setupVscode)) {
+      if (hostServers) throw new IllegalArgumentException("--ssh-port is for SSH; it cannot be used with --host-servers");
+      ssh = true;
     }
     if (cleanRemote && !remote) {
       throw new IllegalArgumentException("--clean-remote goes with --remote");
@@ -482,8 +485,8 @@ public class ArgParser {
       }
       if (hostServers) throw new IllegalArgumentException("Use either --remote or --host-servers");
     }
-    if (ssh && mcp && projectRoot == null) {
-      throw new IllegalArgumentException("--ssh needs --project <local folder> to upload: clone the repository first, then register the MCP server with its absolute path");
+    if (ssh && mcp && projectRoot == null && (yamlFile != null || scanRoot != null || tobiRoot != null)) {
+      throw new IllegalArgumentException("--mcp --ssh takes --project <folder> (the folder it uploads), not -f, --scan or --from-tobi");
     }
     if (agent != null && !installSkills) throw new IllegalArgumentException("--agent goes with --install-skills");
     if (skillsDir != null && !installSkills) throw new IllegalArgumentException("--skills-dir goes with --install-skills");
@@ -515,31 +518,23 @@ public class ArgParser {
       return;
     }
 
+    /* --mcp with no project: the client's project folder (Claude Code's CLAUDE_PROJECT_DIR) or the one it started MC in,
+       when that is a repository; else none until open_project */
+    if (mcp && projectRoot == null && yamlFile == null && scanRoot == null && tobiRoot == null && importSelection == null) {
+      for (String folder : new String[] { System.getenv("CLAUDE_PROJECT_DIR"), System.getProperty("user.dir") }) {
+        File here = folder != null ? workingProject(new File(folder), System.getProperty("user.home")) : null;
+        if (here == null) continue;
+        projectRoot = here.getPath();
+        break;
+      }
+    }
     if (specName != null) {
       if (projectRoot == null) throw new IllegalArgumentException("--spec names a YAML file in the --project folder; give --project");
       if (yamlFile != null || scanRoot != null || tobiRoot != null) {
         throw new IllegalArgumentException("--spec replaces build.yaml for --project; it cannot be combined with -f, --scan or --from-tobi");
       }
     }
-    /* --project: pick the spec the project already has (or the one --spec names) */
-    if (projectRoot != null && yamlFile == null && scanRoot == null && tobiRoot == null) {
-      File root = new File(projectRoot);
-      if (!root.isDirectory()) throw new IllegalArgumentException("--project is not a directory: " + projectRoot);
-      if (specName != null) {
-        File spec = new File(root, specName);
-        try {
-          if (!spec.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
-            throw new IllegalArgumentException("--spec must name a file inside the --project folder: " + specName);
-          }
-        } catch (java.io.IOException e) {
-          throw new IllegalArgumentException("--spec cannot be resolved: " + specName);
-        }
-        if (!spec.isFile()) throw new IllegalArgumentException("--spec file not found in the project: " + specName);
-        yamlFile = spec.getPath();
-      } else if (new File(root, "build.yaml").isFile()) yamlFile = new File(root, "build.yaml").getPath();
-      else if (new File(root, "Rules.mk").isFile()) tobiRoot = projectRoot;
-      else scanRoot = projectRoot;
-    }
+    if (projectRoot != null && yamlFile == null && scanRoot == null && tobiRoot == null) resolveProject();
 
     boolean hasFile = yamlFile != null;
     boolean hasScan = scanRoot != null;
@@ -557,7 +552,7 @@ public class ArgParser {
     }
 
     int sources = (hasFile ? 1 : 0) + (hasScan ? 1 : 0) + (hasTobi ? 1 : 0);
-    if (sources == 0) {
+    if (sources == 0 && !mcp) {
       throw new IllegalArgumentException(
           "Required: -f|--file <YAML>, --scan <source-root> or --from-tobi <project-root>");
     }
@@ -622,6 +617,76 @@ public class ArgParser {
   private boolean isValidFile(String path) {
     File f = new File(path);
     return f.exists() && f.canRead() && path.endsWith(".yaml");
+  }
+
+  /* --project: the spec the project already has (or the one --spec names): build.yaml, else Rules.mk, else a scan */
+  private void resolveProject() {
+    File root = new File(projectRoot);
+    if (!root.isDirectory()) throw new IllegalArgumentException("--project is not a directory: " + projectRoot);
+    if (specName != null) {
+      File spec = new File(root, specName);
+      try {
+        if (!spec.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
+          throw new IllegalArgumentException("--spec must name a file inside the --project folder: " + specName);
+        }
+      } catch (java.io.IOException e) {
+        throw new IllegalArgumentException("--spec cannot be resolved: " + specName);
+      }
+      if (!spec.isFile()) throw new IllegalArgumentException("--spec file not found in the project: " + specName);
+      yamlFile = spec.getPath();
+    } else if (new File(root, "build.yaml").isFile()) yamlFile = new File(root, "build.yaml").getPath();
+    else if (new File(root, "Rules.mk").isFile()) tobiRoot = projectRoot;
+    else scanRoot = projectRoot;
+  }
+
+  /*
+   * The MCP server's working directory as its project: a folder with build.yaml or Rules.mk, else the git repository it
+   * is in (a client started in a subfolder); never the home folder or a file system root, so a server started
+   * elsewhere does not scan or upload a whole home
+   */
+  static File workingProject(File dir, String home) {
+    try {
+      File here = dir.getCanonicalFile();
+      File project = new File(here, "build.yaml").isFile() || new File(here, "Rules.mk").isFile() ? here : VscodeSetup.gitRoot(here);
+      if (project == null || project.getParentFile() == null) return null;
+      if (home != null && project.equals(new File(home).getCanonicalFile())) return null;
+      return project;
+    } catch (java.io.IOException e) {
+      return null;
+    }
+  }
+
+  /*
+   * open_project: the MCP server's project from now on (an existing folder, absolute), resolved as --project is.
+   * -f / --scan / --from-tobi given at the start are replaced.
+   */
+  public synchronized void openProject(String folder) {
+    if (folder == null || folder.trim().isEmpty()) throw new IllegalArgumentException("Give 'path': the repository's absolute path");
+    File dir = new File(folder.trim());
+    if (!dir.isAbsolute()) throw new IllegalArgumentException("'path' must be absolute: " + folder);
+    if (!dir.isDirectory()) {
+      throw new IllegalArgumentException("Not a folder on this machine: " + folder + ". Clone the repository first, then give its absolute path.");
+    }
+    String before = projectRoot;
+    String[] spec = { yamlFile, scanRoot, tobiRoot };
+    try {
+      projectRoot = dir.getCanonicalPath();
+      yamlFile = null;
+      scanRoot = null;
+      tobiRoot = null;
+      resolveProject();
+    } catch (Exception e) {
+      projectRoot = before;
+      yamlFile = spec[0];
+      scanRoot = spec[1];
+      tobiRoot = spec[2];
+      throw e instanceof IllegalArgumentException ? (IllegalArgumentException) e : new IllegalArgumentException(e.getMessage());
+    }
+  }
+
+  /** --mcp with no project yet (none given, the working directory is not a repository): open_project sets one. */
+  public boolean hasProject() {
+    return projectRoot != null || yamlFile != null || scanRoot != null || tobiRoot != null;
   }
 
   public boolean hasScan() {
@@ -937,7 +1002,7 @@ public class ArgParser {
 
   public static String getUsage() {
     StringBuilder sb = new StringBuilder();
-    sb.append("Usage: java -jar MasterCompiler.jar (-f <YAML> | --scan <root> | --from-tobi <root> | --project <dir>) [options]")
+    sb.append("Usage: java -jar MasterCompiler.jar (-f <YAML> | --scan <root> | --from-tobi <root> | --project <dir> | --mcp --ssh) [options]")
         .append("\n");
     for (Option opt : Option.values()) {
       sb.append("  ");

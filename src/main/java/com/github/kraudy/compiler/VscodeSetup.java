@@ -382,18 +382,28 @@ public final class VscodeSetup {
     List<File> dirs = new ArrayList<File>();
     for (String name : (agents == null ? "copilot" : agents).split(",", -1)) {
       String agent = name.trim().toLowerCase(java.util.Locale.ROOT);
-      List<String> subs;
-      if (agent.equals("copilot")) subs = Arrays.asList(".copilot/skills");
-      else if (agent.equals("claude")) subs = Arrays.asList(".claude/skills");
-      else if (agent.equals("agents")) subs = Arrays.asList(".agents/skills");
-      else if (agent.equals("all")) subs = Arrays.asList(".copilot/skills", ".claude/skills", ".agents/skills");
-      else throw new IllegalArgumentException("--agent: unknown agent \"" + name.trim() + "\" (copilot, claude, agents, all)");
+      List<String> subs = agent.equals("all") ? new ArrayList<String>(AGENT_SKILLS.values())
+          : AGENT_SKILLS.containsKey(agent) ? Arrays.asList(AGENT_SKILLS.get(agent)) : null;
+      if (subs == null) throw new IllegalArgumentException("--agent: unknown agent \"" + name.trim() + "\" (copilot, claude, agents, all)");
       for (String sub : subs) {
         File dir = new File(home, sub);
         if (!dirs.contains(dir)) dirs.add(dir);
       }
     }
     return dirs;
+  }
+
+  /* --agent name -> its skills folder under the home folder ("agents": read by Codex, Grok Build and OpenCode) */
+  static final java.util.Map<String, String> AGENT_SKILLS = new java.util.LinkedHashMap<String, String>();
+  /* that home folder -> the same agent's folder inside one repository, when the home one cannot be written */
+  static final java.util.Map<String, String> REPOSITORY_SKILLS = new java.util.LinkedHashMap<String, String>();
+  static {
+    AGENT_SKILLS.put("copilot", ".copilot/skills");
+    AGENT_SKILLS.put("claude", ".claude/skills");
+    AGENT_SKILLS.put("agents", ".agents/skills");
+    REPOSITORY_SKILLS.put(".copilot/skills", ".github/skills");
+    REPOSITORY_SKILLS.put(".claude/skills", ".claude/skills");
+    REPOSITORY_SKILLS.put(".agents/skills", ".agents/skills");
   }
 
   /* MC's skills from the jar into .github/skills (MC owns these files: they are refreshed) */
@@ -406,12 +416,41 @@ public final class VscodeSetup {
           continue;
         }
         File target = new File(skillsDir, skill);
-        target.getParentFile().mkdirs();
-        Files.copy(in, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        try {
+          Files.createDirectories(target.getParentFile().toPath());
+          Files.copy(in, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (java.io.IOException e) {
+          throw new SkillsFolderException(skillsDir, e);
+        }
         installed++;
       }
     }
     return installed;
+  }
+
+  /* A skills folder that cannot be created or written: which one, why, and where else they can go */
+  static final class SkillsFolderException extends IllegalArgumentException {
+    SkillsFolderException(File skillsDir, java.io.IOException cause) {
+      super("Cannot write the skills to " + skillsDir.getAbsolutePath() + " (" + reason(cause) + "). Create that folder "
+          + "yourself or make it writable, or install into a folder you can write with --skills-dir, e.g. the "
+          + "repository's own " + projectLocal(skillsDir) + " (the agent reads it in that repository only).", cause);
+    }
+
+    private static String reason(java.io.IOException e) {
+      String kind = e instanceof java.nio.file.AccessDeniedException ? "permission denied"
+          : e instanceof java.nio.file.FileAlreadyExistsException ? "a file is in the way"
+          : e instanceof java.nio.file.NoSuchFileException ? "a folder on the way does not exist and cannot be created"
+          : e.getClass().getSimpleName();
+      return kind + (e.getMessage() != null ? ": " + e.getMessage() : "");
+    }
+
+    private static String projectLocal(File skillsDir) {
+      String path = skillsDir.getPath().replace('\\', '/');
+      for (java.util.Map.Entry<String, String> e : REPOSITORY_SKILLS.entrySet()) {
+        if (path.endsWith(e.getKey())) return "<repository>/" + e.getValue();
+      }
+      return "<repository>/.claude/skills";
+    }
   }
 
   private static String indent(String text) {

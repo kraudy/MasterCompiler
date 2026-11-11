@@ -3,6 +3,29 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.33
+
+- `--mcp` (also `--mcp --ssh`) no longer needs `--project`: one server entry, registered once at user scope, serves
+  every repository. MC uses the client's folder when it is a repository (`build.yaml`, `Rules.mk` or git; Claude
+  Code's `CLAUDE_PROJECT_DIR` first; never the home folder). Started anywhere else, `status` says `no project` and the
+  new `open_project` tool opens one (an absolute path, after cloning) or switches to another, without a restart.
+- `--ssh-port` with `--mcp` or `--setup-vscode` implies `--ssh`; with other options it is no longer rejected.
+- `--install-skills`: a skills folder that cannot be created or written is reported with its path and the reason, and
+  the fallback (`--skills-dir <repository>/.claude/skills`); the other folders are still installed. Before, a
+  `NoSuchFileException` stack trace.
+- `--help`, `--doctor` and `--install-skills` end with "Next steps for your agent": the command that registers MC in
+  Claude Code, Codex and OpenCode, and the Copilot setup, with this jar's path (and, from `--doctor`, the host, user,
+  port or Code for IBM i connection) filled in; then restart the client (`/mcp` in Claude Code).
+- `impact` takes a target as `plan` names it (`SRV_BASE36.MODULE`, `LIB/NAME`, the key) and a source or copybook file
+  (`BASE36_H`, `qrpgleref/base36_h.rpgleinc`, `QRPGLEREF,BASE36_H`): the targets that compile it or copy it in and their
+  dependents. Before, `NAME.TYPE` looked for an object named after the type.
+- MCP `plan` / `build`: a source warning (e.g. two sources for one object) comes once while it lasts; later answers
+  count it in `warningsShownEarlier`.
+- `call_program` / `debug_program` after a build run in a new job (`newJob`), so they use rebuilt service programs
+  instead of the copy the last call's job had activated. The 5250 screens carry `rebuiltServicePrograms` when a build
+  rebuilt service programs while the session was open, with how to get a new job (SIGNOFF, `screen_close`,
+  `screen_open`).
+
 ## v0.3.32
 
 - `build` and `plan` with `files` (or `since`) now include a binder-less service program (`EXPORT(*ALL)`, `MODULE`

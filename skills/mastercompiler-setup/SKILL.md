@@ -72,7 +72,9 @@ On 64-bit Windows the release also has `MasterCompiler-windows-x64.zip` with its
 Optional, once per machine, so every repository's agent already knows MC (copies the skills, not the jar):
 `java -jar ~/tools/MasterCompiler.jar --install-skills --agent <claude|agents|all>`
 (`claude` = `~/.claude/skills`; `agents` = `~/.agents/skills`, read by Codex, Grok Build and OpenCode; `copilot` is
-the default). Ask the user first.
+the default). Ask the user first. If a folder cannot be written (a sandbox), MC says which and why; use
+`--skills-dir <repository>/.claude/skills` (that repository only) instead. Its last lines, like `--help` and
+`--doctor`, are "Next steps for your agent": the registration command for each client with this jar's path filled in.
 
 ## 3. What MC needs to know
 
@@ -84,34 +86,38 @@ the default). Ask the user first.
   user, transport and where the password would come from, never the password.
 - **Where objects go**: builds replace objects in the current library. It must be the user's own development library,
   never a shared or production one. Preview before writing anything, and get the user's OK.
-- **The repository**: the absolute path of the git repository (the MCP server runs with `--project <that path>`).
-  **Clone it before you register the server**: `--mcp --ssh` needs `--project`, and the entry names one repository
-  (another repository is another entry, or the same one edited). Without a `build.yaml` MC scans the sources (see the
-  `mastercompiler` skill).
+- **The repository**: no need to name it in the entry. Registered without `--project` (user scope), one entry serves
+  every repository: MC uses the folder the client runs in (Claude Code's project folder, or a folder with `build.yaml`,
+  `Rules.mk` or `.git`, a subfolder's repository included; never the home folder). Started anywhere else, `status`
+  says `no project`: clone the repository, then call `open_project` with its absolute path (no restart). `--project
+  <abs repo>` still pins one repository. Without a `build.yaml` MC scans the sources (see the `mastercompiler` skill).
 
 ## 4. Register the server (show the user the entry first)
 
-`<abs repo>` is the absolute path of the repository; `<jar>` the absolute path of `MasterCompiler.jar`; `java` may be
-a full path. Replace the `env` lines by the ones from "The password" that fit. With Code for IBM i, replace the
-`IBMI_HOSTNAME` / `IBMI_USERNAME` env lines by `"--code4i", "--connection", "<name>"` in the arguments.
+`<jar>` is the absolute path of `MasterCompiler.jar`; `java` may be a full path. `--doctor` (or `--help`) prints these
+commands with both filled in, and the host, user and port it found. Replace the `env` lines by the ones from "The
+password" that fit. With Code for IBM i, replace the `IBMI_HOSTNAME` / `IBMI_USERNAME` env lines by `"--code4i",
+"--connection", "<name>"` in the arguments. Another SSH port (PUB400: 2222): add `"--ssh-port", "2222"` (or
+`IBMI_SSH_PORT` in `env`).
 Do not commit a file that holds a user's host and paths: use the client's user/local scope, or a git-ignored file.
 
-**Claude Code** (`claude mcp add --scope local|user|project`, or `.mcp.json` for the project):
+**Claude Code** (`claude mcp add --transport stdio --scope user --env IBMI_HOSTNAME=<host> ... mastercompiler -- java
+-jar <jar> --mcp --ssh`, or `.mcp.json` for the project):
 
 ```json
 { "mcpServers": { "mastercompiler": {
     "type": "stdio", "command": "java",
-    "args": ["-jar", "<jar>", "--mcp", "--ssh", "--project", "<abs repo>"],
+    "args": ["-jar", "<jar>", "--mcp", "--ssh"],
     "env": { "IBMI_HOSTNAME": "<host>", "IBMI_USERNAME": "<user>", "IBMI_PASSWORD_COMMAND": "secret-tool lookup service ibmi" } } } }
 ```
 
-**Codex CLI** (`~/.codex/config.toml`, or `.codex/config.toml` in a trusted project; `codex mcp add` writes it):
+**Codex CLI** (`~/.codex/config.toml`, or `.codex/config.toml` in a trusted project; `codex mcp add mastercompiler
+--env K=V ... -- java -jar <jar> --mcp --ssh` writes it):
 
 ```toml
 [mcp_servers.mastercompiler]
 command = "java"
-args = ["-jar", "<jar>", "--mcp", "--ssh", "--project", "<abs repo>"]
-cwd = "<abs repo>"
+args = ["-jar", "<jar>", "--mcp", "--ssh"]
 env = { IBMI_HOSTNAME = "<host>", IBMI_USERNAME = "<user>", IBMI_PASSWORD_COMMAND = "secret-tool lookup service ibmi" }
 ```
 
@@ -124,7 +130,7 @@ under `mcp.servers`:
 ```json
 { "mcp": { "servers": { "mastercompiler": {
     "type": "local",
-    "command": ["java", "-jar", "<jar>", "--mcp", "--ssh", "--project", "<abs repo>"],
+    "command": ["java", "-jar", "<jar>", "--mcp", "--ssh"],
     "environment": { "IBMI_HOSTNAME": "<host>", "IBMI_USERNAME": "<user>", "IBMI_PASSWORD_COMMAND": "secret-tool lookup service ibmi" } } } } }
 ```
 
@@ -134,7 +140,7 @@ and follow it:
 ```json
 { "mcp": { "mastercompiler": {
     "type": "local", "enabled": true,
-    "command": ["java", "-jar", "<jar>", "--mcp", "--ssh", "--project", "<abs repo>"],
+    "command": ["java", "-jar", "<jar>", "--mcp", "--ssh"],
     "environment": { "IBMI_HOSTNAME": "<host>", "IBMI_USERNAME": "<user>", "IBMI_PASSWORD_COMMAND": "secret-tool lookup service ibmi" } } } }
 ```
 
@@ -147,7 +153,8 @@ set up by `--setup-vscode` for Copilot; a terminal agent uses SSH.
 **Register the server before the client starts.** Clients load MCP servers at start: one added mid-session (`claude
 mcp add` while Claude Code runs, an edit to `opencode.json` or `config.toml`) has no tools in that session. Tell the
 user to restart the client, or in Claude Code to reconnect it with `/mcp`; you cannot do it from inside the session.
-Then call `plan` without arguments: a list of targets means MC reached the IBM i and understood the project.
+Then call `status`: `no project` means the client runs outside the repository (call `open_project`); then `plan`
+without arguments: a list of targets means MC reached the IBM i and understood the project.
 "Connected" in the client (`opencode mcp list`, `claude mcp list`, `/mcp`) only means MC runs on the PC: it answers at
 once and connects to the IBM i in the background. `status` says how far that got: `state` is `starting`, `ready` or
 `failed` (with `startup` and the error). A failed start, or an SSH connection lost later, does not need a restart: the
@@ -182,7 +189,7 @@ project's `.mc/` folder (sources imported for reference). Nothing to copy to the
 | Tools missing after registering | Restart the client; check the entry's paths are absolute and `java -jar <jar> --version` works in a shell |
 | `IBMI_HOSTNAME is not set` | Add it and `IBMI_USERNAME` to `env`, or use `--code4i --connection` |
 | `VS Code user settings not found` | `--code4i` needs VS Code's `settings.json`: set `MC_VSCODE_SETTINGS`, or use `IBMI_HOSTNAME` / `IBMI_USERNAME` |
-| `--ssh needs --project` | Give the absolute repository path after `--project` |
+| `status` says `no project` | Clone the repository, then `open_project` with its absolute path |
 | host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator |
 | Client says connected, `status` shows an error | The PC side runs; the IBM i side did not start (`status` says why). Fix that cause; the next `plan` or `build` tries again |
 | Password command prints nothing | Run it in the user's own shell (not for you to read its output): the first output line must be the password |

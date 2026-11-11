@@ -1208,6 +1208,8 @@ public class MasterCompiler{
       /* Invalid arguments: one line saying what is wrong, then the usage (no stack trace) */
       if (ArgParser.wantsHelp(args)) {
         System.out.println(ArgParser.getUsage());
+        System.out.println();
+        System.out.println(NextSteps.text(null));
         return 0;
       }
       ArgParser parser;
@@ -1240,11 +1242,20 @@ public class MasterCompiler{
             ? java.util.Collections.singletonList(new java.io.File(parser.getSkillsDir()))
             : VscodeSetup.skillDirs(parser.getAgent(), System.getProperty("user.home"));
         for (java.io.File dir : dirs) {
-          int installed = VscodeSetup.installSkills(dir);
-          logger.info("Installed {} MasterCompiler skills in {}.", installed, dir);
+          try {
+            int installed = VscodeSetup.installSkills(dir);
+            logger.info("Installed {} MasterCompiler skills in {}.", installed, dir);
+          } catch (VscodeSetup.SkillsFolderException e) {
+            System.err.println("Error: " + e.getMessage());  // the other folders are still installed
+            exitCode = 1;
+          }
         }
-        logger.info("In any repository, ask your agent: \"set up MasterCompiler for this repository\" "
-            + "(Copilot: Agent mode; terminal agents: see docs/Agents.md).");
+        if (exitCode == 0) {
+          logger.info("In any repository, ask your agent: \"set up MasterCompiler for this repository\" "
+              + "(Copilot: Agent mode; terminal agents: see docs/Agents.md).");
+        }
+        System.out.println();
+        System.out.println(NextSteps.text(null));
         return exitCode;
       }
 

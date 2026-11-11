@@ -207,4 +207,19 @@ public final class SourceNaming {
       return false;
     }
   }
+
+  /*
+   * Does what an agent typed name this file: its path (or the end of it), its file name, or that name without the
+   * extensions; a member form FILE,MBR or FILE(MBR) is its member. Case does not matter.
+   */
+  static boolean namesFile(String typed, String path) {
+    String want = typed.trim().replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+    java.util.regex.Matcher member = java.util.regex.Pattern.compile("^[^,(/]*[,(]([^,()]+)\\)?$").matcher(want);
+    if (member.matches()) want = member.group(1).trim();
+    if (want.isEmpty()) return false;
+    String file = path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+    String name = file.substring(file.lastIndexOf('/') + 1);
+    String stem = name.indexOf('.') > 0 ? name.substring(0, name.indexOf('.')) : name;
+    return file.equals(want) || file.endsWith("/" + want) || name.equals(want) || stem.equals(want);
+  }
 }
