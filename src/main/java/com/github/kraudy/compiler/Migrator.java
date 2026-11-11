@@ -24,6 +24,8 @@ public class Migrator {
   private final boolean verbose;
   private final User currentUser;
   private CommandExecutor commandExec;
+  static final String MEMBER_TEXT = "MasterCompiler: copy of the stream file";  // marks the members MC writes
+  private String replacedMember;
 
   public Migrator(Connection connection, boolean debug, boolean verbose, User currentUser, CommandExecutor commandExec) {
     this.connection = connection;
@@ -76,8 +78,23 @@ public class Migrator {
           //TODO: Should this be migrated to QTEMP?
           if(verbose) logger.info("Migrating stream file to source member");
           if (!sourcePfExists(key)) createSourcePf(key);
-          if (!sourceMemberExists(key)) createSourceMember(key);
+          String foreign = foreignMember(key);
+          boolean created = false;
+          if (foreign != null) {
+            replacedMember = (commandExec.isDryRun() ? "Would replace" : "Replaced") + " source member " + foreign
+                + " with " + key.getStreamFile() + ": MasterCompiler did not create it (or an MC before v0.3.31 did; "
+                + "its members are marked from then on)";
+            logger.warn(replacedMember);
+          } else if (!sourceMemberExists(key)) {
+            createSourceMember(key);
+            created = true;
+          }
           migrateStreamFileToMember(key);
+          /* MC's members carry its text: a replaced one is reported once, not at every build */
+          if (foreign != null || created) {
+            commandExec.executeCommand("CHGPFM FILE(" + key.getQualifiedSourceFile() + ") MBR(" + key.getSourceName()
+                + ") TEXT(''" + MEMBER_TEXT + "'')", commandExec.getCurrentTime());  // inside QCMDEXC('...'): quotes doubled
+          }
           key.put(ParamCmd.SRCFILE, key.getQualifiedSourceFile())
             .put(ParamCmd.SRCMBR, key.getObjectName())
             .removeStreamFile();
@@ -179,6 +196,39 @@ public class Migrator {
     String library = qualified.substring(0, slash).trim().toUpperCase();
     if (library.startsWith("*")) return "";
     return "AND SYSTEM_TABLE_SCHEMA = '" + library.replace("'", "''") + "' ";
+  }
+
+  /* The source member this build replaced (or would replace) although MC did not create it; null when none */
+  public String takeReplacedMember() {
+    String replaced = replacedMember;
+    replacedMember = null;
+    return replaced;
+  }
+
+  /*
+   * LIB/FILE(MEMBER), changed ..., text '...' when the member exists and its text is not MC's: someone else's source
+   * (a member from an older MC, with no text, counts as someone else's once)
+   */
+  String foreignMember(TargetKey key) throws SQLException {
+    try (Statement stmt = connection.createStatement();
+         ResultSet rs = stmt.executeQuery(
+            "With " +
+            Utilities.CteLibraryList +
+            "SELECT CAST(SYSTEM_TABLE_SCHEMA AS VARCHAR(10) CCSID " + MasterCompiler.INVARIANT_CCSID + ") AS Lib, " +
+            "COALESCE(CAST(PARTITION_TEXT AS VARCHAR(50) CCSID " + MasterCompiler.INVARIANT_CCSID + "), '') AS Text, " +
+            "LAST_CHANGE_TIMESTAMP AS Changed " +
+            "FROM QSYS2.SYSPARTITIONSTAT " +
+            "INNER JOIN Libs " +
+            "ON (SYSTEM_TABLE_SCHEMA = Libs.Libraries) " +
+            "WHERE SYSTEM_TABLE_NAME = '" + key.getSourceFile() + "' " +
+            "AND SYSTEM_TABLE_MEMBER = '" + key.getSourceName() + "' " +
+            sourceLibraryFilter(key) + "LIMIT 1")) {
+      if (!rs.next()) return null;
+      String text = rs.getString("Text").trim();
+      if (text.equals(MEMBER_TEXT)) return null;
+      return rs.getString("Lib").trim() + "/" + key.getSourceFile() + "(" + key.getSourceName() + "), changed "
+          + rs.getTimestamp("Changed") + (text.isEmpty() ? "" : ", text '" + text + "'");
+    }
   }
 
   /* Validate if Source Member exists */

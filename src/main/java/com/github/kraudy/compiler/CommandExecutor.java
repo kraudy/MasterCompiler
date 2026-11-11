@@ -58,6 +58,10 @@ public class CommandExecutor {
   /* Hooks that ran out of time: what their job was doing, and how it was stopped */
   private final List<BuildReport.Timeout> timeouts = new ArrayList<BuildReport.Timeout>();
 
+  public boolean isDryRun() {
+    return dryRun;
+  }
+
   public List<BuildReport.Timeout> getTimeouts() {
     return timeouts;
   }

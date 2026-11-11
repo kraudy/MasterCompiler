@@ -144,7 +144,7 @@ final class CallRunner {
     return result.path("success").asBoolean(false) ? 0 : 1;
   }
 
-  private static Timestamp serverTime(Connection connection) {
+  static Timestamp serverTime(Connection connection) {
     try (Statement stmt = connection.createStatement()) {
       stmt.setQueryTimeout(10);
       ResultSet rs = stmt.executeQuery("SELECT CURRENT TIMESTAMP FROM SYSIBM.SYSDUMMY1");
@@ -240,7 +240,7 @@ final class CallRunner {
    * for a bounded time. Only the job's own files are ever read: another job's file would look like this run's output.
    * Nothing here can fail the call: the answer is just shorter, and says why.
    */
-  private static void collectSpool(AS400 system, Connection connection, ObjectNode result, Timestamp started) {
+  static void collectSpool(AS400 system, Connection connection, ObjectNode result, Timestamp started) {
     String job = result.path("job").asText("");
     ArrayNode spool = result.putArray("spool");
     if (job.isEmpty()) {
@@ -306,7 +306,7 @@ final class CallRunner {
   private static List<ObjectNode> readJobFiles(Connection connection, String job, java.util.Map<String, ObjectNode> read)
       throws java.sql.SQLException {
     List<ObjectNode> out = new ArrayList<ObjectNode>();
-    JsonNode listed = SpoolFiles.list(connection, "", job).path("spooledFiles");
+    JsonNode listed = SpoolFiles.list(connection, "", job, true).path("spooledFiles");
     for (int i = listed.size() - 1; i >= 0; i--) {
       JsonNode f = listed.get(i);
       String name = f.path("file").asText();
@@ -322,7 +322,7 @@ final class CallRunner {
         file = emptyFile(name, number, job, status);
       } else {
         try {
-          file = SpoolFiles.read(connection, name, job, number, 1, SpoolFiles.MAX_LINES);
+          file = SpoolFiles.read(connection, name, job, number, 1, SpoolFiles.MAX_LINES, true);
           file.put("status", status);
           if (file.path("totalLines").asInt() > 0) read.put(key, file);
         } catch (IllegalArgumentException gone) {

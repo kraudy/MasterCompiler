@@ -382,7 +382,14 @@ public class MasterCompiler{
 
 
         /* Migrate source file */
-        if (!noMigrate) migrator.migrateSource(key);
+        if (!noMigrate) {
+          try {
+            migrator.migrateSource(key);
+          } finally {
+            String replaced = migrator.takeReplacedMember();
+            if (replaced != null) replacedMembers.put(key, replaced);
+          }
+        }
 
         /* EXPORT(*ALL) takes no binder source: SRCFILE / SRCMBR would only be noise (or a wrong library) */
         if (key.getCompilationCommand() == CompilationPattern.CompCmd.CRTSRVPGM && key.get(ParamCmd.EXPORT).contains("ALL")
@@ -517,6 +524,7 @@ public class MasterCompiler{
   private final Map<String, String> fileLibrary = new java.util.HashMap<String, String>();  // FILE -> library on the library list
 
   private final Map<TargetKey, List<String>> targetBndDirs = new java.util.HashMap<TargetKey, List<String>>();
+  private final Map<TargetKey, String> replacedMembers = new java.util.HashMap<TargetKey, String>();  // someone else's source member, copied over
   private static final java.util.regex.Pattern BNDDIR_KEYWORD =
       java.util.regex.Pattern.compile("\\bBNDDIR\\s*\\(([^)]*)\\)", java.util.regex.Pattern.CASE_INSENSITIVE);
 
@@ -696,6 +704,8 @@ public class MasterCompiler{
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *" + key.getObjectTypeEnum().name()
           + " and create it again" + (key.getObjectTypeEnum() == CompilationPattern.ObjectType.PF ? ": its data is lost" : "");
     }
+    String replaced = replacedMembers.get(key);
+    if (replaced != null) result.warning = result.warning == null ? replaced : result.warning + "; " + replaced;
     if (dryRun || since == null) return;
 
     try {
@@ -719,6 +729,7 @@ public class MasterCompiler{
         } else {
           result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, compileBaseDir);
         }
+        result.splitMessages();
       }
     } catch (Exception e) {
       logger.info("Could not collect report details for {}: {}", key.asString(), e.getMessage());

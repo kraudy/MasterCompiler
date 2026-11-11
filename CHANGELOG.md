@@ -3,6 +3,38 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.31
+
+- `build` and `plan` take `targets`: exactly those targets (names, `NAME.TYPE` or the keys `impact` returns), like
+  `--target` on the command line. Rebuilding a chain is `impact`'s targets plus dependents, with no fallback to the CLI.
+- New MCP tool `clean_remote` (with `--mcp --ssh`): deletes this project's copy and MC's jar on the IBM i after a
+  preview, stopping MC there first; the next tool uploads them again. `--clean-remote` now keeps the copy or the jar
+  while an MC server still runs from it (deleting the jar under a running MCP server broke it until a restart).
+- A build that replaces a source member MC did not create (DDS and OPM sources compile from a member) says so in the
+  target's `warning`, and `plan` shows it first. MC marks the members it writes (member text), so a member written
+  by an earlier MC version is reported once.
+- `run_command` and `call_program` refusals for a spec without `protectedLibs` say which file gets the line. Over
+  SSH, `run_command` uploads the changed spec first, so the added line counts at once.
+- `call_program`'s preview flags programs with a display file (`displayFile`): in its batch job they stop at the
+  open (`RNX1217`); use the 5250 tools.
+- `status` has one `state`: `ready`, `starting` (over SSH) or `failed`. Over SSH `system` is the IBM i's host name,
+  not `localhost`.
+- Java without CA certificates (an empty or missing `cacerts`): `--doctor` prints `TLS CA store`, the MCP server
+  logs it at start, `status` shows `tls`, and `screen_open` says what to install instead of `trustAnchors parameter
+  must be non-empty`. A fixed store is read again at the next try.
+- `--doctor` prints `SSH NOT USABLE` when only the host servers work (exit code still 0).
+- SSH connections the server drops before the sign-on (PUB400's `Exceeded MaxStartups`, `connection is closed by
+  foreign host`) are tried 4 times with a growing pause, then fail with a readable message.
+- Build reports: severity-0 records (e.g. CPC5D0B "Service program created") move from `errors` to `messages`, and a
+  message about the whole compile (e.g. RNS9308) is listed once.
+- `call_program` returns the call's spooled output (`spool`), like `--call`. A call's host server job now keeps its
+  printer output (`OVRPRTF SPLFOWN(*JOB)`): before, it went to the user's QPRTJOB job (as on PUB400) and neither showed
+  it. The demo program `MCDHELLO` prints to QPRINT instead of `DSPLY` (nothing in a batch job), so a first call shows
+  its lines.
+- Docs: register the MCP server before starting the client (or reconnect with `/mcp`); restart it after fixing
+  `cacerts`, changing the password source or deleting MC's files from a shell; interactive programs go through the
+  5250 tools; the setup skill link points at the release tag.
+
 ## v0.3.30
 
 - `--mcp --ssh`: a spec written on the PC (a scanned `build.yaml`, `mc-base.yaml` hooks) names the PC's folder in

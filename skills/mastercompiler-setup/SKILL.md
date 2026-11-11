@@ -142,11 +142,18 @@ set up by `--setup-vscode` for Copilot; a terminal agent uses SSH.
 
 ## 5. Start and verify
 
-Restart the client (or reload its MCP servers, e.g. `/mcp` in Claude Code) so it starts the server. Then call `plan` without arguments: a list of targets means MC reached the IBM i and understood the project.
+**Register the server before the client starts.** Clients load MCP servers at start: one added mid-session (`claude
+mcp add` while Claude Code runs, an edit to `opencode.json` or `config.toml`) has no tools in that session. Tell the
+user to restart the client, or in Claude Code to reconnect it with `/mcp`; you cannot do it from inside the session.
+Then call `plan` without arguments: a list of targets means MC reached the IBM i and understood the project.
 "Connected" in the client (`opencode mcp list`, `claude mcp list`, `/mcp`) only means MC runs on the PC: it answers at
-once and connects to the IBM i in the background. `status` says how far that got (`startup`, and `ibmi` with the error
-while it is not running there). A failed start, or an SSH connection lost later, does not need a restart: the next tool
-that needs the IBM i (`plan`, `build`, ...) connects again.
+once and connects to the IBM i in the background. `status` says how far that got: `state` is `starting`, `ready` or
+`failed` (with `startup` and the error). A failed start, or an SSH connection lost later, does not need a restart: the
+next tool that needs the IBM i (`plan`, `build`, ...) connects again.
+
+The MCP server **does need a restart** (as above) after the user fixes Java's CA store (`cacerts`, see
+Troubleshooting), changes the password source, or deletes MC's files on the IBM i from a shell (`--clean-remote`):
+it keeps those from its start. To delete MC's files while the server runs, use its `clean_remote` tool instead.
 The first start over SSH uploads MC (about 10 MB) and takes longer. Then follow the `mastercompiler` skill for the
 edit-compile-fix loop. If you cannot register or start the server yourself, give the user the exact entry and the
 steps. Never write into their config without asking.
@@ -177,3 +184,8 @@ project's `.mc/` folder (sources imported for reference). Nothing to copy to the
 | host key changed | The IBM i's SSH key differs from `~/.ssh/known_hosts`. Do not work around it: ask the user to confirm with their administrator |
 | Client says connected, `status` shows an error | The PC side runs; the IBM i side did not start (`status` says why). Fix that cause; the next `plan` or `build` tries again |
 | Password command prints nothing | Run it in the user's own shell (not for you to read its output): the first output line must be the password |
+| `trustAnchors parameter must be non-empty`, or `status` shows `tls` | Java has no CA store (`cacerts` missing or empty; `--doctor` prints `TLS CA store`). The user installs the JDK's CA certificates (Debian/Ubuntu: `ca-certificates-java`) or a full JDK, or sets `MC_TRUSTSTORE`; then restart the MCP server |
+| `closed the connection before the sign-on`, `Exceeded MaxStartups` | The IBM i's SSH server is busy (common on PUB400). MC already tried 4 times; wait a minute and call again |
+| `--doctor` says `SSH NOT USABLE` | Only the host servers work: `--mcp --ssh` and `--remote` cannot run now. Fix SSH first (port: PUB400 uses 2222) |
+| Tools fail after `--clean-remote` deleted MC's jar | That server ran from it: restart the MCP server (it uploads MC again). Next time use the `clean_remote` tool |
+| `call_program` stops with `RNX1217` | The program opens a display file (WORKSTN), and calls run in a batch job: use `screen_open` / `screen_send` |

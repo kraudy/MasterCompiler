@@ -38,14 +38,23 @@ final class SpoolFiles {
 
   /* The newest spooled files of this user, optionally of one name and / or job */
   static ObjectNode list(Connection connection, String file, String job) throws SQLException {
+    return list(connection, file, job, false);
+  }
+
+  /*
+   * byJob: the files of that job whoever owns them. A call's host server job keeps its printer output (SPLFOWN(*JOB)),
+   * and those files belong to the job's user (QUSER), not to this user
+   */
+  static ObjectNode list(Connection connection, String file, String job, boolean byJob) throws SQLException {
     ObjectNode result = mapper.createObjectNode();
     ArrayNode files = result.putArray("spooledFiles");
     String sql = "SELECT SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER, QUALIFIED_JOB_NAME, CREATION_TIMESTAMP, TOTAL_PAGES, USER_DATA, STATUS "
-        + "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER)) WHERE 1 = 1"
+        + "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(" + (byJob && !job.isEmpty() ? "JOB_NAME => ?" : "USER_NAME => USER") + ")) WHERE 1 = 1"
         + (file.isEmpty() ? "" : " AND SPOOLED_FILE_NAME = ?") + (job.isEmpty() ? "" : " AND QUALIFIED_JOB_NAME = ?")
         + " ORDER BY CREATION_TIMESTAMP DESC FETCH FIRST " + LISTED + " ROWS ONLY";
     try (PreparedStatement stmt = connection.prepareStatement(sql)) {
       int p = 1;
+      if (byJob && !job.isEmpty()) stmt.setString(p++, job);
       if (!file.isEmpty()) stmt.setString(p++, file);
       if (!job.isEmpty()) stmt.setString(p, job);
       stmt.setQueryTimeout(60);
@@ -69,10 +78,18 @@ final class SpoolFiles {
 
   /* One spooled file's lines: startLine (1-based), up to maxLines */
   static ObjectNode read(Connection connection, String file, String job, int number, int startLine, int maxLines) throws SQLException {
+    return read(connection, file, job, number, startLine, maxLines, false);
+  }
+
+  /* byJob: as in list, a file of that job whoever owns it */
+  static ObjectNode read(Connection connection, String file, String job, int number, int startLine, int maxLines, boolean byJob)
+      throws SQLException {
     int lines = Math.max(1, Math.min(maxLines <= 0 ? DEFAULT_LINES : maxLines, MAX_LINES));
     int start = Math.max(1, startLine);
     /* Which one: it must be this user's (SPOOLED_FILE_INFO only lists those) */
-    String sql = "SELECT QUALIFIED_JOB_NAME, SPOOLED_FILE_NUMBER, CREATION_TIMESTAMP FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER)) "
+    boolean ofJob = byJob && !job.isEmpty();
+    String sql = "SELECT QUALIFIED_JOB_NAME, SPOOLED_FILE_NUMBER, CREATION_TIMESTAMP FROM TABLE(QSYS2.SPOOLED_FILE_INFO("
+        + (ofJob ? "JOB_NAME => ?" : "USER_NAME => USER") + ")) "
         + "WHERE SPOOLED_FILE_NAME = ?" + (job.isEmpty() ? "" : " AND QUALIFIED_JOB_NAME = ?")
         + (number > 0 ? " AND SPOOLED_FILE_NUMBER = ?" : "") + " ORDER BY CREATION_TIMESTAMP DESC FETCH FIRST 1 ROW ONLY";
     String qualifiedJob;
@@ -80,6 +97,7 @@ final class SpoolFiles {
     String created;
     try (PreparedStatement stmt = connection.prepareStatement(sql)) {
       int p = 1;
+      if (ofJob) stmt.setString(p++, job);
       stmt.setString(p++, file);
       if (!job.isEmpty()) stmt.setString(p++, job);
       if (number > 0) stmt.setInt(p, number);

@@ -19,7 +19,18 @@ curl -fL -o ~/tools/MasterCompiler.jar "https://github.com/kraudy/MasterCompiler
 java -jar ~/tools/MasterCompiler.jar --install-skills --agent all     # or: claude | agents | copilot, comma-separated
 ```
 
-Or, with no jar yet, copy [`skills/mastercompiler-setup`](../skills/mastercompiler-setup) into your agent's skills folder.
+Or, with no jar yet, copy the setup skill of that release into your agent's skills folder (Claude Code shown):
+
+```bash
+curl -fL --create-dirs -o ~/.claude/skills/mastercompiler-setup/SKILL.md \
+  "https://raw.githubusercontent.com/kraudy/MasterCompiler/$tag/skills/mastercompiler-setup/SKILL.md"
+```
+
+**Register the MCP server before you start the agent.** Clients load their MCP servers when they start: a server added
+mid-session (`claude mcp add`, an edit to `opencode.json` or `config.toml`) has no tools until the client is restarted,
+or, in Claude Code, reconnected with `/mcp`. Restart the MCP server the same way after you fix Java's CA store
+(`cacerts`), change the password source, or delete MC's files on the IBM i from a shell (`--clean-remote`): it keeps
+those from its start. MC's own `clean_remote` tool needs no restart.
 
 ## Where things go
 
@@ -33,8 +44,9 @@ Or, with no jar yet, copy [`skills/mastercompiler-setup`](../skills/mastercompil
 
 `--agent all` installs to `~/.copilot/skills`, `~/.claude/skills` and `~/.agents/skills`; each client reads at least one of
 them. `~` is Java's home folder; when the agent's home is another one (`$HOME` set elsewhere), name the folder instead:
-`--install-skills --skills-dir "$HOME/.claude/skills"`. The exact entry for each client is in the [setup skill](../skills/mastercompiler-setup/SKILL.md) (one place, so it
-stays in step with the release). Config file formats change between client versions: when in doubt, the client's own
+`--install-skills --skills-dir "$HOME/.claude/skills"`. The exact entry for each client is in the setup skill at the
+latest release tag, `https://github.com/kraudy/MasterCompiler/blob/<tag_name>/skills/mastercompiler-setup/SKILL.md`
+(one place, so it stays in step with the release). Config file formats change between client versions: when in doubt, the client's own
 `mcp add` command wins.
 
 ## The password
@@ -48,6 +60,13 @@ environment configuration (`env`; OpenCode calls it `environment`) names where M
 
 The agent never asks for it and it never goes in the chat, a command line or a committed file. After IBM i rejects a
 password MC stops signing on there so the profile is not disabled; change the source and restart the MCP server.
+
+## Interactive programs
+
+`call_program` runs a program in a batch server job, with no display. A program with a display file (`WORKSTN`, e.g. a
+menu or an inquiry screen) stops at the open of that file (`RNX1217`). Run those through the 5250 tools instead:
+`screen_open`, then `screen_send` and `screen` (read the screen). A program that only shows `DSPLY` text returns nothing to
+`call_program`: print to QPRINT, whose spooled output comes back in the answer, or return a parameter.
 
 ## No VS Code, no Code for IBM i
 

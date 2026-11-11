@@ -57,13 +57,22 @@ public class BuildReport {
     public List<String> unresolvedSymbols;   // CPD5D02 Definition not found for symbol ...
     public List<String> binderWarnings;      // CPD5D1D and alike: harmless unless a CPD5D02 follows
     public String failedAt;  // compile, hook, tests, timeout, cancelled, protectedLibs: what failed when the status is failed
-    public List<CompileError> errors;    // the compile's own (EVFEVENT, its joblog messages)
+    public List<CompileError> errors;    // the compile's own (EVFEVENT, its joblog messages), severity 10 and up
+    public List<CompileError> messages;  // its informational ones (severity 0, e.g. CPC5D0B Service program created)
     public List<JoblogMessage> joblog;
     public List<JoblogMessage> hookJoblog;  // messages while the target's hooks ran (tests, CPYF, ...): never compile errors
 
     public TargetResult(String target, String status) {
       this.target = target;
       this.status = status;
+    }
+
+    /* Severity 0 records are not errors: they move to messages */
+    void splitMessages() {
+      if (errors == null) return;
+      List<CompileError> info = new ArrayList<CompileError>();
+      errors.removeIf(e -> e.severity == 0 && info.add(e));
+      if (!info.isEmpty()) messages = info;
     }
   }
 
@@ -128,6 +137,11 @@ public class BuildReport {
     compact(minSeverity, true);
   }
 
+  /* Message text compared without case, extra spaces or a final period: the joblog and EVFEVENT spell it apart */
+  private static String plain(String text) {
+    return text == null ? "" : text.trim().replaceAll("\\s+", " ").replaceAll("\\.$", "").toLowerCase(java.util.Locale.ROOT);
+  }
+
   /* showSkipped false: unchanged targets are only counted (skipped), not listed: small builds stay small */
   public void compact(int minSeverity, boolean showSkipped) {
     if (!showSkipped && skipped > 0) {
@@ -138,10 +152,20 @@ public class BuildReport {
     for (TargetResult t : targets) {
       List<CompileError> errors = new ArrayList<CompileError>();
       java.util.Set<String> seen = new java.util.HashSet<String>();
+      java.util.Set<String> seenText = new java.util.HashSet<String>();  // id and text: a joblog copy of an EVFEVENT record is not listed twice
       if (t.errors != null) {
         for (CompileError e : t.errors) {
-          if (e.severity >= minSeverity && seen.add(e.file + ":" + e.line + ":" + e.id + ":" + e.message)) errors.add(e);
+          if (e.severity < minSeverity || !seen.add(e.file + ":" + e.line + ":" + e.id + ":" + e.message)) continue;
+          /* A message about the whole compile (line 0, e.g. RNS9308) once, whichever file record carries it */
+          if (!seenText.add(e.id + ":" + plain(e.message)) && e.line <= 0) continue;
+          errors.add(e);
         }
+      }
+      if (t.messages != null && minSeverity == 0) {
+        java.util.Set<String> seenInfo = new java.util.HashSet<String>();
+        t.messages.removeIf(m -> !seenInfo.add(m.id + ":" + plain(m.message)));
+      } else {
+        t.messages = null;
       }
       List<JoblogMessage> joblog = new ArrayList<JoblogMessage>();
       java.util.Set<String> seenJoblog = new java.util.HashSet<String>();
@@ -161,7 +185,7 @@ public class BuildReport {
             if (!t.unresolvedSymbols.contains(name)) t.unresolvedSymbols.add(name);
           }
           if (m.severity >= 30) {
-            if (seen.add("null:0:" + m.id + ":" + m.text)) {
+            if (seenText.add(m.id + ":" + plain(m.text))) {
               CompileError e = new CompileError();
               e.id = m.id;
               e.severity = m.severity;

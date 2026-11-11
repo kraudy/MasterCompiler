@@ -69,6 +69,13 @@ final class TrustStores {
       sources.add("MC_TRUSTSTORE " + file.trim() + " (" + (count[0] - before) + ")");
     }
 
+    /* None at all: Java's TLS would fail with "the trustAnchors parameter must be non-empty". Not kept, so a fixed store is read at the next try */
+    if (count[0] == 0) {
+      String why = NO_CA + " (looked in " + String.join(", ", sources) + ")";
+      sources.clear();
+      throw new IllegalStateException(why);
+    }
+
     TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
     tmf.init(trusted);
     SSLContext context = SSLContext.getInstance("TLS");
@@ -76,6 +83,38 @@ final class TrustStores {
     logger.info("TLS trusts: {}", String.join(", ", sources));
     factory = context.getSocketFactory();
     return factory;
+  }
+
+  static final String NO_CA = "Java trusts no certificate authority: its CA store (" + javaCacerts() + ") is missing or "
+      + "empty, so TLS to the IBM i (screen_open with TLS) cannot work. Install the JDK's CA certificates (Debian/Ubuntu: "
+      + "ca-certificates-java; or use a full JDK such as Temurin) or set MC_TRUSTSTORE to the IBM i's CA certificate, then "
+      + "restart the MCP server";
+
+  private static String javaCacerts() {
+    String own = System.getProperty("javax.net.ssl.trustStore");
+    return own != null ? own : System.getProperty("java.home") + File.separator + "lib" + File.separator + "security"
+        + File.separator + "cacerts";
+  }
+
+  /* --doctor and the MCP start-up: Java's own CA certificates, counted; null when there is none and no MC_TRUSTSTORE */
+  static String caStore() {
+    int count = 0;
+    try {
+      TrustManagerFactory java = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+      java.init((KeyStore) null);
+      for (javax.net.ssl.TrustManager tm : java.getTrustManagers()) {
+        if (tm instanceof X509TrustManager) count += ((X509TrustManager) tm).getAcceptedIssuers().length;
+      }
+    } catch (Exception unreadable) { /* counted as none */ }
+    String own = System.getenv("MC_TRUSTSTORE");
+    boolean extra = own != null && !own.trim().isEmpty();
+    if (count == 0 && !extra) return null;
+    return count + " CA certificates in " + javaCacerts() + (extra ? ", plus MC_TRUSTSTORE " + own.trim() : "");
+  }
+
+  /* MCP start-up on the PC: said at once, not first at screen_open */
+  static void warnIfNone() {
+    if (caStore() == null) logger.warn(NO_CA);
   }
 
   /* Where the trusted certificates came from, for an error message */

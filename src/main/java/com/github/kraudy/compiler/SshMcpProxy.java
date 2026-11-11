@@ -76,6 +76,7 @@ public class SshMcpProxy {
   private Code4iConfig code4i;
   private final String token = "mcp-" + randomHex(8);  // this server's MC on the IBM i: its pid file and -Dmc.session
   private volatile boolean startedOnce;
+  private volatile String remoteJar;  // MC's jar on the IBM i, once a session started
   private final ExecutorService calls = Executors.newSingleThreadExecutor(r -> {
     Thread t = new Thread(r, "mc-ssh-calls");
     t.setDaemon(true);
@@ -102,7 +103,8 @@ public class SshMcpProxy {
 
     code4i = MasterCompiler.code4i(parser);
     configure(code4i);
-    router = new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
+    TrustStores.warnIfNone();  // screen_open runs from here
+    router =new ReadOnlyConnections.Router(project, true, code4i != null ? code4i.name : null);
     SignOnGuard.known(buildTarget);
 
     /*
@@ -306,6 +308,7 @@ public class SshMcpProxy {
   private OutputStream startRemote(Session s) throws Exception {
     long start = System.currentTimeMillis();
     String jar = prepareRemote(code4i);
+    remoteJar = jar;
     s.ssh = ssh;
 
     stage("4/5 starting MasterCompiler on the IBM i");
@@ -404,7 +407,7 @@ public class SshMcpProxy {
         if (status == 0) status = 1;
       }
       if (parser.isCleanRemote()) {
-        if (status == 0) cleanRemote(jar);
+        if (status == 0) logger.info("--clean-remote: {}", cleanRemote(jar));
         else logger.warn("--clean-remote: the build failed, so {} and the MC jar stay on the IBM i for inspection", remoteDir);
       }
       return status;
@@ -433,31 +436,50 @@ public class SshMcpProxy {
   }
 
   /*
-   * --clean-remote after a successful build: the uploaded project copy and this MC version's jar. Only MC's own copy
-   * is deleted: never a --push folder, and only when its real path (symbolic links resolved) is below <home>/mc and its
-   * marker .mc/local-project holds this project's id. The next --remote uploads again.
+   * --clean-remote after a successful build, and the clean_remote tool: the uploaded project copy and this MC version's
+   * jar; returns what was done. Only MC's own copy is deleted: never a --push folder, and only when its real path
+   * (symbolic links resolved) is below <home>/mc and its marker .mc/local-project holds this project's id. Neither is
+   * deleted while an MC process on the IBM i still runs from it (an MCP server's: deleting its jar breaks it). The
+   * next --remote uploads again.
    */
-  private void cleanRemote(String jar) {
+  private String cleanRemote(String jar) {
+    List<String> done = new ArrayList<String>();
     try {
       String mc = ssh.realPath(remoteHome + "/mc");
       String real = ssh.realPath(remoteDir);
       String marker = ssh.execQuiet("cat " + SshTarget.quote(remoteDir + "/.mc/local-project"));
       if (parser.getPush() != null || mc == null || real == null || !real.startsWith(mc + "/") || real.length() <= mc.length() + 1
           || marker == null || !marker.trim().equals(ownerId)) {
-        logger.warn("--clean-remote: {} is not an MC copy of this project (inside {}/mc, with its marker), so it stays", remoteDir, remoteHome);
+        done.add(remoteDir + " is not an MC copy of this project (inside " + remoteHome + "/mc, with its marker), so it stays");
+      } else if (runsFrom(remoteDir)) {
+        done.add(remoteDir + " stays: an MC server still runs in it (an MCP server with --mcp --ssh for this project: "
+            + "use its clean_remote tool, or close that client first)");
       } else {
         ssh.exec("rm -rf " + SshTarget.quote(real));
         SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
         manifest.clear();
         manifest.save();
-        logger.info("--clean-remote: {} deleted from the IBM i", remoteDir);
+        done.add(remoteDir + " deleted from the IBM i");
       }
-      ssh.exec("rm -f " + SshTarget.quote(jar));
-      ssh.execQuiet("rmdir " + SshTarget.quote(remoteHome + "/mc/.mc") + " " + SshTarget.quote(remoteHome + "/mc"));  // only when empty
-      logger.info("--clean-remote: MC's jar deleted from the IBM i");
+      if (runsFrom(jar)) {
+        done.add("MC's jar stays: an MC server still runs from it (an MCP server, --mcp --ssh); deleting it would break "
+            + "that server until it is restarted");
+      } else {
+        ssh.exec("rm -f " + SshTarget.quote(jar));
+        ssh.execQuiet("rmdir " + SshTarget.quote(remoteHome + "/mc/.mc") + " " + SshTarget.quote(remoteHome + "/mc"));  // only when empty
+        done.add("MC's jar deleted from the IBM i");
+      }
     } catch (Exception e) {
+      done.add("did not finish: " + e.getMessage());
       logger.warn("--clean-remote did not finish: {}", e.getMessage());
     }
+    return String.join("; ", done);
+  }
+
+  /* An MC process on the IBM i whose command line names this path (the jar, or the copy as its --project) */
+  private boolean runsFrom(String path) {
+    String out = ssh.execQuiet("ps -e -o args= | grep -F -e " + SshTarget.quote(path) + " | grep -v grep");
+    return out != null && out.contains("-jar");
   }
 
   /* Start-up stage, logged and kept for tool calls that wait or fail */
@@ -677,6 +699,10 @@ public class SshMcpProxy {
         sendResult(request.get("id"), upload(params.path("arguments")));
         return null;
       }
+      if ("clean_remote".equals(params.path("name").asText())) {  // ends MC there: run here, on the calls thread
+        sendResult(request.get("id"), cleanRemoteTool(params.path("arguments").path("confirm").asBoolean(false)));
+        return null;
+      }
       ObjectNode args = params.has("arguments") && params.get("arguments").isObject()
           ? (ObjectNode) params.get("arguments") : params.putObject("arguments");
       ObjectNode answer = router.handle(params.path("name").asText(), args);
@@ -689,6 +715,52 @@ public class SshMcpProxy {
       sendToolError(line, "Could not prepare the call: " + e.getMessage());
       return null;
     }
+  }
+
+  /*
+   * clean_remote: --clean-remote from the MCP server. MC there runs from the copy and the jar, so its session ends
+   * first (lost), its process is stopped over a new SSH connection, and only then are the files deleted. The next
+   * call starts a new session, which uploads both again.
+   */
+  private ObjectNode cleanRemoteTool(boolean confirm) {
+    String text;
+    boolean error = false;
+    try {
+      Session s = connected();  // where the copy and the jar are: known once MC started there
+      String jar = remoteJar;
+      if (!confirm) {
+        text = "Nothing was deleted. On " + host + " clean_remote would stop MasterCompiler there and delete "
+            + (parser.getPush() != null ? "MC's jar " + jar + " (the --push folder " + remoteDir + " stays)"
+                : "the project copy " + remoteDir + " and MC's jar " + jar + " (kept while another MC server runs from it)")
+            + ". Library objects stay (clean deletes those). The next tool that needs the IBM i uploads both again. Show "
+            + "this to the user; if they agree, call again with confirm: true.";
+      } else if (remoteBuildRunning()) {
+        text = "Build " + remoteBuild + " is running on the IBM i from this copy: nothing was deleted. Wait for it "
+            + "(build_status) or stop it with cancel, then call clean_remote again.";
+        error = true;
+      } else {
+        lost(s, "clean_remote deleted MasterCompiler's files on the IBM i");
+        ssh = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, buildTarget.password,
+            code4i != null ? code4i.privateKeyPath : null));
+        try {
+          stopEarlier();
+          text = cleanRemote(jar) + ". The next tool that needs the IBM i uploads MasterCompiler and the sources again.";
+        } finally {
+          ssh.close();
+        }
+      }
+    } catch (ExecutionException e) {
+      text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage()
+          + ". Nothing was deleted; --clean-remote with --remote cleans up from a shell.";
+      error = true;
+    } catch (Exception e) {
+      text = "clean_remote did not finish: " + e.getMessage();
+      error = true;
+    }
+    ObjectNode result = mapper.createObjectNode();
+    result.putArray("content").addObject().put("type", "text").put("text", text);
+    result.put("isError", error);
+    return result;
   }
 
   /* upload_file over this server's SSH session, once it is up */
@@ -781,7 +853,7 @@ public class SshMcpProxy {
       if (!"tools/call".equals(request.path("method").asText())) return line;
       String tool = request.path("params").path("name").asText();
       if ((tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export") || tool.equals("import_source") || tool.equals("build")
-          || tool.equals("plan") || tool.equals("impact")) && remoteBuildRunning()) {
+          || tool.equals("plan") || tool.equals("impact") || tool.equals("run_command")) && remoteBuildRunning()) {
         sendToolError(line, "Build " + remoteBuild + " is running on the IBM i (or did not say within 60 s that it ended): "
             + tool + " would upload the sources under it. Follow it with build_status, see what the job does with "
             + "whats_running, or stop it with cancel.");
@@ -791,8 +863,8 @@ public class SshMcpProxy {
         pendingResults.put(request.path("id").toString(), request.path("params").path("arguments"));  // the file is written here
         return line;
       }
-      if (tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export")) {
-        sync(projectFiles(project), true);  // they read the sources in the IBM i copy
+      if (tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export") || tool.equals("run_command")) {
+        sync(projectFiles(project), true);  // they read the sources (run_command: protectedLibs in the spec) in the IBM i copy
         return line;
       }
       if (tool.equals("import_source")) {
@@ -856,6 +928,8 @@ public class SshMcpProxy {
   private ObjectNode statusFields(ObjectNode into) {
     into.put("pcVersion", MasterCompiler.version());
     into.put("connection", "SSH " + host);
+    if (into.has("system")) into.put("system", host);  // MC there names its own system localhost
+    if (TrustStores.caStore() == null) into.put("tls", TrustStores.NO_CA);
     into.put("startup", stage);
     into.put("localProjectFolder", project != null ? project.getAbsolutePath() : null);
     into.put("ibmiProjectFolder", remoteDir);
@@ -875,6 +949,7 @@ public class SshMcpProxy {
         failed = "could not start: " + (e.getCause() != null ? e.getCause() : e).getMessage();
       }
     }
+    text.put("state", failed != null ? "failed" : "starting");
     text.put("ibmi", failed != null ? "disconnected" : "connecting");
     text.put("note", failed != null ? "MasterCompiler is not running on the IBM i (" + failed + "). The next tool that needs "
         + "the IBM i (plan, build, ...) connects again; status itself does not."

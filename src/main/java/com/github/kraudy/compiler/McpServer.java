@@ -138,6 +138,7 @@ public class McpServer {
     MasterCompiler.quietLogs(parser.isVerbose());
     SecretPrompt.sender(this::sendLine);
     if (!readOnlyMode) ScreenTools.systemCcsid(this::screenCcsidForScreens);
+    if (!IBMiDotEnv.isIBMi()) TrustStores.warnIfNone();
     logger.info("MasterCompiler MCP server ready");
 
     BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
@@ -247,8 +248,8 @@ public class McpServer {
 
     tools.add(tool("build",
         "Compile targets on the IBM i. With 'files' or 'since' only the targets whose sources " +
-        "(or /copy members) changed are built, plus everything that depends on them; with neither, " +
-        "every target is built. Returns the build report: per target status, command, compile errors " +
+        "(or /copy members) changed are built, plus everything that depends on them; with 'targets' exactly those " +
+        "(e.g. the targets and dependents impact listed); with none of them, every target is built. Returns the build report: per target status, command, compile errors " +
         "(file, line, column, id, severity, message) and joblog; hook messages apart (hookJoblog), failedAt " +
         "(compile, hook, tests, timeout, cancelled, protectedLibs), tests: each RUCALLTST hook's RPGUnit result as JSON " +
         "(counts, each failing test with its message and statement), and timeouts: hooks past their timeout with their " +
@@ -260,7 +261,7 @@ public class McpServer {
         buildSchema()));
     tools.add(tool("plan",
         "Dry run of build: which targets would compile, in order, and with which commands. " +
-        "Nothing is compiled. Same 'files' / 'since' selection as build.",
+        "Nothing is compiled. Same 'files' / 'since' / 'targets' selection as build.",
         selectionSchema()));
 
     ObjectNode impact = mapper.createObjectNode();
@@ -289,6 +290,19 @@ public class McpServer {
         + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members. With "
         + "formerTargets: true it deletes the objects MC built for targets taken out of the spec instead.",
         clean));
+    if (parser.isSsh()) {
+      ObjectNode cleanRemote = mapper.createObjectNode();
+      cleanRemote.put("type", "object");
+      cleanRemote.putObject("properties").putObject("confirm").put("type", "boolean").put("description",
+          "false (default): only say what would be deleted. true: delete, after the user agreed");
+      tools.add(tool("clean_remote",
+          "Delete MasterCompiler's own files on the IBM i (IFS, not objects): this project's uploaded copy under "
+          + "<home>/mc and MC's jar, e.g. at the end of a trial. Only when the user asks. MC there is stopped first; the "
+          + "jar stays while another MC server (another project) still runs from it. The next tool that needs the IBM i "
+          + "uploads both again (about 10 MB). Objects in the library stay: clean deletes those. First call without "
+          + "confirm and show the user what would go; call again with confirm: true only if they agree.",
+          cleanRemote));
+    }
 
     ObjectNode find = mapper.createObjectNode();
     find.put("type", "object");
@@ -729,6 +743,12 @@ public class McpServer {
     ObjectNode since = props.putObject("since");
     since.put("type", "string");
     since.put("description", "Git ref: build what changed since it (committed, uncommitted and untracked)");
+    ObjectNode targets = props.putObject("targets");
+    targets.put("type", "array");
+    targets.putObject("items").put("type", "string");
+    targets.put("description", "Build exactly these targets, in build order, and nothing else (no dependents): NAME, "
+        + "NAME.TYPE (BASE36.SRVPGM) or the target keys impact returns. To rebuild a chain, pass impact's targets and "
+        + "dependents. Not with files or since");
     ObjectNode minSeverity = props.putObject("minSeverity");
     minSeverity.put("type", "integer");
     minSeverity.put("description", "Lowest message severity in the report (default 20: errors that stop a compile). "
@@ -747,7 +767,7 @@ public class McpServer {
     tool.put("description", description);
     tool.set("inputSchema", inputSchema);
     /* MCP hints: clients can auto-approve read-only tools and confirm destructive ones */
-    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("call_program") || name.equals("copy_rows")
+    boolean destructive = name.equals("build") || name.equals("clean") || name.equals("clean_remote") || name.equals("call_program") || name.equals("copy_rows")
         || name.equals("upload_file") || name.equals("cancel") || name.equals("run_command") || name.equals("debug_program")
         || name.equals("screen_open") || name.equals("screen_send");
     boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
@@ -1100,7 +1120,12 @@ public class McpServer {
     compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));
 
     Set<String> files = files(args, spec);
-    if (files != null) compiler.setChangedFiles(files);
+    List<String> targets = new java.util.ArrayList<String>();
+    for (JsonNode target : args.path("targets")) if (!target.asText("").trim().isEmpty()) targets.add(target.asText().trim());
+    if (!targets.isEmpty()) {
+      if (files != null || args.hasNonNull("since")) throw new IllegalArgumentException("'targets' names what to build: leave out 'files' and 'since'");
+      compiler.setOnlyTargets(String.join(",", targets));
+    } else if (files != null) compiler.setChangedFiles(files);
     else if (args.hasNonNull("since")) compiler.setSince(args.get("since").asText());
 
     compiler.build();
@@ -1370,10 +1395,12 @@ public class McpServer {
       try {
         connect();
       } catch (Exception e) {
+        result.put("state", "failed");
         result.put("readOnly", true);
         result.put("error", e.getMessage());
         return toolResult(pretty.writeValueAsString(result), false);
       }
+      result.put("state", "ready");
       result.put("readOnly", true);
       result.put("user", system.getUserId());
       result.put("system", system.getSystemName());
@@ -1395,8 +1422,10 @@ public class McpServer {
     if (signOn == null) signOn = buildSignOn();
     if (signOn != null) SignOnGuard.known(signOn);
     /* Not connected (a rejected password, a network error): status still answers, with why */
+    /* One answer to "can I use it": ready (signed on, the tools work) or failed (error says why) */
     try {
       connectWithLibraryList();
+      result.put("state", "ready");
       result.put("user", system.getUserId());
       result.put("system", system.getSystemName());
       result.put("currentLibrary", currentLibrary());
@@ -1404,8 +1433,10 @@ public class McpServer {
       Integer screens = screenCcsid();
       if (screens != null) result.put("screenCcsid", screens);
     } catch (Exception e) {
+      result.put("state", "failed");
       result.put("error", e.getMessage());
     }
+    if (!IBMiDotEnv.isIBMi() && TrustStores.caStore() == null) result.put("tls", TrustStores.NO_CA);
     if (router() != null) result.set("connections", router.connectionsStatus());
     return toolResult(pretty.writeValueAsString(result), false);
   }
@@ -1427,6 +1458,14 @@ public class McpServer {
           args.path("deleteWhere").asText(null), connection, writer);
       return toolResult(pretty.writeValueAsString(result), false);
     }
+  }
+
+  /* What a refusal for missing protectedLibs asks for: the line, and the file it goes in */
+  private String protectedLibsHint() {
+    String file = parser.hasScan() ? (parser.getBaseFile() != null ? new File(parser.getBaseFile()).getName() : "mc-base.yaml")
+        + " in the scanned source folder (create it if missing)" : new File(specName()).getName();
+    return "Ask the user which libraries hold production data, then add a top-level line such as "
+        + "protectedLibs: [PRODLIB1, PRODLIB2] to " + file + " and call again (the spec is read at each call: no restart).";
   }
 
   private List<String> protectedLibs() {
@@ -1482,13 +1521,19 @@ public class McpServer {
     }
     if (writes.size() > 0 && spec.protectedLibs.isEmpty()) {
       return toolResult("Refused: " + program + " can change files (" + writes + ") and the spec sets no protectedLibs, so "
-          + "nothing keeps it from production data. Add protectedLibs: [<production libraries>] to the spec first.", true);
+          + "nothing keeps it from production data. " + protectedLibsHint(), true);
     }
     /* Database writes are checked; other effects (jobs, the IFS, commands run by text) are only listed */
     List<String> sourceLines = java.nio.file.Files.readAllLines(source.toPath(), java.nio.charset.StandardCharsets.UTF_8);
     String debugLines = null;
     List<String> debugVariables = null;
     int maxHits = Math.max(1, Math.min(args.path("maxHits").asInt(10), 50));
+    /* A batch job has no display: a WORKSTN program stops at the open of its display file (RNX1217) */
+    if (!debug && ProgramDebugger.usesDisplay(sourceLines)) {
+      result.put("displayFile", program + " seems to use a display file (WORKSTN, EXFMT, SNDRCVF or a CL DCLF): call_program "
+          + "runs it in a batch job with no display, where it stops at the open of that file (RNX1217). Run it with "
+          + "screen_open / screen_send instead. A CL DCLF of a database file is fine.");
+    }
     if (debug) {
       if (spec.protectedLibs.stream().anyMatch(p -> p.trim().equalsIgnoreCase(curlib))) {
         return toolResult("Refused: debug_program creates its helper " + ProgramDebugger.HELPER + " in the current library "
@@ -1548,9 +1593,12 @@ public class McpServer {
       around = ProgramDebugger.around(system, curlib, program, debugLines, debugVariables, maxHits);
       result.put("debugHelper", helper);
     }
+    Timestamp started = CallRunner.serverTime(connection);
     ObjectNode ran = ProgramCaller.call(system, curlib, program, args.path("parameters").isArray()
         ? args.path("parameters") : mapper.createArrayNode(), SqlTools.libraryList(connection), curlib, around);
     if (debug) ran.put("debugHelper", result.path("debugHelper").asText());
+    /* What it printed (QPRINT): the call's batch job has no display, so DSPLY shows nothing */
+    else CallRunner.collectSpool(system, connection, ran, started);
     ran.set("writes", writes);
     ran.set("otherEffects", effects);
     if (!checks.isEmpty()) {
@@ -1586,8 +1634,8 @@ public class McpServer {
     }
     String upper = command.toUpperCase(java.util.Locale.ROOT);
     if (protectedLibs().isEmpty()) {
-      return toolResult("Refused: the spec sets no protectedLibs, so nothing keeps a command from production data. Add "
-          + "protectedLibs: [<production libraries>] to the spec first.", true);
+      return toolResult("Refused: the spec sets no protectedLibs, so nothing keeps a command from production data. "
+          + protectedLibsHint(), true);
     }
     for (String lib : protectedLibs()) {
       if (java.util.regex.Pattern.compile("(?<![A-Z0-9_$#@])" + java.util.regex.Pattern.quote(lib.trim().toUpperCase(java.util.Locale.ROOT))

@@ -129,6 +129,9 @@ final class ProgramCaller {
     if (!setup.run(chglibl)) {
       throw new IllegalStateException("Could not set the library list for the call: " + messages(setup.getMessageList()));
     }
+    /* A host server job's printer output goes to the user's QPRTJOB by default: kept in this job, it is read back.
+       If the override fails the call still runs; the answer then says the job owns no spooled file */
+    setup.run("OVRPRTF FILE(*PRTF) SPLFOWN(*JOB) OVRSCOPE(*JOB)");
 
     ProgramCall call = new ProgramCall(system, QSYSObjectPathName.toPath(library, program, "PGM"), params);
     ExecutorService runner = Executors.newSingleThreadExecutor();

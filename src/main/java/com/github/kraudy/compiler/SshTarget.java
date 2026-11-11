@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.SftpATTRS;
 import com.jcraft.jsch.SftpException;
@@ -71,7 +72,39 @@ public final class SshTarget implements AutoCloseable {
   /* --strict-host-key: set once by run(); an IBMI_SSH_KNOWN_HOSTS file also makes it strict */
   static volatile boolean strictHostKey;
 
+  /*
+   * A busy sshd drops connections before any sign-on (PUB400: "Exceeded MaxStartups", "connection is closed by foreign
+   * host"): tried again a few times, 2, 5 and 10 s apart. No password was sent on such a try, so this costs no
+   * attempt against the profile; anything else (a rejected password, a host key) fails at once.
+   */
+  private static final int[] RETRY_SECONDS = { 2, 5, 10 };
+
   public static SshTarget connect(String host, int port, String user, String password, String privateKeyPath) throws Exception {
+    for (int attempt = 0; ; attempt++) {
+      try {
+        return connectOnce(host, port, user, password, privateKeyPath);
+      } catch (JSchException e) {
+        if (!beforeSignOn(e)) throw e;
+        if (attempt == RETRY_SECONDS.length) {
+          throw new IllegalStateException("SSH to " + host + ":" + port + " failed " + (attempt + 1) + " times: the IBM i "
+              + "closed the connection before the sign-on (" + e.getMessage() + "). Its SSH server is busy or limits new "
+              + "connections (sshd MaxStartups; common on PUB400): try again in a minute", e);
+        }
+        logger.warn("SSH to {}:{} closed before the sign-on ({}): trying again in {} s", host, port, e.getMessage(), RETRY_SECONDS[attempt]);
+        Thread.sleep(RETRY_SECONDS[attempt] * 1000L);
+      }
+    }
+  }
+
+  /* The server closed or reset the connection during the key exchange: nothing about the user was checked yet */
+  static boolean beforeSignOn(JSchException e) {
+    String text = String.valueOf(e.getMessage()).toLowerCase(java.util.Locale.ROOT);
+    if (text.contains("auth") || text.contains("hostkey") || text.contains("host key")) return false;
+    return text.contains("closed by foreign host") || text.contains("connection reset") || text.contains("maxstartups")
+        || text.contains("invalid server's version string") || text.contains("end of io stream");
+  }
+
+  private static SshTarget connectOnce(String host, int port, String user, String password, String privateKeyPath) throws Exception {
     JSch jsch = new JSch();
     File sshDir = new File(System.getProperty("user.home"), ".ssh");
     String own = System.getenv("IBMI_SSH_KNOWN_HOSTS");

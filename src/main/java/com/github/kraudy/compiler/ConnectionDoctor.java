@@ -88,6 +88,8 @@ final class ConnectionDoctor {
     out.println("Library list      : " + libl);
     out.println("Home directory    : " + (code4i != null && code4i.homeKnown ? code4i.homeDirectory + " (Code for IBM i)"
         : "the SSH user's $HOME"));
+    String ca = TrustStores.caStore();
+    out.println("TLS CA store      : " + (ca != null ? ca : "none. " + TrustStores.NO_CA));
     out.println();
 
     SignOnGuard.Target target = new SignOnGuard.Target(code4i != null ? code4i.name : host, host, user, password);
@@ -104,6 +106,8 @@ final class ConnectionDoctor {
       out.println("Usable transport  : SSH only. Build with --remote (or serve MCP with --mcp --ssh); the host servers do not work from here");
     } else if (hostServersUsable) {
       out.println("Usable transport  : host servers only. The default build and --mcp work; --ssh and --remote do not");
+      out.println("SSH NOT USABLE    : --remote and --mcp --ssh cannot be used right now (the SSH check above says why); "
+          + "this still exits 0 because the host servers work");
     } else {
       out.println("Usable transport  : none. Fix the first failure above; "
           + (port.number == 22 && "default".equals(port.origin)
