@@ -86,7 +86,8 @@ public class AgentSetupTest {
   void shellWordsAreQuotedOnlyWhenNeeded() {
     assertEquals("/opt/mc/MasterCompiler.jar", NextSteps.word("/opt/mc/MasterCompiler.jar", false));
     assertEquals("'secret-tool lookup service ibmi'", NextSteps.word("secret-tool lookup service ibmi", false));
-    assertEquals("'it'\\''s'", NextSteps.word("it's", false));
+    /* PowerShell doubles a quote inside quotes; POSIX shells close and reopen them */
+    assertEquals(File.separatorChar == '\\' ? "'it''s'" : "'it'\\''s'", NextSteps.word("it's", false));
     assertEquals("\"a \\\"b\\\"\"", NextSteps.word("a \"b\"", true));
   }
 
