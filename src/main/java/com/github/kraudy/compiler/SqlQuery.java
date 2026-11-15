@@ -35,10 +35,11 @@ final class SqlQuery {
     return libl;
   }
 
-  static int run(AS400 system, ArgParser parser, Code4iConfig code4i) throws Exception {
+  static int run(AS400 system, ArgParser parser, Code4iConfig code4i, HostConnections connections) throws Exception {
     String statement = SqlTools.checkReadOnly(parser.getSql());
     ObjectNode result;
-    try (Connection connection = SqlTools.readOnlyConnection(system, libraries(parser, code4i))) {
+    try (Connection connection = connections.open(HostConnections.Purpose.READ_ONLY, "--sql",
+        () -> SqlTools.readOnlyConnection(system, libraries(parser, code4i)))) {
       result = new SqlTools(0, new ArrayList<String>(), null).query(connection, statement, parser.getMaxRows(), 0);
     } catch (SQLException e) {
       System.err.println("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage());

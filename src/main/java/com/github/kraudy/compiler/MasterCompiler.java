@@ -69,6 +69,7 @@ public class MasterCompiler{
   private BuildProgress progress;  // where the build is now (build_status, whats_running, cancel)
   private JobWatch watch;          // looks at / stops the build job from another connection
   private boolean ownWatch;
+  private HostConnections connections = new HostConnections(HostConnections.Mode.SHARED);  // the command line's: --verbose prints them
 
   public MasterCompiler(AS400 system) throws Exception {
     this(system, new AS400JDBCDataSource(system).getConnection());
@@ -144,6 +145,10 @@ public class MasterCompiler{
     this.keepGoing = keepGoing;
   }
 
+  public void setConnections(HostConnections connections) {
+    this.connections = connections;
+  }
+
   /* MCP: the progress other threads read, and the watch the server shares with whats_running */
   public void setProgress(BuildProgress progress, JobWatch watch) {
     this.progress = progress;
@@ -174,7 +179,7 @@ public class MasterCompiler{
     commandExec = new CommandExecutor(connection, debug, verbose, dryRun);
     if (progress == null) progress = new BuildProgress("cli");
     if (watch == null) {
-      watch = new JobWatch(system);  // opens its connection only if a hook times out
+      watch = JobWatch.own(system, connections);  // opens its connection only if a hook times out
       ownWatch = true;
     }
     progress.jobName = JobWatch.jobName(connection);
@@ -1115,6 +1120,17 @@ public class MasterCompiler{
     return system;
   }
 
+  /* The command line's AS400 object, its services (command, files) counted as they connect */
+  private static AS400 counted(AS400 system, HostConnections connections) {
+    system.addConnectionListener(connections.listener());
+    return system;
+  }
+
+  /* The command line's build job */
+  private static Connection buildConnection(AS400 system, HostConnections connections) throws Exception {
+    return connections.open(HostConnections.Purpose.BUILD, "the build job", () -> new AS400JDBCDataSource(system).getConnection());
+  }
+
   /* --password-stdin / IBMI_PASSWORD_FILE / the password command, else IBMI_PASSWORD of the environment or .env, else SSH_ASKPASS or the terminal */
   private static String dotenvPassword(io.github.cdimascio.dotenv.Dotenv env) {
     String provided = Passwords.provided();
@@ -1204,6 +1220,8 @@ public class MasterCompiler{
     Connection connection = null;
     int exitCode = 0;
     boolean debug = false;
+    boolean verbose = false;
+    HostConnections connections = new HostConnections(HostConnections.Mode.SHARED);  // what this run opened: --verbose prints it at the end
     try {
       /* Invalid arguments: one line saying what is wrong, then the usage (no stack trace) */
       if (ArgParser.wantsHelp(args)) {
@@ -1225,6 +1243,7 @@ public class MasterCompiler{
         return 2;
       }
       debug = parser.isDebug();
+      verbose = parser.isVerbose() && !parser.isMcp();  // the MCP server shows its own in status
 
       if (parser.isVersion()) {
         System.out.println("MasterCompiler " + version());
@@ -1292,8 +1311,8 @@ public class MasterCompiler{
           return exitCode;
         }
         quietLogs(parser.isVerbose());
-        system = signOn(parser);
-        return parser.getSql() != null ? SqlQuery.run(system, parser, code4i(parser)) : DataFetch.run(system, parser);
+        system = counted(signOn(parser), connections);
+        return parser.getSql() != null ? SqlQuery.run(system, parser, code4i(parser), connections) : DataFetch.run(system, parser);
       }
 
       /* Run a program in one job and print what it gave back (its output is the answer: no logger lines around it) */
@@ -1303,15 +1322,15 @@ public class MasterCompiler{
           return exitCode;
         }
         quietLogs(parser.isVerbose());
-        system = signOn(parser);
-        connection = new AS400JDBCDataSource(system).getConnection();
+        system = counted(signOn(parser), connections);
+        connection = buildConnection(system, connections);
         return CallRunner.run(system, connection, parser, code4i(parser));
       }
 
       /* Import: source members -> MC repository (stream files, report, scanned build.yaml) */
       if (parser.getImportSelection() != null) {
-        system = signOn(parser);
-        connection = new AS400JDBCDataSource(system).getConnection();
+        system = counted(signOn(parser), connections);
+        connection = buildConnection(system, connections);
         String outDir = parser.getOutputFile();
         LibraryImporter.ImportReport imported = new LibraryImporter(system, connection, parser.isVerbose())
             .run(parser.getImportSelection(), outDir);
@@ -1334,7 +1353,7 @@ public class MasterCompiler{
       if (parser.isGenerateOnly()) {
         system = null;
         try {
-          system = signOn(parser);
+          system = counted(signOn(parser), connections);
         } catch (Exception ignore) {
           /* local-only generation */
           if (parser.isVerbose()) {
@@ -1343,7 +1362,7 @@ public class MasterCompiler{
         }
         if (system != null) {
           try {
-            connection = new AS400JDBCDataSource(system).getConnection();
+            connection = buildConnection(system, connections);
           } catch (Exception ignore) {
             if (parser.isVerbose()) {
               logger.info("No JDBC connection; generating without object inspection");
@@ -1375,8 +1394,8 @@ public class MasterCompiler{
         return exitCode;
       }
 
-      system = signOn(parser);
-      connection = new AS400JDBCDataSource(system).getConnection();
+      system = counted(signOn(parser), connections);
+      connection = buildConnection(system, connections);
 
       BuildSpec spec;
       if (parser.hasTobi()) {
@@ -1428,6 +1447,7 @@ public class MasterCompiler{
       compiler.setLibraryHooks(libraryHooks(parser, code4i));
       compiler.setPush(pushDir(parser, code4i, spec));
       compiler.setKeepGoing(parser.isKeepGoing());
+      compiler.setConnections(connections);
       compiler.build();
       if (compiler.foundCompilationError()) exitCode = 1;
 
@@ -1458,6 +1478,7 @@ public class MasterCompiler{
       } catch (SQLException e) {
         logger.error("Error cleaning up", e);
       }
+      if (verbose) logger.info(connections.summary());
     }
     return exitCode;
   }

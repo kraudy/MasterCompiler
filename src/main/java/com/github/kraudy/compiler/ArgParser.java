@@ -32,6 +32,7 @@ public class ArgParser {
     LIBL          (null, "libl",         Kind.VALUE, "Library list for the build job (CHGLIBL), space-separated"),
     CURLIB        (null, "curlib",       Kind.VALUE, "Current library for the build job (CHGCURLIB)"),
     READ_ONLY     (null, "read-only",    Kind.FLAG,  "With --mcp: a read-only server for another IBM i (sql, find_object, find_source, object_info, export_rows); --libl lists the only libraries it reads"),
+    SINGLE_CONNECTION (null, "single-connection", Kind.FLAG, "With --mcp: one IBM i connection (the build job's) for sql, checkRows, the job monitor and copy_rows: fewer sign-ons, queries wait for builds"),
     MAX_ROWS      (null, "max-rows",     Kind.VALUE, "With --read-only: most rows one query or copy may read"),
     MASK_COLUMNS  (null, "mask-columns", Kind.VALUE, "With --read-only: columns (comma-separated) sql shows masked and copy_rows must replace"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
@@ -160,6 +161,7 @@ public class ArgParser {
   private boolean srvpgmFromExports;
   private boolean strictHostKey;
   private boolean readOnly;
+  private boolean singleConnection;
   private int maxRows;
   private String maskColumns;
   private boolean hostServers;
@@ -281,6 +283,7 @@ public class ArgParser {
       case SRVPGM_FROM_EXPORTS: srvpgmFromExports = true; break;
       case STRICT_HOST_KEY: strictHostKey = true; break;
       case READ_ONLY:     readOnly = true; break;
+      case SINGLE_CONNECTION: singleConnection = true; break;
       case HOST_SERVERS:  hostServers = true; break;
       case INSTALL_SKILLS: installSkills = true; break;
       case VERSION:       version = true; break;
@@ -495,6 +498,7 @@ public class ArgParser {
     if (installSkills) VscodeSetup.skillDirs(agent, System.getProperty("user.home"));  // rejects an unknown agent here
     if (installSkills || version) return;  // need nothing else
     if (readOnly && !mcp) throw new IllegalArgumentException("--read-only goes with --mcp");
+    if (singleConnection && (!mcp || readOnly)) throw new IllegalArgumentException("--single-connection goes with --mcp (not --read-only, which has one connection)");
     if ((maxRows != 0 || maskColumns != null) && !readOnly) {
       throw new IllegalArgumentException("--max-rows and --mask-columns go with --read-only");
     }
@@ -805,6 +809,11 @@ public class ArgParser {
     out.add("--project");
     out.add(remoteProject);
     return out;
+  }
+
+  /** {@code --single-connection}: the MCP server holds only the build connection. */
+  public boolean isSingleConnection() {
+    return singleConnection;
   }
 
   /** {@code --read-only}: an MCP server that only reads, for a second IBM i. */

@@ -21,15 +21,17 @@ import com.ibm.as400.access.AS400JDBCDataSource;
 /*
  * The sql and find_object MCP tools.
  *
- * sql: one SELECT / VALUES / WITH statement on a connection the driver opens read only (JT400
- * access "read only": anything else is refused by the driver), with the spec's library list
- * (system naming, so unqualified names resolve as the programs see them), a row and a column limit
- * and a timeout.
+ * sql: one SELECT / VALUES / WITH statement (checkReadOnly, checkWithDb2) on a connection the driver keeps read only
+ * (JT400 access "read only", or "read call" for the MCP server's ReadConnection, which changes its library list with
+ * CHGLIBL; with --single-connection the build connection, inside a READ ONLY transaction: reading()), with the spec's
+ * library list (system naming, so unqualified names resolve as the programs see them), a row and a column limit and a
+ * timeout.
  *
  * find_object: every library holding NAME (of a type), the one the library list picks, and whether
  * the user is authorized to use it.
  */
 final class SqlTools {
+  private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(SqlTools.class);
   static final int DEFAULT_ROWS = 100;
   static final int MAX_ROWS = 1000;
   static final int DEFAULT_COLUMNS = 40;
@@ -49,6 +51,53 @@ final class SqlTools {
     this.rowCap = rowCap;
     this.mask = mask;
     this.allowed = allowed;
+  }
+
+  private boolean guarded;  // queries on a connection that can write (--single-connection: the build connection)
+
+  /* Queries in a read-only transaction (READ_ONLY_TRANSACTION), for a connection the driver does not keep read only */
+  SqlTools guarded(boolean guarded) {
+    this.guarded = guarded;
+    return this;
+  }
+
+  interface SqlWork<T> {
+    T run() throws SQLException;
+  }
+
+  /*
+   * The server-side guard of a query on a connection that can write. Db2 refuses every SQL data change and DDL in a
+   * READ ONLY transaction (SQL0817, SQLSTATE 25006; checked on PUB400). It needs commitment control: under NO COMMIT
+   * Db2 ignores READ ONLY, so READ COMMITTED is set for the query and the connection's own settings come back after
+   * the rollback. Not covered: what is not SQL data, e.g. a CL command or program a function runs (the SIDE_EFFECTS
+   * list refuses the known ones). A failed rollback closes the connection: it may hold the transaction.
+   */
+  static final String READ_ONLY_TRANSACTION = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY";
+
+  <T> T reading(Connection connection, SqlWork<T> work) throws SQLException {
+    if (!guarded) return work.run();
+    boolean autoCommit = connection.getAutoCommit();
+    int isolation = connection.getTransactionIsolation();
+    T result;
+    try {
+      connection.setAutoCommit(false);
+      connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+      try (Statement stmt = connection.createStatement()) {
+        stmt.execute(READ_ONLY_TRANSACTION);
+      }
+      result = work.run();
+    } finally {
+      try {
+        connection.rollback();
+        connection.setTransactionIsolation(isolation);
+        connection.setAutoCommit(autoCommit);
+      } catch (SQLException e) {
+        logger.warn("Could not end the read-only transaction ({}): closing the connection", e.getMessage());
+        connection.close();
+        throw e;  // no answer from a connection left in an unknown state
+      }
+    }
+    return result;
   }
 
   static final String MASKED = "(masked)";
@@ -237,11 +286,26 @@ final class SqlTools {
 
   /* A read-only connection with this library list (current library first) */
   static Connection readOnlyConnection(AS400 system, List<String> libraryList) throws SQLException {
-    AS400JDBCDataSource ds = new AS400JDBCDataSource(system);
-    ds.setAccess("read only");
+    return readOnlyConnection(system, libraryList, "read only");
+  }
+
+  /* How queries read: system naming (unqualified names through the library list, as programs see them), dates and times
+     as text that inserts back unchanged (copy_rows) */
+  static void readSettings(AS400JDBCDataSource ds) {
     ds.setNaming("system");
-    ds.setDateFormat("iso");  // dates and times as text that inserts back unchanged (copy_rows)
+    ds.setDateFormat("iso");
     ds.setTimeFormat("iso");
+  }
+
+  /* The MCP server's read connection (ReadConnection): "read call", so CHGLIBL can run on it; its library list comes after */
+  static Connection readCallConnection(AS400 system) throws SQLException {
+    return readOnlyConnection(system, new ArrayList<String>(), "read call");
+  }
+
+  private static Connection readOnlyConnection(AS400 system, List<String> libraryList, String access) throws SQLException {
+    AS400JDBCDataSource ds = new AS400JDBCDataSource(system);
+    ds.setAccess(access);
+    readSettings(ds);
     if (!libraryList.isEmpty()) ds.setLibraries(String.join(",", libraryList));
     Connection connection = ds.getConnection();
     connection.setReadOnly(true);
@@ -263,8 +327,27 @@ final class SqlTools {
     return libs;
   }
 
+  /* The CHGLIBL that gives another job this job's current library and user library list (QTEMP left out) */
+  static String libraryListCommand(Connection connection) throws SQLException {
+    String curlib = "*CRTDFT";
+    List<String> user = new ArrayList<String>();
+    try (Statement stmt = connection.createStatement();
+         ResultSet rs = stmt.executeQuery("SELECT TYPE, TRIM(SYSTEM_SCHEMA_NAME) FROM QSYS2.LIBRARY_LIST_INFO "
+             + "WHERE TYPE IN ('CURRENT', 'USER') ORDER BY ORDINAL_POSITION")) {
+      while (rs.next()) {
+        if ("CURRENT".equals(rs.getString(1).trim())) curlib = rs.getString(2);
+        else if (!"QTEMP".equals(rs.getString(2))) user.add(rs.getString(2));
+      }
+    }
+    return "CHGLIBL LIBL(" + (user.isEmpty() ? "*NONE" : String.join(" ", user)) + ") CURLIB(" + curlib + ")";
+  }
+
   ObjectNode query(Connection readOnly, String sql, int maxRows, int maxColumns) throws SQLException {
     String statement = checkReadOnly(sql);
+    return reading(readOnly, () -> queryChecked(readOnly, statement, maxRows, maxColumns));
+  }
+
+  private ObjectNode queryChecked(Connection readOnly, String statement, int maxRows, int maxColumns) throws SQLException {
     int cap = rowCap > 0 ? Math.min(rowCap, MAX_ROWS) : MAX_ROWS;
     int rows = Math.max(1, Math.min(maxRows <= 0 ? Math.min(DEFAULT_ROWS, cap) : maxRows, cap));
     int columns = Math.max(1, maxColumns <= 0 ? DEFAULT_COLUMNS : maxColumns);
@@ -325,6 +408,11 @@ final class SqlTools {
   ObjectNode queryForFile(Connection readOnly, String sql, int maxRows, java.util.Map<String, String> set, boolean inserts)
       throws SQLException {
     String statement = checkReadOnly(sql);
+    return reading(readOnly, () -> queryForFileChecked(readOnly, sql, statement, maxRows, set, inserts));
+  }
+
+  private ObjectNode queryForFileChecked(Connection readOnly, String sql, String statement, int maxRows,
+      java.util.Map<String, String> set, boolean inserts) throws SQLException {
     int cap = rowCap > 0 ? Math.min(rowCap, FILE_MAX_ROWS) : FILE_MAX_ROWS;
     int rows = Math.max(1, Math.min(maxRows <= 0 ? Math.min(MAX_ROWS, cap) : maxRows, cap));
     List<String> labels = new ArrayList<String>();  // upper case, for matching

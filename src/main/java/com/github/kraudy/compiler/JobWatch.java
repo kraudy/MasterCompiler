@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,10 +19,10 @@ import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400JDBCDataSource;
 
 /*
- * Looks at the build job from a connection of its own, so it answers while the build job is busy: its status
+ * Looks at the build job from another connection, so it answers while the build job is busy: its status
  * (RUN, MSGW, LCKW, DEQW, ...), call stack, the locks it waits for and who holds them, the message it waits on
  * and the joblog's last lines. Also stops it: a cancel of the running statement first, ENDJOB *IMMED if that
- * does not end it.
+ * does not end it. Which connection it looks and stops from is given (shared, own, stopOnly).
  */
 final class JobWatch implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(JobWatch.class);
@@ -32,11 +33,38 @@ final class JobWatch implements AutoCloseable {
   static final int CANCEL_GRACE_SECONDS = 10;
 
   private final AS400 system;
-  private Connection monitor;
+  private final HostConnections connections;
+  private final String ownReason;   // why it opens a connection of its own: null when it uses the shared one
+  private final Callable<Connection> looks;  // inspect, joblogTail: null when it cannot look (--single-connection)
+  private final Callable<Connection> stops;  // CANCEL_SQL, ENDJOB
+  private Connection monitor;  // its own connection, opened when first needed
 
-  JobWatch(AS400 system) {
+  private JobWatch(AS400 system, HostConnections connections, String ownReason, Callable<Connection> shared, boolean looks) {
     this.system = system;
+    this.connections = connections;
+    this.ownReason = ownReason;
+    this.stops = shared != null ? shared : this::own;
+    this.looks = looks ? stops : null;
   }
+
+  /* The command line: a connection of its own, opened only if a hook times out */
+  static JobWatch own(AS400 system, HostConnections connections) {
+    return new JobWatch(system, connections, "a hook timed out: looking at the build job", null, true);
+  }
+
+  /* The MCP server: through its read connection */
+  static JobWatch shared(AS400 system, HostConnections connections, Callable<Connection> read) {
+    return new JobWatch(system, connections, null, read, true);
+  }
+
+  /* --single-connection: the build connection is busy while a build runs, so nothing is looked at; stopping a build
+     still needs a second job, so a connection of its own is opened for that, counted, and closed after the stop */
+  static JobWatch stopOnly(AS400 system, HostConnections connections) {
+    return new JobWatch(system, connections, "stopping the build job (single-connection mode)", null, false);
+  }
+
+  static final String NOT_LOOKED = "Not looked at: with --single-connection the build connection is the only one and it is "
+      + "busy while a build runs (build_status still shows the stage, target and command)";
 
   /* Qualified name of the job behind a connection: 123456/QUSER/QZDASOINIT */
   static String jobName(Connection connection) {
@@ -49,9 +77,21 @@ final class JobWatch implements AutoCloseable {
     }
   }
 
-  private synchronized Connection connection() throws SQLException {
-    if (monitor == null || monitor.isClosed()) monitor = new AS400JDBCDataSource(system).getConnection();
+  private synchronized Connection own() throws Exception {
+    if (monitor == null || monitor.isClosed()) {
+      monitor = connections.open(HostConnections.Purpose.MONITOR, ownReason, () -> new AS400JDBCDataSource(system).getConnection());
+    }
     return monitor;
+  }
+
+  private static Connection from(Callable<Connection> source) throws SQLException {
+    try {
+      return source.call();
+    } catch (SQLException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new SQLException(e.getMessage(), e);
+    }
   }
 
   /* Everything at once: what the job does now and what it waits for */
@@ -59,8 +99,9 @@ final class JobWatch implements AutoCloseable {
     ObjectNode result = mapper.createObjectNode();
     result.put("job", job);
     if (job == null) return result.put("note", "The build job is not known yet");
+    if (looks == null) return result.put("note", NOT_LOOKED);
     try {
-      Connection c = connection();
+      Connection c = from(looks);
       status(c, job, result);
       if (result.has("ended")) return result;
       stack(c, job, result);
@@ -75,8 +116,9 @@ final class JobWatch implements AutoCloseable {
 
   /* The job's last joblog lines: time, id, text */
   synchronized ArrayNode joblogTail(String job, int lines) {
+    if (looks == null) return mapper.createArrayNode().add(NOT_LOOKED);
     try {
-      return joblogTail(connection(), job, lines);
+      return joblogTail(from(looks), job, lines);
     } catch (SQLException e) {
       ArrayNode none = mapper.createArrayNode();
       none.add("Could not read the joblog: " + e.getMessage());
@@ -252,7 +294,15 @@ final class JobWatch implements AutoCloseable {
    * its own: JT400's cancel can block until the command ends), QSYS2.CANCEL_SQL, then ENDJOB *IMMED (the
    * connection is gone after that). Returns the steps.
    */
-  String stop(String job, Statement running, java.util.function.BooleanSupplier stillRunning) {
+  synchronized String stop(String job, Statement running, java.util.function.BooleanSupplier stillRunning) {
+    try {
+      return stopSteps(job, running, stillRunning);
+    } finally {
+      if (looks == null) close();  // --single-connection: back to the build connection alone
+    }
+  }
+
+  private String stopSteps(String job, Statement running, java.util.function.BooleanSupplier stillRunning) {
     List<String> steps = new ArrayList<String>();
     if (running != null) {
       Thread cancel = new Thread(() -> {
@@ -267,7 +317,7 @@ final class JobWatch implements AutoCloseable {
       steps.add("cancelled the running statement");
       if (waitWhile(stillRunning, CANCEL_GRACE_SECONDS / 2)) return done(steps);
     }
-    try (PreparedStatement stmt = connection().prepareStatement("CALL QSYS2.CANCEL_SQL(?)")) {
+    try (PreparedStatement stmt = from(stops).prepareStatement("CALL QSYS2.CANCEL_SQL(?)")) {
       stmt.setString(1, job);
       stmt.execute();
       steps.add("QSYS2.CANCEL_SQL");
@@ -275,7 +325,7 @@ final class JobWatch implements AutoCloseable {
       steps.add("QSYS2.CANCEL_SQL failed: " + e.getMessage());
     }
     if (waitWhile(stillRunning, CANCEL_GRACE_SECONDS / 2)) return done(steps);
-    try (Statement stmt = connection().createStatement()) {
+    try (Statement stmt = from(stops).createStatement()) {
       stmt.execute("CALL QSYS2.QCMDEXC('ENDJOB JOB(" + job + ") OPTION(*IMMED)')");
       steps.add("still running after " + CANCEL_GRACE_SECONDS + " s: ENDJOB " + job + " OPTION(*IMMED)");
     } catch (SQLException e) {
@@ -309,6 +359,7 @@ final class JobWatch implements AutoCloseable {
     try {
       if (monitor != null) monitor.close();
     } catch (Exception ignored) { /* closing anyway */ }
+    if (monitor != null) connections.closed(HostConnections.Purpose.MONITOR, "done with it");
     monitor = null;
   }
 

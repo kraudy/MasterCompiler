@@ -49,6 +49,9 @@ public class McpServer {
   private AS400 system;
   private Connection connection;
   private Timestamp lastJoblog;
+  private final HostConnections connections;  // every connection to the IBM i: status shows them
+  /* sql, checkRows and the job monitor: one connection, its library list changed in place (unless routed to the build one) */
+  private final ReadConnection read;
 
   /* --read-only: a server for another IBM i that only reads (ReadOnlyConnections), limited to these libraries */
   private final boolean readOnlyMode;
@@ -105,6 +108,9 @@ public class McpServer {
     this.maxRows = parser != null ? parser.getMaxRows() : 0;
     this.mask = parser != null ? parser.getMaskColumns() : new java.util.ArrayList<String>();
     this.connector = null;
+    this.connections = new HostConnections(readOnlyMode ? HostConnections.Mode.READ_SERVER
+        : parser != null && parser.isSingleConnection() ? HostConnections.Mode.SINGLE : HostConnections.Mode.SHARED);
+    this.read = new ReadConnection(() -> SqlTools.readCallConnection(system), connections);
   }
 
   private McpServer(List<String> libraries, int maxRows, List<String> mask, java.util.concurrent.Callable<AS400> connector) {
@@ -114,6 +120,8 @@ public class McpServer {
     this.maxRows = maxRows;
     this.mask = mask;
     this.connector = connector;
+    this.connections = new HostConnections(HostConnections.Mode.READ_SERVER);
+    this.read = new ReadConnection(() -> SqlTools.readCallConnection(system), connections);
   }
 
   /* A read-only server in this process (a read-only connection over the host servers) */
@@ -470,7 +478,8 @@ public class McpServer {
     tools.add(tool("status",
         "MasterCompiler's version, the IBM i user, current library and library list the tools use (after the spec's "
         + "library settings), the project folder and spec, protectedLibs; over SSH also the host and the start-up stage. "
-        + "Call it first when something looks off.",
+        + "hostConnections: every connection to the IBM i (build, read-only, monitor, copy, command, files), its job, "
+        + "when it was opened, how often it was opened and why (each open is a sign-on). Call it first when something looks off.",
         statusSchema));
 
     ObjectNode callSchema = mapper.createObjectNode();
@@ -1420,19 +1429,15 @@ public class McpServer {
     return objects;
   }
 
-  /* Read-only connection for the sql tool, kept while the library list stays the same */
-  private Connection readOnly;
-  private String readOnlyLibl;
-
-  /* The read-only connection for queries, with the build connection's library list */
+  /* The connection for queries (sql, checkRows), with the build connection's library list */
   private Connection readOnlyConnection() throws Exception {
-    List<String> libl = SqlTools.libraryList(connection);
-    if (readOnly == null || readOnly.isClosed() || !String.join(" ", libl).equals(readOnlyLibl)) {
-      if (readOnly != null) try { readOnly.close(); } catch (Exception ignored) { /* reopened below */ }
-      readOnly = SqlTools.readOnlyConnection(system, libl);
-      readOnlyLibl = String.join(" ", libl);
-    }
-    return readOnly;
+    if (connections.onBuild(HostConnections.Purpose.READ_ONLY)) return connection;
+    return read.get(SqlTools.libraryListCommand(connection));
+  }
+
+  /* SqlTools for queries on that connection: in a read-only transaction when it can write (--single-connection) */
+  private SqlTools queryTools(List<String> allowed) {
+    return new SqlTools(maxRows, mask, allowed).guarded(connections.mode.guardsQueries);
   }
 
   private ObjectNode sql(JsonNode args) throws Exception {
@@ -1451,7 +1456,7 @@ public class McpServer {
       }
     }
     connectWithLibraryList();
-    readOnlyConnection();
+    Connection reader = readOnlyConnection();
     try {
       if (ResultFiles.wanted(args)) {
         java.util.Map<String, String> set = new java.util.LinkedHashMap<String, String>();
@@ -1459,16 +1464,16 @@ public class McpServer {
           java.util.Map.Entry<String, JsonNode> e = it.next();
           set.put(e.getKey(), e.getValue().asText());
         }
-        ObjectNode full = new SqlTools(maxRows, mask, readOnlyMode ? readLibs : null).queryForFile(readOnly, statement, args.path("maxRows").asInt(0), set,
+        ObjectNode full = queryTools(readOnlyMode ? readLibs : null).queryForFile(reader, statement, args.path("maxRows").asInt(0), set,
             "inserts".equalsIgnoreCase(args.path("format").asText()));
         ObjectNode result = toolResult(pretty.writeValueAsString(full), false);
         /* MC on the PC writes the file here; on the IBM i (behind SSH) or as a read-only server, the PC side does */
         return readOnlyMode || IBMiDotEnv.isIBMi() ? result : ResultFiles.finish(args, result, projectDir());
       }
-      ObjectNode result = new SqlTools(maxRows, mask, readOnlyMode ? readLibs : null).query(readOnly, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
+      ObjectNode result = queryTools(readOnlyMode ? readLibs : null).query(reader, statement, args.path("maxRows").asInt(0), args.path("maxColumns").asInt(0));
       return toolResult(pretty.writeValueAsString(result), false);
     } catch (java.sql.SQLException e) {
-      String hint = "42703".equals(e.getSQLState()) ? columnsHint(statement) : "";
+      String hint = "42703".equals(e.getSQLState()) ? columnsHint(reader, statement) : "";
       return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage() + hint, true);
     }
   }
@@ -1477,7 +1482,7 @@ public class McpServer {
       "\\b(?:FROM|JOIN)\\s+(?:([A-Z$#@][A-Z0-9_$#@]*)\\s*[./]\\s*)?([A-Z$#@][A-Z0-9_$#@]*)", java.util.regex.Pattern.CASE_INSENSITIVE);
 
   /* SQL0206 (column not found): the columns of the query's tables, so the right name is one call away */
-  private String columnsHint(String statement) {
+  private String columnsHint(Connection readOnly, String statement) {
     StringBuilder hint = new StringBuilder();
     java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
     int tables = 0;
@@ -1544,6 +1549,7 @@ public class McpServer {
       result.put("system", system.getSystemName());
       result.put("libraries", String.join(" ", readLibs));
       if (!mask.isEmpty()) result.put("maskColumns", String.join(" ", mask));
+      result.set("hostConnections", connections.toJson());
       return toolResult(pretty.writeValueAsString(result), false);
     }
     if (parser.hasProject()) {
@@ -1580,6 +1586,7 @@ public class McpServer {
       result.put("error", e.getMessage());
     }
     if (!IBMiDotEnv.isIBMi() && TrustStores.caStore() == null) result.put("tls", TrustStores.NO_CA);
+    result.set("hostConnections", connections.toJson());
     if (router() != null) result.set("connections", router.connectionsStatus());
     return toolResult(pretty.writeValueAsString(result), false);
   }
@@ -1596,10 +1603,17 @@ public class McpServer {
     if (to.isEmpty()) to = from.substring(from.replace('.', '/').lastIndexOf('/') + 1);
     String target = RowCopier.target(to, currentLibrary(), protectedLibs());
     boolean confirm = args.path("confirm").asBoolean(false);
-    try (Connection writer = confirm ? RowCopier.writeConnection(system, SqlTools.libraryList(connection)) : null) {
+    Connection writer = !confirm ? null : connections.onBuild(HostConnections.Purpose.COPY) ? connection
+        : connections.open(HostConnections.Purpose.COPY, "copy_rows", () -> RowCopier.writeConnection(system, SqlTools.libraryList(connection)));
+    try {
       ObjectNode result = RowCopier.copy(args.get("fetched"), args.path("fromConnection").asText(), target,
           args.path("deleteWhere").asText(null), connection, writer);
       return toolResult(pretty.writeValueAsString(result), false);
+    } finally {
+      if (writer != null && writer != connection) {
+        writer.close();
+        connections.closed(HostConnections.Purpose.COPY, "copy_rows done");
+      }
     }
   }
 
@@ -1723,7 +1737,7 @@ public class McpServer {
     } catch (IllegalArgumentException e) {
       return toolResult(e.getMessage(), true);
     }
-    SqlTools rowTools = new SqlTools(maxRows, mask, null);
+    SqlTools rowTools = queryTools(null);
     List<java.util.Map<String, java.util.Map<String, String>>> before = new java.util.ArrayList<java.util.Map<String, java.util.Map<String, String>>>();
     try {
       Connection reader = readOnlyConnection();
@@ -1744,6 +1758,7 @@ public class McpServer {
     /* The calls' job (the COMMAND host server) keeps the service programs it activated: after a build, a new job */
     if (objectsChanged) {
       objectsChanged = false;
+      connections.nextReason(HostConnections.Purpose.COMMAND, "a build ran since the last call: a new job activates the objects as they are now");
       system.disconnectService(AS400.COMMAND);
       result.put("newJob", "A build ran since the last call: this call starts a new job, so it activates the objects as they "
           + "are now (unless the system reuses its remote command jobs)");
@@ -2114,8 +2129,10 @@ public class McpServer {
 
   /* One connection for the server's lifetime; reconnect if it dropped */
   private void connect() throws Exception {
+    String reason = connection == null ? "first call" : "the connection was closed";
     if (connectionGone) {  // ENDJOB ended the build job: a new one
       connectionGone = false;
+      reason = "ENDJOB ended the build job";
       disconnect();
     }
     if (connection != null && !connection.isClosed()) return;
@@ -2124,6 +2141,7 @@ public class McpServer {
       AS400 readSystem = connector != null ? connector.call() : MasterCompiler.connect(parser);
       connection = signedOn(() -> SqlTools.readOnlyConnection(readSystem, readLibs));
       system = readSystem;
+      connections.opened(HostConnections.Purpose.BUILD, JobWatch.jobName(connection), reason + " (read only: " + readLibs + ")");
       logger.info("Connected read only to {} as {}, reading {}", system.getSystemName(), system.getUserId(), readLibs);
       return;
     }
@@ -2139,11 +2157,18 @@ public class McpServer {
     if (signOn == null) signOn = buildSignOn();
     connection = signedOn(() -> {
       system = MasterCompiler.connect(parser);
-      return new AS400JDBCDataSource(system).getConnection();
+      system.addConnectionListener(connections.listener());
+      AS400JDBCDataSource ds = new AS400JDBCDataSource(system);
+      /* Queries run on it too (--single-connection): names resolve and dates read as on the read connection
+         (MC's own SQL here is qualified, which system naming takes; SQL sources build with RUNSQLSTM's NAMING) */
+      if (connections.onBuild(HostConnections.Purpose.READ_ONLY)) SqlTools.readSettings(ds);
+      return ds.getConnection();
     });
     lastJoblog = new CommandExecutor(connection, false, false, false).getCurrentTime();
     buildJob = JobWatch.jobName(connection);
-    jobWatch = new JobWatch(system);
+    connections.opened(HostConnections.Purpose.BUILD, buildJob, reason);
+    jobWatch = connections.onBuild(HostConnections.Purpose.MONITOR) ? JobWatch.stopOnly(system, connections)
+        : JobWatch.shared(system, connections, read::get);
     logger.info("Connected to IBM i as {} (job {})", system.getUserId(), buildJob);
   }
 
@@ -2213,13 +2238,11 @@ public class McpServer {
     if (jobWatch != null) jobWatch.close();
     jobWatch = null;
     buildJob = null;
-    try {
-      if (readOnly != null && !readOnly.isClosed()) readOnly.close();
-    } catch (Exception ignored) {}
-    readOnly = null;
+    read.close();
     try {
       if (connection != null && !connection.isClosed()) connection.close();
     } catch (Exception ignored) {}
+    if (connection != null) connections.closed(HostConnections.Purpose.BUILD, "disconnected");
     if (system != null) system.disconnectAllServices();
     connection = null;
     system = null;

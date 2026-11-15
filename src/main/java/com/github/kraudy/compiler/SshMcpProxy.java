@@ -1391,6 +1391,7 @@ public class SshMcpProxy {
     List<String> libraries = libraryArgs(code4i, true);
     for (int i = 0; i < libraries.size(); i++) command.append(' ').append(i % 2 == 0 ? libraries.get(i) : SshTarget.quote(libraries.get(i)));
     if (parser.isVerbose()) command.append(" -v");
+    if (parser.isSingleConnection()) command.append(" --single-connection");
     return command.toString();
   }
 

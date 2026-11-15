@@ -59,6 +59,10 @@ final class RowChanges {
 
   /* The rows now: key -> {column: value}, in the query's order */
   Map<String, Map<String, String>> snapshot(SqlTools tools, Connection readOnly) throws SQLException {
+    return tools.reading(readOnly, () -> snapshotChecked(tools, readOnly));
+  }
+
+  private Map<String, Map<String, String>> snapshotChecked(SqlTools tools, Connection readOnly) throws SQLException {
     tools.checkWithDb2(readOnly, sql);
     Map<String, Map<String, String>> rows = new LinkedHashMap<String, Map<String, String>>();
     try (Statement stmt = readOnly.createStatement()) {
