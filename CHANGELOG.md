@@ -3,6 +3,26 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.35
+
+- Duplicate sources: "two sources build X" is logged once per server (one line for all of them), and a build report
+  names it only for objects that build compiled.
+- `screen_open` applies the build job's library list (the spec's) after the sign-on: CHGLIBL on the first command line
+  (`libraryList`, default true). `status` shows it as `libraryListCommand`; `--doctor` and the next steps say where the
+  library list goes.
+- `impact` lists binding directories apart (`bindingDirectories`), not among the dependents: the change does not need
+  them rebuilt.
+- A service program whose exports changed: the build report's `signatureChanges` lists its callers still bound to the
+  old signature (they fail with MCH4431) and the rebind command for each (`UPDPGM ... MODULE(*NONE)`).
+
+- Fewer sign-ons: a library-list change no longer closes and reopens the MCP server's read-only connection (it runs
+  `CHGLIBL` on it), and the job monitor (`whats_running`, `cancel`, hook timeouts) reads through that connection
+  instead of opening a third one. Measured on PUB400: each new JDBC connection is a sign-on.
+- `status` shows `hostConnections`: every connection to the IBM i with its purpose, job, when it was opened and how
+  often, and why; each open and reopen is logged. `--verbose` on the command line prints the count at the end.
+- `--mcp --single-connection`: `sql`, `checkRows`, the monitor and `copy_rows` run on the build connection, so the
+  server holds one connection. Queries run in a read-only transaction there; see docs/Cli.md for the trade-offs.
+
 ## v0.3.34
 
 - A build that replaces a program or service program while a 5250 session is open says so in `screenSession` (also

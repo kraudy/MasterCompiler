@@ -152,8 +152,13 @@ public class McpServer {
     protocolOut = new PrintStream(System.out, true, "UTF-8");
     System.setOut(System.err);
     MasterCompiler.quietLogs(parser.isVerbose());
+    /* each connection opened, reopened or kept with a new library list: some systems limit sign-ons */
+    for (Class<?> c : new Class<?>[] { HostConnections.class, ReadConnection.class }) {
+      ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(c)).setLevel(ch.qos.logback.classic.Level.INFO);
+    }
     SecretPrompt.sender(this::sendLine);
     if (!readOnlyMode) ScreenTools.systemCcsid(this::screenCcsidForScreens);
+    if (!readOnlyMode) ScreenTools.specLibraryList(this::libraryListForScreens);
     if (!IBMiDotEnv.isIBMi()) TrustStores.warnIfNone();
     logger.info("MasterCompiler MCP server ready");
 
@@ -295,7 +300,8 @@ public class McpServer {
         "Everything that would have to be rebuilt if this object changed: the targets that depend " +
         "on it, directly or transitively, in build order. Reads the sources, then checks the library: sourceOnly lists "
         + "the targets whose object is not there (never built, or deleted), presenceUnknown the SQL objects it cannot "
-        + "tell. Compiles nothing.",
+        + "tell. bindingDirectories: the binding directories that list it, apart from dependents (the change does not need them rebuilt; a build by files or since still recreates them). "
+        + "Compiles nothing.",
         impact));
 
     ObjectNode open = mapper.createObjectNode();
@@ -623,6 +629,9 @@ public class McpServer {
     openProps.putObject("port").put("type", "integer").put("description", "Telnet port (default 992, TLS)");
     openProps.putObject("ccsid").put("type", "integer").put("description", "EBCDIC CCSID of the screens (default 37)");
     openProps.putObject("waitSeconds").put("type", "integer").put("description", "How long to wait for a screen (default 30)");
+    openProps.putObject("libraryList").put("type", "boolean").put("description", "true (default): after the sign-on, run "
+        + "CHGLIBL with the build job's library list (the spec's: --libl / --curlib, Code for IBM i, the spec's library "
+        + "hooks) on the first command line, so programs find what the build used. false: the user profile's own");
     tools.add(tool("screen_open",
         "Open an interactive 5250 session (a green screen) on the build system and sign on as the build connection's "
         + "user, to run and check display file programs. Returns the first screen after sign-on. MasterCompiler types "
@@ -1231,8 +1240,8 @@ public class McpServer {
       ArrayNode files = result.putArray("sources");  // the files it named: the targets below compile them or copy them in
       for (String file : sources) files.add(file);
     }
-    ArrayNode targets = result.putArray("targets");
-    ArrayNode dependents = result.putArray("dependents");
+    result.putArray("targets");
+    result.putArray("dependents");
     List<TargetKey> listed = new java.util.ArrayList<TargetKey>();
     for (TargetKey key : spec.targets.keySet()) if (rebuild.contains(key)) listed.add(key);  // spec order = build order
 
@@ -1264,10 +1273,31 @@ public class McpServer {
     if (deployedOnly && !checked) result.put("deployedOnly", "ignored: the library could not be checked");
     for (TargetKey key : listed) {
       if (deployedOnly && checked && sourceOnly.contains(key)) continue;
-      (seeds.contains(key) ? targets : dependents).add(key.asString());
+      result.withArray(impactList(key, seeds.contains(key))).add(key.asString());
+    }
+    for (String holder : NOT_REBUILT.values()) {
+      if (result.has(holder)) result.put(holder + "Note", NOT_REBUILT_NOTE);
     }
     return toolResult(pretty.writeValueAsString(result), false);
   }
+
+  /* Dependents a change does not need rebuilt, listed apart under their own name: a binding directory only lists the
+     service program (its entry stays valid); the build plan still orders them after it */
+  static final java.util.Map<CompilationPattern.ObjectType, String> NOT_REBUILT =
+      new java.util.EnumMap<CompilationPattern.ObjectType, String>(CompilationPattern.ObjectType.class);
+  static {
+    NOT_REBUILT.put(CompilationPattern.ObjectType.BNDDIR, "bindingDirectories");
+  }
+  /* Where impact lists a target: the object asked about, a dependent to rebuild, or a NOT_REBUILT list */
+  static String impactList(TargetKey key, boolean asked) {
+    if (asked) return "targets";
+    String apart = NOT_REBUILT.get(key.getObjectTypeEnum());
+    return apart != null ? apart : "dependents";
+  }
+
+  static final String NOT_REBUILT_NOTE = "Listed apart from dependents: a binding directory names the object, it does not "
+      + "compile it in, so this change does not need it rebuilt (its entry stays valid). Build the dependents without it; "
+      + "a build by files or since still recreates it, with the same entries.";
 
   /* Types whose object name is the target's name: impact can tell whether they are in the library */
   static final Set<CompilationPattern.ObjectType> PRESENCE_CHECKED = java.util.EnumSet.of(
@@ -1579,6 +1609,7 @@ public class McpServer {
       result.put("system", system.getSystemName());
       result.put("currentLibrary", currentLibrary());
       result.put("libraryList", String.join(" ", SqlTools.libraryList(connection)));
+      result.put("libraryListCommand", SqlTools.libraryListCommand(connection));  // the same for another job (screen_open)
       Integer screens = screenCcsid();
       if (screens != null) result.put("screenCcsid", screens);
     } catch (Exception e) {
@@ -2211,6 +2242,22 @@ public class McpServer {
       try {
         connect();
         return screenCcsid();
+      } finally {
+        lane.release();
+      }
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /* For screen_open: the CHGLIBL with the build job's library list, read now if the build job is free */
+  private String libraryListForScreens() {
+    try {
+      BuildProgress running = lastBuild;
+      if ((running != null && running.isRunning()) || !lane.tryAcquire(5, java.util.concurrent.TimeUnit.SECONDS)) return null;
+      try {
+        connectWithLibraryList();
+        return SqlTools.libraryListCommand(connection);
       } finally {
         lane.release();
       }

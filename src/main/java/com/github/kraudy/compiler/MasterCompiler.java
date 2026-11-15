@@ -911,10 +911,32 @@ public class MasterCompiler{
     return parts;
   }
 
+  /* The spec's warnings, and "two sources build X" only for the objects this build compiled (or tried to), once each */
+  static List<String> reportWarnings(BuildSpec spec, List<BuildReport.TargetResult> targets) {
+    List<String> warnings = new ArrayList<String>(spec.warnings);
+    for (BuildReport.TargetResult result : targets) {
+      if (!BuildReport.TOUCHED.contains(result.status)) continue;
+      String object = BuildSpec.objectOf(result.target);
+      List<String> files = spec.duplicateSources.get(object);
+      String warning = files != null ? BuildSpec.duplicateWarning(object, files) : null;
+      if (warning != null && !warnings.contains(warning)) warnings.add(warning);
+    }
+    return warnings;
+  }
+
   /* Targets never reached are listed as not built, then the report is written (--json) */
   private void finishReport() {
     if (compilationError) report.success = false;
-    if (!globalSpec.warnings.isEmpty()) report.warnings = new ArrayList<String>(globalSpec.warnings);
+    List<String> warnings = reportWarnings(globalSpec, report.targets);
+    if (!warnings.isEmpty()) report.warnings = warnings;
+    /* a service program's new exports: callers outside this build still bound to its old signature */
+    if (!dryRun && connection != null) {
+      List<BuildReport.SignatureChange> changes = SignatureCheck.check(connection, report.targets);
+      for (BuildReport.SignatureChange change : changes) {
+        logger.warn("{}: {} {}", change.serviceProgram, change.note, change.rebind.isEmpty() ? "" : String.join("; ", change.rebind));
+      }
+      if (!changes.isEmpty()) report.signatureChanges = changes;
+    }
     report.spec = specFingerprint();
     if (commandExec != null && !commandExec.getHooksRun().isEmpty()) report.hooks = new ArrayList<String>(commandExec.getHooksRun());
     if (commandExec != null && !commandExec.getTimeouts().isEmpty()) report.timeouts = new ArrayList<BuildReport.Timeout>(commandExec.getTimeouts());

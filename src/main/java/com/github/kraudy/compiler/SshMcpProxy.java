@@ -118,6 +118,7 @@ public class SshMcpProxy {
     McpServer local = new McpServer(parser);
     SecretPrompt.sender(this::send);
     ScreenTools.systemCcsid(this::remoteScreenCcsid);
+    ScreenTools.specLibraryList(() -> remoteStatus().path("libraryListCommand").asText(null));
     BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
     String line;
     try {
@@ -765,8 +766,16 @@ public class SshMcpProxy {
   private volatile Integer screenCcsid;
 
   private Integer remoteScreenCcsid() {
-    Session s = session;  // asked of the running session only: never a reason to connect
-    if (screenCcsid != null || !s.usable()) return screenCcsid;
+    if (screenCcsid != null) return screenCcsid;
+    JsonNode text = remoteStatus();
+    if (text.path("screenCcsid").isInt()) screenCcsid = text.get("screenCcsid").asInt();
+    return screenCcsid;
+  }
+
+  /* MC's status on the IBM i, asked of the running session only (never a reason to connect); empty when unknown */
+  private JsonNode remoteStatus() {
+    Session s = session;
+    if (!s.usable()) return mapper.createObjectNode();
     String own = "mc-proxy-" + ownIds.incrementAndGet();
     CompletableFuture<JsonNode> answer = new CompletableFuture<JsonNode>();
     ownCalls.put(own, answer);
@@ -777,15 +786,14 @@ public class SshMcpProxy {
       request.put("method", "tools/call");
       request.putObject("params").put("name", "status").putObject("arguments");
       writeRemote(s, mapper.writeValueAsString(request));
-      JsonNode text = mapper.readTree(answer.get(30, java.util.concurrent.TimeUnit.SECONDS)
+      return mapper.readTree(answer.get(30, java.util.concurrent.TimeUnit.SECONDS)
           .path("result").path("content").path(0).path("text").asText("{}"));
-      if (text.path("screenCcsid").isInt()) screenCcsid = text.get("screenCcsid").asInt();
     } catch (Exception e) {
-      logger.info("Could not read the screens' CCSID from the IBM i: {}", e.getMessage());
+      logger.info("Could not read MC's status on the IBM i: {}", e.getMessage());
+      return mapper.createObjectNode();
     } finally {
       ownCalls.remove(own);
     }
-    return screenCcsid;
   }
 
   /* Calls for a read-only connection are answered here; compare gets what the other system holds */

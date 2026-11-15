@@ -114,13 +114,10 @@ public class SpecGenerator {
 
       /* One object, one source: e.g. ORD.pgm.rpgle left behind when it became ORD.pgm.sqlrpgle. Both stay
          targets (the later build replaces the object), but the report says so. */
-      String object = key.getLibrary() + "." + key.getObjectName() + "." + key.getObjectTypeEnum();
+      String object = BuildSpec.objectOf(key);
       if (objects.containsKey(object)) {
-        String warning = "Two sources build " + key.getObjectName() + " *" + key.getObjectTypeEnum() + ": "
-            + objects.get(object) + " and " + candidate.relativePath + "; the one built last wins. "
-            + "Delete or rename the one that is not in use.";
-        logger.warn(warning);
-        spec.warnings.add(warning);
+        spec.duplicateSources.computeIfAbsent(object, o -> new java.util.ArrayList<String>(
+            java.util.Collections.singletonList(objects.get(o)))).add(candidate.relativePath);
       } else {
         objects.put(object, candidate.relativePath);
       }
@@ -203,8 +200,25 @@ public class SpecGenerator {
       logger.info("Resolving generated params without object inspection");
     }
     SpecResolver.resolveAll(spec, descriptor);
+    logDuplicates(spec);
 
     return spec;
+  }
+
+  /* Objects with two sources already logged by this process: the spec is scanned again on every MCP call */
+  private static final java.util.Set<String> loggedDuplicates = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+  /* One line for the objects with several sources not logged yet; the build report names those its build touched */
+  static String logDuplicates(BuildSpec spec) {
+    java.util.List<String> fresh = new java.util.ArrayList<String>();
+    for (java.util.Map.Entry<String, java.util.List<String>> e : spec.duplicateSources.entrySet()) {
+      if (loggedDuplicates.add(e.getKey() + " " + e.getValue())) fresh.add(e.getKey().replace(".", " *") + " (" + String.join(", ", e.getValue()) + ")");
+    }
+    if (fresh.isEmpty()) return null;
+    String line = fresh.size() + (fresh.size() == 1 ? " object has" : " objects have") + " more than one source, the one built "
+        + "last wins (delete or rename the unused one): " + String.join("; ", fresh);
+    logger.warn(line);
+    return line;
   }
 
   /* The source as text when it is a local file this scan can read; null for an IFS source or one that cannot be read */

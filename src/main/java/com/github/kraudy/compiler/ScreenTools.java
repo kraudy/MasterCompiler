@@ -143,6 +143,10 @@ final class ScreenTools {
           : "cannot be asked here (no desktop, no URL elicitation): the user signs on in their own emulator"));
       preview.put("ccsid", ccsid + (args.has("ccsid") ? "" : " (MC_5250_CCSID if set, else the system's QCHRID code page, "
           + "else 37 when it could not be read; give 'ccsid' if accents show wrong)"));
+      preview.put("libraryList", args.path("libraryList").asBoolean(true)
+          ? "after the sign-on, CHGLIBL with the build job's library list (the spec's) on the first command line; "
+            + "libraryList: false keeps the user profile's own"
+          : "the user profile's own (libraryList: false)");
       preview.put("watch", watchFile.getPath() + ": every screen is written there; the user can open it in VS Code to follow along");
       preview.put("next", "Nothing opened yet. Show this to the user; if they agree, call screen_open again with confirm: true.");
       return result(mapper.writeValueAsString(preview), false);
@@ -241,8 +245,14 @@ final class ScreenTools {
       for (String line : messages) shown.add(line);
     }
     answer.put("signedOn", target.user + "@" + target.name);
-    answer.put("note", "Signed on with the user profile's own library list, not the spec's: run CHGLIBL / CHGCURLIB on "
-        + "a command line first when the program needs them. Sign off (SIGNOFF) before screen_close so the job ends.");
+    if (args.path("libraryList").asBoolean(true)) {
+      java.util.function.Supplier<String> spec = specLibraryList;
+      answer.put("libraryList", applyLibraryList(screen, spec != null ? spec.get() : null, wait));
+      answer.setAll(view(screen));  // the screen after it
+    } else {
+      answer.put("libraryList", "the user profile's own (libraryList: false)");
+    }
+    answer.put("note", "Sign off (SIGNOFF) before screen_close so the job ends.");
     return result(mapper.writeValueAsString(answer), false);
   }
 
@@ -260,6 +270,44 @@ final class ScreenTools {
 
   static void systemCcsid(java.util.function.Supplier<Integer> supplier) {
     systemCcsid = supplier;
+  }
+
+  /* The CHGLIBL that gives a session the build job's library list (the spec's), null when not known */
+  private static volatile java.util.function.Supplier<String> specLibraryList;
+
+  static void specLibraryList(java.util.function.Supplier<String> supplier) {
+    specLibraryList = supplier;
+  }
+
+  /* The command line of a screen: the input field on a row that shows ===> before it (a menu, a command entry) */
+  static Screen5250.Field commandLine(List<String> lines, List<Screen5250.Field> fields, int cols) {
+    for (Screen5250.Field f : fields) {
+      int row = f.start / cols;
+      int col = f.start % cols;
+      if (!f.bypass() && !f.hidden() && row < lines.size() && lines.get(row).substring(0, Math.min(col, lines.get(row).length())).contains("===>")) return f;
+    }
+    return null;
+  }
+
+  /* After the sign-on: CHGLIBL on the first screen's command line. What happened, for the answer */
+  private static String applyLibraryList(Screen5250 screen, String chglibl, int wait) throws java.io.IOException {
+    if (chglibl == null) return "not applied: the build job's library list is not known now (a build runs, or MC is not "
+        + "connected); type CHGLIBL on a command line";
+    Screen5250.Field line = commandLine(screen.lines(), screen.inputFields(), screen.cols());
+    if (line == null) return "not applied: the first screen has no command line (===>); type it where there is one: " + chglibl;
+    if (chglibl.length() > line.length) return "not applied: longer than the command line; type it in parts: " + chglibl;
+    screen.fill(line, chglibl);
+    screen.press(Screen5250.aid("ENTER"));
+    screen.waitForInput(wait);
+    String message = lastLine(screen.lines());
+    return chglibl + (message.isEmpty() ? "" : " -> " + message);
+  }
+
+  private static String lastLine(List<String> lines) {
+    for (int r = lines.size() - 1; r >= Math.max(0, lines.size() - 2); r--) {
+      if (!lines.get(r).trim().isEmpty()) return lines.get(r).trim();
+    }
+    return "";
   }
 
   private static int defaultCcsid() {

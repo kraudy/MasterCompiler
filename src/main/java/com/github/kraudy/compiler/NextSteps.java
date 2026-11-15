@@ -46,6 +46,11 @@ final class NextSteps {
   private NextSteps() {}
 
   /* host, user, port and connection come from --doctor when it knows them (null: a placeholder) */
+  /* Where the spec's library list goes: --doctor and the next steps say it */
+  static final String LIBRARY_LIST = "The library list: --libl / --curlib (or Code for IBM i's, or the spec's CHGLIBL / "
+      + "ADDLIBLE hooks) is applied to MC's build job; screen_open applies the same list to a 5250 session after the "
+      + "sign-on (libraryList, default true), and status shows it (libraryListCommand). No CHGLIBL by hand.";
+
   static String text(Known known) {
     Known k = known != null ? known : new Known(null, null, null, 0);
     List<String> command = new ArrayList<String>(Arrays.asList(java(), "-jar", VscodeSetup.jarPath(), "--mcp", "--ssh"));
@@ -80,6 +85,7 @@ final class NextSteps {
     out.append("In each repository, set protectedLibs at setup (" + ProtectedLibs.REFUSALS + "): the top-level line "
         + ProtectedLibs.EXAMPLE + " in build.yaml, or in mc-base.yaml for a scanned project; --doctor --project <repository> "
         + "shows it.\n");
+    out.append(LIBRARY_LIST + "\n");
     out.append("Then restart the client (Claude Code: /mcp reconnects): a server registered while it runs has no tools "
         + "until then. The password itself never goes in these commands or in the chat.");
     return out.toString();

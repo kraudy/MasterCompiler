@@ -110,6 +110,7 @@ final class ConnectionDoctor {
         : code4i != null && !code4i.libraryList.isEmpty() ? String.join(" ", code4i.libraryList) + " (Code for IBM i)" : "not set";
     out.println("Current library   : " + curlib);
     out.println("Library list      : " + libl);
+    out.println("                    " + NextSteps.LIBRARY_LIST);
     out.println("Home directory    : " + (code4i != null && code4i.homeKnown ? code4i.homeDirectory + " (Code for IBM i)"
         : "the SSH user's $HOME"));
     String ca = TrustStores.caStore();

@@ -27,6 +27,29 @@ public class BuildSpec {
   @com.fasterxml.jackson.annotation.JsonIgnore
   public final java.util.List<String> warnings = java.util.Collections.synchronizedList(new java.util.ArrayList<String>());
 
+  /* Objects more than one source builds: NAME.TYPE -> the files. A report names only those its build touched */
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  public final java.util.Map<String, java.util.List<String>> duplicateSources =
+      java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, java.util.List<String>>());
+
+  /* The object of a target (NAME.TYPE: a scan builds into one library), the key of duplicateSources */
+  public static String objectOf(TargetKey key) {
+    return key.getObjectName() + "." + key.getObjectTypeEnum();
+  }
+
+  /* The same from a report's target, LIB.NAME.TYPE.SOURCETYPE */
+  public static String objectOf(String target) {
+    String[] parts = target.split("\\.");
+    return parts.length >= 3 ? parts[1] + "." + parts[2] : target;
+  }
+
+  /* The warning for one object with several sources */
+  public static String duplicateWarning(String object, java.util.List<String> files) {
+    String[] parts = object.split("\\.");
+    return "Two sources build " + parts[0] + " *" + parts[1] + ": " + String.join(" and ", files)
+        + "; the one built last wins. Delete or rename the one that is not in use.";
+  }
+
   /* Set once the dependency graph is built, so a build does not scan the sources a second time */
   private boolean dependenciesDetected;
   public boolean isDependenciesDetected() { return dependenciesDetected; }

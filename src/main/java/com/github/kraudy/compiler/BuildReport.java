@@ -20,6 +20,8 @@ public class BuildReport {
   public static final String SKIPPED = "skipped";     // --diff: unchanged
   public static final String PLANNED = "planned";     // --dry-run
   public static final String NOT_BUILT = "not_built"; // never reached (an earlier target failed)
+  /* The statuses of a target this build compiled or tried to (its warnings are worth showing) */
+  public static final java.util.Set<String> TOUCHED = new java.util.HashSet<String>(java.util.Arrays.asList(BUILT, FAILED, PLANNED));
   public static final String BLOCKED = "blocked";     // --keep-going: depends on a failed target
 
   public boolean success = true;
@@ -40,6 +42,7 @@ public class BuildReport {
   public List<TargetResult> targets = new ArrayList<TargetResult>();
   public List<TestRun> tests;   // RPGUnit runs (RUCALLTST hooks), in order; target is null for a global hook
   public List<Timeout> timeouts; // hooks that ran past their timeout: what their job was doing, how it was stopped
+  public List<SignatureChange> signatureChanges;  // service programs built whose callers are bound to an old signature
   public String cancelled;       // cancel tool: how the build was stopped
   public String skippedNote;     // compact without showSkipped: the skipped targets are only counted
   public List<String> formerTargets;  // objects MC built for targets the spec no longer has (clean formerTargets: true)
@@ -123,6 +126,14 @@ public class BuildReport {
     public List<TestCase> failed;
     public String source;
     public String note;
+  }
+
+  /* A service program whose signature changed, and the callers to bind again (SignatureCheck) */
+  public static class SignatureChange {
+    public String serviceProgram;
+    public String note;
+    public List<String> callers = new ArrayList<String>();
+    public List<String> rebind = new ArrayList<String>();
   }
 
   public static class Timeout {
