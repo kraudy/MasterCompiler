@@ -1,5 +1,6 @@
 package com.github.kraudy.compiler;
 
+import java.io.File;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -218,6 +219,10 @@ public class MasterCompiler{
         /* A scanned spec's CHGCURDIR names the folder on this PC: the job works in the pushed copy instead */
         if (baseDir != null) moveCurDir(globalSpec, baseDir, compileBaseDir);
         globalSpec.before.add(0, new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, compileBaseDir));
+      } else if (runsInProjectCopy(baseDir) && !hasCurDir(globalSpec)) {
+        /* MC on the IBM i (--mcp --ssh, --remote): relative stream files resolve from the project, as the spec meant
+           (the build job starts in the user's home), unless the spec says where with a CHGCURDIR of its own */
+        globalSpec.before.add(0, new CommandObject(SysCmd.CHGCURDIR).put(ParamCmd.DIR, baseDir));
       }
 
       /* Inquiry messages get their default reply (*DFT): a hook fails instead of waiting in MSGW */
@@ -1226,6 +1231,17 @@ public class MasterCompiler{
       return hooks;
     }
     return code4i != null ? code4i.libraryHooks() : hooks;
+  }
+
+  /* A global CHGCURDIR of the spec's own (a scanned spec has one): it says where the job works */
+  private static boolean hasCurDir(BuildSpec spec) {
+    for (CommandObject hook : spec.before) if (hook.getSystemCommand() == SysCmd.CHGCURDIR) return true;
+    return false;
+  }
+
+  /* The spec's folder is on the IBM i itself: MC runs there, so the build job can work in it */
+  static boolean runsInProjectCopy(String baseDir) {
+    return IBMiDotEnv.isIBMi() && baseDir != null && new File(baseDir).isAbsolute();
   }
 
   /* --push, or with --code4i off the IBM i: <home>/mc/<project folder> */

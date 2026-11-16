@@ -3,6 +3,21 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.37
+
+- Over SSH (MC on the IBM i) the build job works in the project copy: a spec without a `CHGCURDIR` hook finds its
+  relative stream files (`CPYFRMSTMF` for DDS and OPM sources looked in the user's home folder before).
+- A source member MC creates is its own at once: when the copy into it fails, the next build replaces it without
+  `replaceMembers`, and `clean` removes it.
+- 5250 screens for byte-for-byte comparisons: `raw: true` on `screen`, `screen_open` and `screen_send` adds the
+  records the IBM i sent since the last key (`hostWrites`, hex) and every field with its attribute byte, field format
+  word and MDT (`allFields`, output-only fields too). `record: true` writes the session to
+  `.mc/results/screen-<time>.jsonl` in tn5250-rs's recording format (hidden values masked).
+- `download_file`: an IFS stream file to `.mc/results/` byte for byte; over SSH on the open connection.
+- `sql` names every value it cut at 500 characters (`cutValues`).
+- Docs: `debug_program` stops only at source statements, never before an OPM program's first one; the classic OPM
+  debugger through the 5250 tools stops at MI instruction /0001 and shows named variables in hex (checked on PUB400).
+
 ## v0.3.36
 
 - Fewer sign-ons: `plan` and `build` no longer start a command server job (`QZRCSRVS`) to load the user profile;

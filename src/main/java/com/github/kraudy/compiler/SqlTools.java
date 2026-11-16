@@ -388,7 +388,13 @@ final class SqlTools {
             else if (masked[c]) row.add(MASKED);
             else {
               value = value.replaceAll("\\s+$", "");
-              row.add(value.length() > MAX_VALUE_CHARS ? value.substring(0, MAX_VALUE_CHARS) + "..." : value);
+              if (value.length() > MAX_VALUE_CHARS) {
+                /* said in the answer, as omittedColumns says it for columns: a cut value is never taken for the whole */
+                result.withArray("cutValues").addObject().put("row", count + 1).put("column", meta.getColumnLabel(c))
+                    .put("length", value.length());
+                value = value.substring(0, MAX_VALUE_CHARS) + "...";
+              }
+              row.add(value);
             }
           }
           count++;

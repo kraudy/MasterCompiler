@@ -2,6 +2,7 @@ package com.github.kraudy.compiler;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -74,6 +75,35 @@ class SessionFeedbackTest {
       }
     }
     assertTrue(routed);
+  }
+
+  /* 4. download_file: byte for byte into .mc/results, a name never leaves it, a short copy is refused */
+  @Test
+  void downloadIsExactAndStaysInResults() throws Exception {
+    byte[] data = { 0x00, (byte) 0xC1, (byte) 0xFF, 0x0A, 0x25 };
+    FileDownload.Source source = new FileDownload.Source() {
+      @Override public long[] stat(String path) { return path.equals("/home/U/probe.bin") ? new long[] { data.length, 0 } : null; }
+      @Override public void get(String path, File local) throws Exception { Files.write(local.toPath(), data); }
+    };
+    ObjectNode args = new ObjectMapper().createObjectNode().put("path", "/home/U/probe.bin");
+    ObjectNode result = FileDownload.handle(args, tempDir.toFile(), source);
+    assertArrayEquals(data, Files.readAllBytes(tempDir.resolve(".mc/results/probe.bin")));
+    assertEquals(".mc/results/probe.bin", result.path("file").asText());
+    assertEquals(5, result.path("bytes").asLong());
+
+    args.put("name", "../escape.bin");
+    assertThrows(IllegalArgumentException.class, () -> FileDownload.handle(args, tempDir.toFile(), source));
+    args.remove("name");
+    args.put("path", "/home/U/missing.bin");
+    assertThrows(IllegalArgumentException.class, () -> FileDownload.handle(args, tempDir.toFile(), source));
+
+    FileDownload.Source shortCopy = new FileDownload.Source() {
+      @Override public long[] stat(String path) { return new long[] { 99, 0 }; }
+      @Override public void get(String path, File local) throws Exception { Files.write(local.toPath(), data); }
+    };
+    args.put("path", "/home/U/other.bin");
+    assertThrows(IllegalStateException.class, () -> FileDownload.handle(args, tempDir.toFile(), shortCopy));
+    assertFalse(Files.exists(tempDir.resolve(".mc/results/other.bin")), "nothing under its name");
   }
 
   private static String read(Path file) throws Exception {

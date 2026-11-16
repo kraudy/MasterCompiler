@@ -7,7 +7,9 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeMap;
@@ -42,8 +44,9 @@ final class Screen5250 implements AutoCloseable {
   static final int AID_ENTER = 0xF1, AID_HELP = 0xF3, AID_ROLL_DOWN = 0xF4, AID_ROLL_UP = 0xF5, AID_PRINT = 0xF6,
       AID_CLEAR = 0xBD, AID_QUERY = 0x88;
 
-  /* An input field of the format table */
+  /* A field the host defined with Start Field: an input field of the format table, or an output-only field (no FFW) */
   static final class Field {
+    boolean input = true;
     int attrPos;  // the attribute byte before the field
     int start;
     int length;
@@ -51,6 +54,13 @@ final class Screen5250 implements AutoCloseable {
     int ffw2;
     int attr;
     boolean mdt;
+
+    Field copy() {
+      Field c = new Field();
+      c.input = input; c.attrPos = attrPos; c.start = start; c.length = length;
+      c.ffw1 = ffw1; c.ffw2 = ffw2; c.attr = attr; c.mdt = mdt;
+      return c;
+    }
 
     boolean bypass()  { return (ffw1 & 0x20) != 0; }
     boolean hidden()  { return (attr & 0x07) == 0x07; }
@@ -71,7 +81,22 @@ final class Screen5250 implements AutoCloseable {
   private int rows = 24;
   private int cols = 80;
   private byte[] buffer = new byte[rows * cols];
-  private final TreeMap<Integer, Field> fields = new TreeMap<Integer, Field>();  // by start
+  private final TreeMap<Integer, Field> fields = new TreeMap<Integer, Field>();  // input fields, by start
+  private final TreeMap<Integer, Field> outputs = new TreeMap<Integer, Field>(); // output-only fields since Clear Unit, by start
+
+  /* The host's records since the last key (screen raw: true), as they came: GDS header and data, telnet framing removed */
+  static final int MAX_HOST_WRITES = 20, MAX_HOST_BYTES = 64 * 1024;
+  private final Deque<byte[]> hostWrites = new ArrayDeque<byte[]>();
+  private int hostBytes;
+  private int hostDropped;
+
+  /* What screen_open / screen_send record (record: true): the records in, the keys out with hidden values masked */
+  interface Recorder {
+    void incoming(byte[] record);
+    void outgoing(String key, int row, int col, List<Object[]> fields);  // {row, col, value}
+  }
+
+  private Recorder recorder;
   private int address;
   private int cursor;
   private int pendingRead;      // the read command the IBM i waits on (0: none, it is busy)
@@ -192,6 +217,61 @@ final class Screen5250 implements AutoCloseable {
     return s.toString();
   }
 
+  /* Every field the host defined, input and output-only, in screen order (copies) */
+  synchronized List<Field> allFields() {
+    TreeMap<Integer, Field> all = new TreeMap<Integer, Field>(outputs);
+    all.putAll(fields);
+    List<Field> copies = new ArrayList<Field>();
+    for (Field f : all.values()) copies.add(f.copy());
+    return copies;
+  }
+
+  /* The host's records since the last key, oldest first (copies) */
+  synchronized List<byte[]> hostWrites() {
+    List<byte[]> copies = new ArrayList<byte[]>();
+    for (byte[] r : hostWrites) copies.add(r.clone());
+    return copies;
+  }
+
+  /* screen raw: true, all taken at one moment: the reader thread changes nothing in between */
+  static final class Raw {
+    List<byte[]> hostWrites;
+    int dropped;
+    List<String> lines;
+    int cols;
+    List<Field> fields;
+  }
+
+  synchronized Raw raw() {
+    Raw raw = new Raw();
+    raw.hostWrites = hostWrites();
+    raw.dropped = hostDropped;
+    raw.lines = lines();
+    raw.cols = cols;
+    raw.fields = allFields();
+    return raw;
+  }
+
+  synchronized void record(Recorder to) {
+    recorder = to;
+  }
+
+  /* A key goes: the records that answer it are the next screen's */
+  private void startKey() {
+    hostWrites.clear();
+    hostBytes = 0;
+    hostDropped = 0;
+  }
+
+  private void keepHostWrite(byte[] r) {
+    hostWrites.addLast(r.clone());
+    hostBytes += r.length;
+    while (hostWrites.size() > 1 && (hostWrites.size() > MAX_HOST_WRITES || hostBytes > MAX_HOST_BYTES)) {
+      hostBytes -= hostWrites.removeFirst().length;
+      hostDropped++;
+    }
+  }
+
   /* ---- typing ---- */
 
   /* Field exit with 'text': the rest nulled, numeric and right-adjust fields right-aligned; sets MDT */
@@ -248,6 +328,11 @@ final class Screen5250 implements AutoCloseable {
 
   /* Press an AID key: the fields go to the IBM i as the pending read asked for */
   void press(int aid) throws IOException {
+    press(aid, null);
+  }
+
+  /* key: its name for a recording (null: not recorded, e.g. the sign-on) */
+  void press(int aid, String key) throws IOException {
     byte[] record;
     synchronized (this) {
       if (closedBy != null) throw new IOException("The session ended: " + closedBy);
@@ -260,6 +345,7 @@ final class Screen5250 implements AutoCloseable {
       data.write(cursor % cols + 1);
       data.write(aid);
       boolean withData = aid != AID_HELP && aid != AID_PRINT && aid != AID_CLEAR;
+      List<Object[]> sent = new ArrayList<Object[]>();  // for a recording: what went, hidden values masked
       if (withData) {
         boolean all = pendingRead == 0x42;  // Read Input Fields: every field, else the changed ones with their address
         for (Field f : fields.values()) {
@@ -272,8 +358,11 @@ final class Screen5250 implements AutoCloseable {
           }
           byte[] content = fieldData(f);
           data.write(content, 0, content.length);
+          sent.add(new Object[] { f.start / cols + 1, f.start % cols + 1, f.hidden() ? "***" : value(f) });
         }
       }
+      if (recorder != null && key != null) recorder.outgoing(key, cursor / cols + 1, cursor % cols + 1, sent);
+      startKey();
       pendingRead = 0;
       lastChange = System.currentTimeMillis();
       record = gds(0, OP_PUT_GET, data.toByteArray());
@@ -284,6 +373,8 @@ final class Screen5250 implements AutoCloseable {
   /* Attention (the ATTN key): a header flag, no data */
   void attention() throws IOException {
     synchronized (this) {
+      if (recorder != null) recorder.outgoing("Attn", cursor / cols + 1, cursor % cols + 1, new ArrayList<Object[]>());
+      startKey();
       pendingRead = 0;
     }
     send(gds(0x40, 0, new byte[0]));
@@ -398,6 +489,8 @@ final class Screen5250 implements AutoCloseable {
   }
 
   private synchronized void processRecord(byte[] r) throws IOException {
+    keepHostWrite(r);
+    if (recorder != null) recorder.incoming(r);
     if (r.length < 10) return;
     int dataStart = 6 + (r[6] & 0xFF);
     int opcode = r[9] & 0xFF;
@@ -475,6 +568,7 @@ final class Screen5250 implements AutoCloseable {
     cols = newCols;
     buffer = new byte[rows * cols];
     fields.clear();
+    outputs.clear();
     address = 0;
     cursor = 0;
     inputError = false;
@@ -579,13 +673,16 @@ final class Screen5250 implements AutoCloseable {
     int length = ((r[i + 1] & 0xFF) << 8) | (r[i + 2] & 0xFF);
     i += 3;
     put((byte) attr);
-    if (f != null) {
-      f.attrPos = attrPos;
-      f.start = address;
-      f.length = length;
-      f.attr = attr;
-      fields.put(f.start, f);
+    if (f == null) {  // no FFW: an output-only field
+      f = new Field();
+      f.input = false;
     }
+    f.attrPos = attrPos;
+    f.start = address;
+    f.length = length;
+    f.attr = attr;
+    (f.input ? outputs : fields).remove(f.start);  // a field redefined at the same place
+    (f.input ? fields : outputs).put(f.start, f);
     return i;
   }
 

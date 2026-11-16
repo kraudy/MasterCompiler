@@ -417,7 +417,8 @@ public class McpServer {
         "Read-only Db2 for i query on the IBM i: table rows, catalog views (QSYS2.SYSCOLUMNS2, SYSTABLES, "
         + "OBJECT_STATISTICS, PROGRAM_INFO, ...). The connection is opened read only, so only SELECT / VALUES / WITH "
         + "run; it has the spec's library list (system naming: LIB/TABLE or LIB.TABLE). Without format, long values are "
-        + "cut at " + SqlTools.MAX_VALUE_CHARS + " characters; with format, the file has every column and exact values.",
+        + "cut at " + SqlTools.MAX_VALUE_CHARS + " characters (cutValues names each one: row, column, full length); "
+        + "with format, the file has every column and exact values.",
         sqlSchema));
 
     ObjectNode findObj = mapper.createObjectNode();
@@ -588,6 +589,18 @@ public class McpServer {
         + "Confirmed uploads are logged in .mc/uploads.log.",
         uploadSchema));
 
+    ObjectNode downloadSchema = mapper.createObjectNode();
+    downloadSchema.put("type", "object");
+    ObjectNode downloadProps = downloadSchema.putObject("properties");
+    downloadProps.putObject("path").put("type", "string").put("description", "Absolute path of an IFS stream file (e.g. /home/USER1/probe.bin)");
+    downloadProps.putObject("name").put("type", "string").put("description", "File name in .mc/results/ (default: the same name)");
+    downloadSchema.putArray("required").add("path");
+    tools.add(tool("download_file",
+        "Copy an IFS stream file to the project's .mc/results/ on this PC, byte for byte (no CCSID conversion): a binary "
+        + "probe output, a dump, a save file in a stream file. Returns bytes, SHA-256 and the local path. Over SSH it uses "
+        + "the open connection (no new sign-on). Reads only on the IBM i.",
+        downloadSchema));
+
     ObjectNode runSchema = mapper.createObjectNode();
     runSchema.put("type", "object");
     ObjectNode runProps = runSchema.putObject("properties");
@@ -636,6 +649,7 @@ public class McpServer {
     openProps.putObject("libraryList").put("type", "boolean").put("description", "true (default): after the sign-on, run "
         + "CHGLIBL with the build job's library list (the spec's: --libl / --curlib, Code for IBM i, the spec's library "
         + "hooks) on the first command line, so programs find what the build used. false: the user profile's own");
+    rawProperties(openProps);
     tools.add(tool("screen_open",
         "Open an interactive 5250 session (a green screen) on the build system and sign on as the build connection's "
         + "user, to run and check display file programs. Returns the first screen after sign-on. MasterCompiler types "
@@ -647,8 +661,10 @@ public class McpServer {
 
     ObjectNode view = mapper.createObjectNode();
     view.put("type", "object");
-    view.putObject("properties").putObject("waitSeconds").put("type", "integer")
+    ObjectNode viewProps = view.putObject("properties");
+    viewProps.putObject("waitSeconds").put("type", "integer")
         .put("description", "While the IBM i is busy, how long to wait for the next screen (default 30)");
+    rawProperties(viewProps);
     tools.add(tool("screen",
         "The 5250 session's current screen: numbered lines, cursor, input fields (number, row, col, length, label, "
         + "value) and state (waiting for input, busy, input error).",
@@ -672,6 +688,7 @@ public class McpServer {
     askProp.putObject("items").put("type", "string");
     askProp.put("description", "Hidden fields (a PASSCODE, a password) by number or \"row,col\": MasterCompiler asks the "
         + "user for each in a password box and types it; the value never reaches you");
+    rawProperties(sendProps);
     tools.add(tool("screen_send",
         "Type into the 5250 screen's input fields and press a key, as a user at the terminal; returns the next screen. "
         + "Never pass a hidden (password) field's value: name it in 'ask' and MasterCompiler asks the user for it in a "
@@ -684,6 +701,16 @@ public class McpServer {
     tools.add(tool("screen_close",
         "Close the 5250 session. Sign off first (SIGNOFF on a command line, or the program's exit then SIGNOFF) so the job ends.",
         close));
+  }
+
+  /* raw and record, on every screen tool that returns a screen */
+  private static void rawProperties(ObjectNode props) {
+    props.putObject("raw").put("type", "boolean").put("description", "true: also the 5250 data: hostWrites (each record "
+        + "the IBM i sent since the last key, hex: GDS header and data) and allFields (every field the host defined, "
+        + "input and output-only: attribute byte and its meaning, FFW, protected, modified, value; hidden values never)");
+    props.putObject("record").put("type", "boolean").put("description", "true: from now on write every record in and "
+        + "every key out to .mc/results/screen-<time>.jsonl (tn5250-rs recording format; the records in are exact, the keys "
+        + "out have hidden values as ***); false: stop");
   }
 
   /* connections.readOnly in the spec: the call reads that IBM i instead */
@@ -828,7 +855,7 @@ public class McpServer {
     boolean destructive = name.equals("build") || name.equals("clean") || name.equals("clean_remote") || name.equals("call_program") || name.equals("copy_rows")
         || name.equals("upload_file") || name.equals("cancel") || name.equals("run_command") || name.equals("debug_program")
         || name.equals("screen_open") || name.equals("screen_send");
-    boolean writes = destructive || name.equals("import_source");  // import_source only adds files to the project
+    boolean writes = destructive || name.equals("import_source") || name.equals("download_file");  // they only add files to the project
     ObjectNode annotations = tool.putObject("annotations");
     annotations.put("readOnlyHint", !writes);
     annotations.put("destructiveHint", destructive);
@@ -941,6 +968,7 @@ public class McpServer {
         case "import_source": return importSource(args);
         case "spool":         return spool(args);
         case "upload_file":   return uploadFile(args);
+        case "download_file": return downloadFile(args);
         case "run_command":   return runCommand(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -1956,6 +1984,20 @@ public class McpServer {
     connect();
     try {
       return toolResult(pretty.writeValueAsString(FileUpload.handle(args, projectDir(), FileUpload.over(system))), false);
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage(), true);
+    }
+  }
+
+  /* Into the project's .mc/results/ (over SSH the proxy downloads with SFTP, before this server sees the call) */
+  private ObjectNode downloadFile(JsonNode args) throws Exception {
+    if (IBMiDotEnv.isIBMi()) {
+      return toolResult("download_file brings a file to the PC: MasterCompiler on the PC (over SSH, or with the host servers) "
+          + "runs it", true);
+    }
+    connect();
+    try {
+      return toolResult(pretty.writeValueAsString(FileDownload.handle(args, projectDir(), FileDownload.over(system))), false);
     } catch (IllegalArgumentException e) {
       return toolResult(e.getMessage(), true);
     }

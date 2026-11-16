@@ -1,8 +1,10 @@
 package com.github.kraudy.compiler;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -32,6 +34,25 @@ final class ScreenTools {
 
   private static volatile Screen5250 session;
   private static volatile File watchFile;
+  private static volatile File projectFolder;
+  private static volatile ScreenRecording recording;  // record: true
+  private static volatile String[] sessionMeta;       // host, port, tls, ccsid: a recording's meta line
+
+  /* What a display attribute byte (0x20-0x3F) shows, as tn5250-rs draws it (IBM 5250 color display) */
+  static final Map<Integer, String> DISPLAY = new HashMap<Integer, String>();
+  static {
+    String[] shown = { "green", "green reverse", "white", "white reverse", "green underline", "green underline reverse",
+        "white underline", "nondisplay", "red", "red reverse", "red blink", "red blink reverse", "red underline",
+        "red underline reverse", "red underline blink", "nondisplay", "turquoise column-separators",
+        "turquoise column-separators reverse", "yellow column-separators", "yellow column-separators reverse",
+        "turquoise underline", "turquoise underline reverse", "yellow underline", "nondisplay", "pink", "pink reverse",
+        "blue", "blue reverse", "pink underline", "pink underline reverse", "blue underline", "nondisplay" };
+    for (int i = 0; i < shown.length; i++) DISPLAY.put(0x20 + i, shown[i]);
+  }
+
+  /* The field format word's shift (FFW1 bits 5-7): what the field accepts */
+  static final String[] SHIFT = { "alpha shift", "alpha only", "numeric shift", "numeric only", "katakana",
+      "digits only", "I/O", "signed numeric" };
 
   private ScreenTools() {}
 
@@ -91,6 +112,7 @@ final class ScreenTools {
   /* A tool result for one of TOOLS; target is the build connection's sign-on (null: not available here) */
   static synchronized ObjectNode handle(String tool, JsonNode args, SignOnGuard.Target target, File project) {
     watchFile = new File(project, ".mc/screen.txt");
+    projectFolder = project;
     try {
       switch (tool) {
         case "screen_open":  return open(args, target);
@@ -110,6 +132,7 @@ final class ScreenTools {
   static synchronized void closeAll() {
     if (session != null) session.close();
     session = null;
+    stopRecording();
   }
 
   private static ObjectNode open(JsonNode args, SignOnGuard.Target buildTarget) throws Exception {
@@ -155,7 +178,9 @@ final class ScreenTools {
 
     SignOnGuard.Target target = new SignOnGuard.Target(build.name + " 5250", build.host, build.user, build.password);  // own status entry, same profile
     int wait = waitSeconds(args);
+    stopRecording();  // one of a session that ended without screen_close
     Screen5250 screen = Screen5250.open(target.host, port, tls, ccsid, ScreenTools::writeWatch, wait);
+    sessionMeta = new String[] { target.host, String.valueOf(port), String.valueOf(tls), String.valueOf(ccsid) };
     try {
       List<Screen5250.Field> input = screen.inputFields();
       if (input.size() < 2 || input.get(0).hidden() || !input.get(1).hidden()) {
@@ -226,6 +251,7 @@ final class ScreenTools {
     }
     session = screen;
     rebuiltSinceOpen.clear();  // a new job: it activates what is there now
+    String recordingNote = record(screen, args);  // only now: the sign-on is never in a recording
     if (codeRefused(target) != null) codeRefused(target, null);  // password and code accepted
     /* The messages waiting at sign-on (Display Messages) are read once and left with F3, as a user does */
     List<String> messages = null;
@@ -253,7 +279,8 @@ final class ScreenTools {
       answer.put("libraryList", "the user profile's own (libraryList: false)");
     }
     answer.put("note", "Sign off (SIGNOFF) before screen_close so the job ends.");
-    return result(mapper.writeValueAsString(answer), false);
+    if (recordingNote != null) answer.put("recording", recordingNote);
+    return result(mapper.writeValueAsString(raw(screen, args, answer)), false);
   }
 
   /* The Display Messages screen (DSPMSG) a sign-on shows when messages wait: its title is in the first rows */
@@ -471,12 +498,16 @@ final class ScreenTools {
 
   private static ObjectNode screen(JsonNode args) throws Exception {
     Screen5250 screen = current();
+    String recordingNote = record(screen, args);
     if (!screen.waitingForInput()) screen.waitForInput(waitSeconds(args));
-    return result(mapper.writeValueAsString(view(screen)), false);
+    ObjectNode answer = view(screen);
+    if (recordingNote != null) answer.put("recording", recordingNote);
+    return result(mapper.writeValueAsString(raw(screen, args, answer)), false);
   }
 
   private static ObjectNode sendKeys(JsonNode args) throws Exception {
     Screen5250 screen = current();
+    String recordingNote = record(screen, args);
     String key = args.path("key").asText("Enter");
     if (key.equalsIgnoreCase("Reset")) {
       screen.reset();
@@ -518,20 +549,22 @@ final class ScreenTools {
         throw new IllegalArgumentException("Unknown key '" + key + "': Enter, F1-F24, PageUp, PageDown, Help, Print, "
             + "Clear, Attn or Reset");
       }
-      screen.press(aid);
+      screen.press(aid, key);
     }
     boolean ready = screen.waitForInput(waitSeconds(args));
     ObjectNode answer = view(screen);
     if (!ready && !screen.closed()) {
       answer.put("note", "The IBM i is still working (no input asked yet): call screen to wait for the next display.");
     }
-    return result(mapper.writeValueAsString(answer), false);
+    if (recordingNote != null) answer.put("recording", recordingNote);
+    return result(mapper.writeValueAsString(raw(screen, args, answer)), false);
   }
 
   private static ObjectNode closeSession() {
     if (session == null) return result("No 5250 session is open.", false);
     session.close();
     session = null;
+    stopRecording();
     writeWatchText("(session closed " + LocalTime.now().withNano(0) + ")\n");
     return result("5250 session closed. If it was not signed off first, the job may stay as a disconnected job "
         + "(QDEVRCYACN) until the system ends it.", false);
@@ -542,6 +575,7 @@ final class ScreenTools {
     if (session.closed()) {
       String why = session.closedBy();
       session = null;
+      stopRecording();  // a new session starts its own
       throw new IllegalStateException("The 5250 session ended (" + why + "). Call screen_open for a new one.");
     }
     return session;
@@ -564,6 +598,81 @@ final class ScreenTools {
       throw new IllegalArgumentException("No input field at row,col " + k);
     }
     throw new IllegalArgumentException("Field keys are the field's number from 'fields' (\"3\") or \"row,col\" inside it");
+  }
+
+  /* record: true starts a recording (one at a time), false stops it; null when the call says nothing */
+  private static String record(Screen5250 screen, JsonNode args) throws IOException {
+    if (!args.has("record")) return recording != null ? "recording to " + recording.file : null;
+    if (!args.path("record").asBoolean()) {
+      File stopped = recording != null ? recording.file : null;
+      stopRecording();
+      return stopped != null ? "stopped; recorded in " + stopped : "no recording was running";
+    }
+    if (recording == null) {
+      String[] m = sessionMeta;
+      recording = ScreenRecording.start(projectFolder, m[0], Integer.parseInt(m[1]), Boolean.parseBoolean(m[2]),
+          Integer.parseInt(m[3]), screen.rows() == 27);
+      screen.record(recording);
+    }
+    return "recording to " + recording.file + " (every record in exactly as the IBM i sent it, every key out with hidden "
+        + "values as ***)";
+  }
+
+  private static void stopRecording() {
+    ScreenRecording r = recording;
+    recording = null;
+    Screen5250 screen = session;
+    if (screen != null) screen.record(null);
+    if (r != null) r.close();
+  }
+
+  /* raw: true: the 5250 data behind the screen */
+  private static ObjectNode raw(Screen5250 screen, JsonNode args, ObjectNode answer) {
+    if (!args.path("raw").asBoolean(false)) return answer;
+    Screen5250.Raw raw = screen.raw();
+    ArrayNode writes = answer.putArray("hostWrites");
+    for (byte[] r : raw.hostWrites) writes.add(SqlTools.hex(r).toLowerCase(Locale.ROOT));
+    if (raw.dropped > 0) {
+      answer.put("hostWritesDropped", raw.dropped + " older records (more than " + Screen5250.MAX_HOST_WRITES
+          + " records or " + Screen5250.MAX_HOST_BYTES + " bytes since the key): record: true keeps all");
+    }
+    ArrayNode all = answer.putArray("allFields");
+    List<String> lines = raw.lines;
+    int cols = raw.cols;
+    int previousEnd = 0;
+    for (Screen5250.Field f : raw.fields) {
+      ObjectNode o = all.addObject();
+      o.put("id", all.size() - 1);
+      o.put("row", f.start / cols + 1);
+      o.put("col", f.start % cols + 1);
+      o.put("len", f.length);
+      o.put("input", f.input);
+      o.put("hidden", f.hidden());
+      o.put("attr", String.format("0x%02x", f.attr));
+      o.put("display", DISPLAY.getOrDefault(f.attr, "not a display attribute"));
+      if (f.input) {
+        o.put("ffw", String.format("0x%02x%02x", f.ffw1, f.ffw2));
+        o.put("shift", SHIFT[f.shift()]);
+        o.put("numeric", f.numeric());
+        o.put("upper", (f.ffw2 & 0x20) != 0);
+        o.put("modified", f.mdt);
+        o.put("bypass", f.bypass());
+      }
+      o.put("protected", !f.input || f.bypass());
+      String label = label(lines, f, cols, previousEnd);
+      if (!label.isEmpty()) o.put("label", label);
+      /* from the screen text, which blanks hidden cells (also behind an attribute inside the field) */
+      if (f.hidden()) o.putNull("value");
+      else o.put("value", rtrim(textOf(lines, f, cols)));
+      previousEnd = f.start + f.length;
+    }
+    return answer;
+  }
+
+  private static String textOf(List<String> lines, Screen5250.Field f, int cols) {
+    StringBuilder s = new StringBuilder();
+    for (int p = f.start; p < f.start + f.length && p / cols < lines.size(); p++) s.append(lines.get(p / cols).charAt(p % cols));
+    return s.toString();
   }
 
   /* The screen for the agent: numbered lines, cursor, input fields with a label, and whether input is expected */

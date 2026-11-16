@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jcraft.jsch.ChannelExec;
@@ -854,6 +855,10 @@ public class SshMcpProxy {
         sendResult(request.get("id"), upload(params.path("arguments")));
         return null;
       }
+      if ("download_file".equals(params.path("name").asText())) {  // the file comes to this PC: SFTP on the open connection
+        sendResult(request.get("id"), download(params.path("arguments")));
+        return null;
+      }
       if ("clean_remote".equals(params.path("name").asText())) {  // ends MC there: run here, on the calls thread
         sendResult(request.get("id"), cleanRemoteTool(params.path("arguments").path("confirm").asBoolean(false)));
         return null;
@@ -921,6 +926,27 @@ public class SshMcpProxy {
       error = true;
     }
     ObjectNode result = mapper.createObjectNode();
+    result.putArray("content").addObject().put("type", "text").put("text", text);
+    result.put("isError", error);
+    return result;
+  }
+
+  /* download_file over this server's SSH session, once it is up: no sign-on of its own */
+  private ObjectNode download(JsonNode args) {
+    ObjectNode result = mapper.createObjectNode();
+    String text;
+    boolean error = false;
+    try {
+      connected();
+      text = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT)
+          .writeValueAsString(FileDownload.handle(args, project, FileDownload.over(ssh)));
+    } catch (ExecutionException e) {
+      text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage() + ". The next call tries again.";
+      error = true;
+    } catch (Exception e) {
+      text = e instanceof IllegalArgumentException ? e.getMessage() : "Download failed: " + e.getMessage();
+      error = true;
+    }
     result.putArray("content").addObject().put("type", "text").put("text", text);
     result.put("isError", error);
     return result;

@@ -116,6 +116,8 @@ public class Migrator {
             logger.warn(replacedMember);
           } else if (before == null && !sourceMemberExists(key)) {
             createSourceMember(key);
+            /* ours from now on: a copy that fails next leaves an empty member the next build may replace and clean remove */
+            if (!commandExec.isDryRun()) record(member(key), true, key.asString());
           }
           migrateStreamFileToMember(key);
           if (before == null || !MEMBER_TEXT.equals(before.text)) {
