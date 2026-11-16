@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -229,8 +230,7 @@ public class SshMcpProxy {
     long start = System.currentTimeMillis();
     stage("1/5 connecting to " + user + "@" + host + ":" + port + " over SSH");
     /* A rejected password: no further try in this run (or at a restart with the same one); the server stays up */
-    ssh = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, buildTarget.password,
-        code4i != null ? code4i.privateKeyPath : null));
+    ssh = signOnSsh();
     /* Home: Code for IBM i's when it has one, else the SSH user's own */
     String home = code4i != null && code4i.homeKnown ? code4i.homeDirectory : ssh.exec("echo $HOME").trim();
     home = home.startsWith("/") ? trimSlash(home) : "/home/" + user.toUpperCase();
@@ -246,10 +246,12 @@ public class SshMcpProxy {
     }
     if (startedOnce) {
       stopEarlier();
+      collectOpens();
     } else {
-      /* pid files of MC servers that ended (each start writes one): only a pid whose process is gone; an empty or unreadable one stays (being written) */
+      /* pid files (and sign-on counts) of MC servers that ended (each start writes one): only a pid whose process is
+         gone; an empty or unreadable one stays (being written) */
       ssh.execQuiet("for f in " + SshTarget.quote(remoteHome + "/mc/.mc") + "/mcp-*.pid; do [ -f \"$f\" ] || continue; "
-          + "p=$(cat \"$f\" 2>/dev/null); [ -n \"$p\" ] && ! kill -0 \"$p\" 2>/dev/null && rm -f \"$f\"; done");
+          + "p=$(cat \"$f\" 2>/dev/null); [ -n \"$p\" ] && ! kill -0 \"$p\" 2>/dev/null && rm -f \"$f\" \"${f%.pid}.opens\"; done");
     }
 
     stage("2/5 checking MasterCompiler on the IBM i");
@@ -381,6 +383,7 @@ public class SshMcpProxy {
     OutputStream toRemote = remote.getOutputStream();
     remote.connect(30_000);
     startedOnce = true;
+    opensPending = true;
     stage("5/5 ready: MasterCompiler running on " + host + " in " + remoteDir + " ("
         + (System.currentTimeMillis() - start) / 1000 + " s)");
 
@@ -393,6 +396,40 @@ public class SshMcpProxy {
   /* Where MC started by this server writes its process id on the IBM i */
   private String pidPath() {
     return remoteHome + "/mc/.mc/" + token + ".pid";
+  }
+
+  /*
+   * Sign-ons over this server's life (status: signOns). MC on the IBM i counts its own connections, but a new session
+   * starts a new MC there: each one keeps its count in this file (-Dmc.opens), read here once it has stopped. SSH
+   * sign-ons are counted here.
+   */
+  private final AtomicInteger sshSignOns = new AtomicInteger();
+  private volatile int earlierOpens;          // connections MC opened in sessions that ended
+  private volatile boolean earlierUnknown;    // one of them left no count
+  private volatile boolean opensPending;      // an MC started since the last count was read
+
+  private String opensPath() {
+    return remoteHome + "/mc/.mc/" + token + ".opens";
+  }
+
+  private SshTarget signOnSsh() throws Exception {
+    SshTarget connected = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, buildTarget.password,
+        code4i != null ? code4i.privateKeyPath : null));
+    sshSignOns.incrementAndGet();
+    return connected;
+  }
+
+  /* After stopEarlier: the stopped MC's count, read once and deleted */
+  private void collectOpens() {
+    if (!opensPending) return;
+    opensPending = false;
+    String file = SshTarget.quote(opensPath());
+    String count = ssh.execQuiet("cat " + file + " 2>/dev/null; rm -f " + file);
+    try {
+      earlierOpens += Integer.parseInt(count.trim());
+    } catch (Exception none) {
+      earlierUnknown = true;
+    }
   }
 
   /*
@@ -675,6 +712,12 @@ public class SshMcpProxy {
     s.lost = why;  // cleaned up: the next call may start a new session
   }
 
+  /* Why a session ended when the link went quiet; MC_SSH_ALIVE_SECONDS gives a host that is quiet while compiling longer */
+  private static String linkLost() {
+    return "the SSH connection to the IBM i stopped answering for " + SshTarget.aliveSeconds() + " s (network, VPN or the "
+        + "IBM i itself; MC_SSH_ALIVE_SECONDS sets how long a silence is tolerated)";
+  }
+
   private static String lostMessage(String why) {
     return "Lost MasterCompiler on the IBM i before it answered (" + why + "). The result is unknown: the call may have "
         + "run there. The next call that needs the IBM i connects again and first stops the MC this server left running "
@@ -850,12 +893,20 @@ public class SshMcpProxy {
         text = "Build " + remoteBuild + " is running on the IBM i from this copy: nothing was deleted. Wait for it "
             + "(build_status) or stop it with cancel, then call clean_remote again.";
         error = true;
+      } else if (!s.inFlight.isEmpty()) {  // e.g. a run_command still running: stopping MC would end it
+        text = s.inFlight.size() + " call(s) still running on the IBM i: nothing was deleted. Call clean_remote again "
+            + "once they answered (a run_command that hangs: whats_running, then cancel).";
+        error = true;
       } else {
+        /* The session's own SSH connection stops MC and deletes the files: no new sign-on while it is up */
+        SshTarget kept = s.ssh;
+        s.ssh = null;  // lost() ends MC's channel only
         lost(s, "clean_remote deleted MasterCompiler's files on the IBM i");
-        ssh = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, buildTarget.password,
-            code4i != null ? code4i.privateKeyPath : null));
+        ssh = kept != null && kept.isConnected() ? kept : signOnSsh();
+        if (kept != null && kept != ssh) kept.close();
         try {
           stopEarlier();
+          collectOpens();
           text = cleanRemote(jar) + ". The next tool that needs the IBM i uploads MasterCompiler and the sources again.";
         } finally {
           ssh.close();
@@ -952,7 +1003,7 @@ public class SshMcpProxy {
       status = remote != null ? remote.getExitStatus() : -1;
     }
     if (linkDown) {
-      lost(s, "the SSH connection to the IBM i stopped answering for about 60 s (network, VPN or the IBM i itself)");
+      lost(s, linkLost());
       return;
     }
     /* Usually a start-up problem on the IBM i (Java, the folder, authority): its own messages are just above */
@@ -1014,10 +1065,10 @@ public class SshMcpProxy {
       logger.error("Could not prepare tool call", e);
       boolean dropped = ssh != null && !ssh.isConnected();
       sendToolError(line, dropped
-          ? "The SSH connection to the IBM i was lost (no answer for about 60 s), so this call did not run there: the next "
+          ? "The SSH connection to the IBM i was lost (no answer for " + SshTarget.aliveSeconds() + " s), so this call did not run there: the next "
             + "call connects again. " + e.getMessage()
           : "Could not upload the sources to the IBM i: " + e.getMessage());
-      if (dropped) lost(session, "the SSH connection to the IBM i stopped answering for about 60 s (network, VPN or the IBM i itself)");
+      if (dropped) lost(session, linkLost());
       return null;
     }
   }
@@ -1049,7 +1100,33 @@ public class SshMcpProxy {
     into.put("localProjectFolder", project != null ? project.getAbsolutePath() : null);
     into.put("ibmiProjectFolder", remoteDir);
     into.set("connections", router.connectionsStatus());
+    into.set("signOns", signOns(into.path("hostConnections").path("totalOpens")));
     return into;
+  }
+
+  /*
+   * Every sign-on to the IBM i host over this server's life: SSH, plus the connections MC opened there in every
+   * session (hostConnections only counts the MC running now). Connections opened, not attempts; the PC's own read-only
+   * connections and 5250 sessions are not in it (connections, screen tools).
+   */
+  private ObjectNode signOns(JsonNode thisProcess) {
+    ObjectNode node = mapper.createObjectNode();
+    int total = sshSignOns.get() + earlierOpens;
+    node.put("ssh", sshSignOns.get());
+    node.put("ibmiEarlierSessions", earlierOpens);
+    if (thisProcess.isInt()) {
+      node.put("ibmiThisSession", thisProcess.asInt());
+      total += thisProcess.asInt();
+    }
+    node.put("total", total);
+    List<String> missing = new ArrayList<String>();
+    if (earlierUnknown) missing.add("an earlier MC on the IBM i left no count");
+    if (opensPending && !thisProcess.isInt()) missing.add("the last MC's count is read when the next session starts");
+    if (!missing.isEmpty()) {
+      node.put("complete", false);
+      node.put("note", String.join("; ", missing) + ": total is at least this");
+    }
+    return node;
   }
 
   private ObjectNode statusHere() {
@@ -1076,6 +1153,10 @@ public class SshMcpProxy {
     text.put("note", failed != null ? "MasterCompiler is not running on the IBM i (" + failed + "). The next tool that needs "
         + "the IBM i (plan, build, ...) connects again; status itself does not."
         : "MasterCompiler is not running on the IBM i yet: the user, current library and library list come once it is");
+    /* An estimate: services MC opens later (call_program's command job) come on top */
+    if (failed != null) text.put("reconnectCost", "1 SSH sign-on, then MC there opens the build connection at its first "
+        + "call" + (parser.isSingleConnection() ? "" : " and the read-only one when a query needs it")
+        + " (call_program / debug_program also start a command server job)");
     result.putArray("content").addObject().put("type", "text").put("text", text.toPrettyString());
     result.put("isError", false);
     return result;
@@ -1390,7 +1471,7 @@ public class SshMcpProxy {
     /* exec: java keeps the shell's pid, written where a later session finds it (stopEarlier) */
     String pids = SshTarget.quote(remoteHome + "/mc/.mc");
     StringBuilder command = new StringBuilder(startCommand(jar, "(umask 077 && mkdir -p " + pids + ") && echo $$ > "
-        + SshTarget.quote(pidPath()) + " && exec ", " -Dmc.session=" + token))
+        + SshTarget.quote(pidPath()) + " && exec ", " -Dmc.session=" + token + " -Dmc.opens=" + SshTarget.quote(opensPath())))
         .append(" --mcp --project ").append(SshTarget.quote(remoteDir));
     /* the same spec as on the PC: --spec names a file inside the uploaded copy */
     if (parser.getSpecName() != null) command.append(" --spec ").append(SshTarget.quote(parser.getSpecName()));

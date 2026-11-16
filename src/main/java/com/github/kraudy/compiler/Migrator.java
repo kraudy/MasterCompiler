@@ -31,6 +31,7 @@ public class Migrator {
   private final boolean debug;
   private final boolean verbose;
   private final User currentUser;
+  private String homeDirectory;  // the user's, read at the first migration
   private CommandExecutor commandExec;
   static final String MEMBER_TEXT = "MasterCompiler: copy of the stream file";  // for people: MC wrote this member
   static final String MEMBER_REFUSAL = "Did not replace";
@@ -165,7 +166,11 @@ public class Migrator {
     CommandObject cmd = new CommandObject(SysCmd.CPYTOSTMF);
 
     if(!key.containsStreamFile()){
-      String migrationPath = currentUser.getHomeDirectory() + "/" + "sources";
+      if (homeDirectory == null) {  // here, not at start: loading the user opens the command host server (a sign-on)
+        currentUser.loadUserInformation();
+        homeDirectory = currentUser.getHomeDirectory();
+      }
+      String migrationPath = homeDirectory + "/" + "sources";
       File migrationDir = new File(migrationPath);
       if (!migrationDir.exists()) migrationDir.mkdirs(); // Create dir if it does not exists
       key.setStreamSourceFile(migrationPath + "/" + key.asString());

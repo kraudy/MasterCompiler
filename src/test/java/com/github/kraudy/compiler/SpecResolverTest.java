@@ -45,6 +45,20 @@ public class SpecResolverTest {
     assertEquals("*SOURCE", resolved.get(ParamCmd.DBGVIEW));
   }
 
+  /* MC adds OPTION(*EVENTF) (an EVFEVENT file in the current library); a spec's OPTION replaces it */
+  @Test
+  void specDefaultsOptionReplacesMcEventFile() {
+    TargetKey key = new TargetKey("curlib.hello.pgm.rpgle");
+    Map<ParamCmd, String> defaults = new HashMap<ParamCmd, String>();
+    defaults.put(ParamCmd.OPTION, "*NOEVENTF");
+    Map<ParamCmd, String> params = new HashMap<ParamCmd, String>();
+    params.put(ParamCmd.SRCSTMF, "hello.rpgle");
+
+    Map<ParamCmd, String> resolved = SpecResolver.resolve(key, defaults, params, null);
+
+    assertEquals("*NOEVENTF", resolved.get(ParamCmd.OPTION));
+  }
+
   @Test
   void specDefaultsApplyThenTargetParamsWin() {
     TargetKey key = new TargetKey("curlib.hello.pgm.rpgle");

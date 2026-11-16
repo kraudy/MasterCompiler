@@ -3,6 +3,21 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.36
+
+- Fewer sign-ons: `plan` and `build` no longer start a command server job (`QZRCSRVS`) to load the user profile;
+  only a build that migrates a source member reads it. `run_command` always runs in the build job.
+- `clean_remote` stops MC and deletes its files over the session's SSH connection (no new sign-on while it is up),
+  and refuses while a call is still running on the IBM i.
+- `status` over SSH: `signOns` counts SSH and IBM i sign-ons over the server's whole life, across reconnects;
+  while disconnected, `reconnectCost` says what the next call will cost.
+- `MC_SSH_ALIVE_SECONDS` (default 60): how long the SSH connection may stay silent before it counts as lost.
+- `whats_running` shows a running `run_command`, and `cancel` without a `buildId` stops one that hangs.
+- `sql` names the columns past `maxColumns` (`omittedColumns`), and a `SYSTOOLS.SPOOLED_FILE_DATA` query that fails on
+  its QTEMP work file points to the `spool` tool.
+- Docs: what a build leaves in the current library (`EVFEVENT` and `OPTION: "*NOEVENTF"`, DDS source files, spooled
+  files in `QPRTJOB`, `CRTBNDCL` listings through `OVRPRTF`).
+
 ## v0.3.35
 
 - Duplicate sources: "two sources build X" is logged once per server (one line for all of them), and a build report

@@ -17,6 +17,8 @@ final class BuildProgress {
   static final String SUCCEEDED = "succeeded";
   static final String FAILED = "failed";
   static final String CANCELLED = "cancelled";
+  /* The id of a run_command's progress: whats_running shows it and cancel stops it, but it is not a build */
+  static final String COMMAND = "run_command";
 
   private static final ObjectMapper mapper = new ObjectMapper();
 
@@ -87,7 +89,7 @@ final class BuildProgress {
   /* What it does now, for the agent to tell the user */
   ObjectNode toJson() {
     ObjectNode node = mapper.createObjectNode();
-    node.put("buildId", id);
+    node.put(COMMAND.equals(id) ? "tool" : "buildId", id);  // no buildId: the SSH proxy follows builds by it
     node.put("state", state);
     node.put("elapsedSeconds", ((finished > 0 ? finished : System.currentTimeMillis()) - started) / 1000);
     if (!isRunning()) return node;

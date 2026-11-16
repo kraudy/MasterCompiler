@@ -12,6 +12,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,6 +89,7 @@ public class McpServer {
   private volatile String laneCall;  // the call using the build connection now, and since when
   private volatile long laneSince;
   private volatile BuildProgress lastBuild;
+  private volatile BuildProgress commandRun;  // the last run_command: whats_running shows it, cancel stops it
   private volatile boolean objectsChanged;  // a build ran since the last call_program: its job may hold old activations
   private final Set<String> shownWarnings = java.util.concurrent.ConcurrentHashMap.newKeySet();  // source warnings already answered
   private final java.util.Map<String, BuildProgress> builds = java.util.Collections.synchronizedMap(
@@ -110,6 +113,7 @@ public class McpServer {
     this.connector = null;
     this.connections = new HostConnections(readOnlyMode ? HostConnections.Mode.READ_SERVER
         : parser != null && parser.isSingleConnection() ? HostConnections.Mode.SINGLE : HostConnections.Mode.SHARED);
+    this.connections.tallyTo(System.getProperty("mc.opens"));  // started by an SSH MCP server: its sign-on count
     this.read = new ReadConnection(() -> SqlTools.readCallConnection(system), connections);
   }
 
@@ -774,7 +778,8 @@ public class McpServer {
         + JobWatch.CANCEL_GRACE_SECONDS + " s its job is ended (ENDJOB *IMMED; MC reconnects at the next call). Nothing "
         + "else of the build runs (no failure hooks); the report says cancelled. First call without confirm and show the user "
         + "what runs; call again with confirm: true only if they agree. Stopping the call in VS Code does not stop the "
-        + "build on the IBM i: this does.",
+        + "build on the IBM i: this does. With no build running, it stops a run_command that is (a CALL that hangs, "
+        + "a MSGW); whats_running shows it.",
         cancel));
   }
 
@@ -1106,6 +1111,11 @@ public class McpServer {
       result.put("callUsingBuildJob", call);
       result.put("forSeconds", (System.currentTimeMillis() - laneSince) / 1000);
     }
+    BuildProgress command = commandRun;
+    if (command != null && command.isRunning()) {
+      result.set("runCommand", command.toJson());
+      result.put("next", "cancel (without buildId) stops this run_command after the user agreed");
+    }
     JobWatch watch = jobWatch;
     if (watch == null || buildJob == null) {
       result.put("job", "not connected yet: nothing runs on the IBM i");
@@ -1116,13 +1126,18 @@ public class McpServer {
   }
 
   private ObjectNode cancel(JsonNode args) throws Exception {
-    BuildProgress build = findBuild(args);
+    BuildProgress lastOrNamed = findBuild(args);
+    BuildProgress command = commandRun;
+    /* No build running: a run_command that is (no buildId given) */
+    BuildProgress build = (lastOrNamed == null || !lastOrNamed.isRunning()) && args.path("buildId").asText("").trim().isEmpty()
+        && command != null && command.isRunning() ? command : lastOrNamed;
     if (build == null || !build.isRunning()) {
-      return toolResult("No build is running" + (build != null ? " (the last, " + build.id + ", " + build.state + ")" : "")
-          + ": nothing to cancel", false);
+      return toolResult("No build or run_command is running" + (build != null ? " (the last build, " + build.id + ", "
+          + build.state + ")" : "") + ": nothing to cancel", false);
     }
+    Stoppable what = build == command ? Stoppable.COMMAND : Stoppable.BUILD;
     ObjectNode result = mapper.createObjectNode();
-    result.set("build", build.toJson());
+    result.set(what.key, build.toJson());
     JobWatch watch = jobWatch;
     if (!args.path("confirm").asBoolean(false)) {
       if (watch != null && build.jobName != null) {
@@ -1132,7 +1147,7 @@ public class McpServer {
       }
       result.put("next", "Nothing was stopped. Show this to the user; if they agree, call cancel again with confirm: true. "
           + "It cancels the running command, ends job " + build.jobName + " (ENDJOB *IMMED) if it is still running after "
-          + JobWatch.CANCEL_GRACE_SECONDS + " s, and builds nothing more (no failure hooks).");
+          + JobWatch.CANCEL_GRACE_SECONDS + " s" + what.afterStop + ".");
       return toolResult(pretty.writeValueAsString(result), false);
     }
     build.cancelRequested = true;
@@ -1154,11 +1169,30 @@ public class McpServer {
     }
     long until = System.currentTimeMillis() + 15_000;
     while (build.isRunning() && System.currentTimeMillis() < until) Thread.sleep(200);
-    result.set("build", build.toJson());
+    result.set(what.key, build.toJson());
     result.put("stopped", build.cancelSteps);
-    result.put("next", build.isRunning() ? "Still ending: call build_status with this buildId"
-        : "Stopped. build_status with this buildId returns its report");
+    result.put("next", build.isRunning() ? what.ending : what.stopped);
     return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* What cancel stops: a build, or a run_command when no build runs. The stopping is the same; only the texts differ */
+  private enum Stoppable {
+    BUILD("build", ", and builds nothing more (no failure hooks)", "Still ending: call build_status with this buildId",
+        "Stopped. build_status with this buildId returns its report"),
+    COMMAND("runCommand", " (the build job: MC connects again at the next call)",
+        "Still ending: run_command answers once it has", "Stopped. run_command answers with its messages");
+
+    final String key;        // the answer's field
+    final String afterStop;  // the preview's last words
+    final String ending;     // next, still running after the stop
+    final String stopped;    // next, ended
+
+    Stoppable(String key, String afterStop, String ending, String stopped) {
+      this.key = key;
+      this.afterStop = afterStop;
+      this.ending = ending;
+      this.stopped = stopped;
+    }
   }
 
   private ObjectNode build(JsonNode args, boolean dryRun, BuildProgress progress) throws Exception {
@@ -1504,8 +1538,23 @@ public class McpServer {
       return toolResult(pretty.writeValueAsString(result), false);
     } catch (java.sql.SQLException e) {
       String hint = "42703".equals(e.getSQLState()) ? columnsHint(reader, statement) : "";
+      for (Map.Entry<Pattern, String> route : SQL_ROUTES.entrySet()) {
+        if (route.getKey().matcher(statement).find() && String.valueOf(e.getMessage()).toUpperCase().contains("QTEMP")) {
+          hint += route.getValue();
+        }
+      }
       return toolResult("SQL error " + e.getSQLState() + " (" + e.getErrorCode() + "): " + e.getMessage() + hint, true);
     }
+  }
+
+  /* Functions sql cannot run (they write a work file in QTEMP, which its read-only guard refuses: the error names QTEMP),
+     and the tool that reads the same */
+  static final Map<Pattern, String> SQL_ROUTES = new LinkedHashMap<Pattern, String>();
+  static {
+    SQL_ROUTES.put(Pattern.compile("\\bSPOOLED_FILE_DATA\\b", Pattern.CASE_INSENSITIVE),
+        ". SYSTOOLS.SPOOLED_FILE_DATA writes a work file in QTEMP, which sql's read-only connection or transaction refuses: "
+        + "read the spooled file with the spool tool instead (this user's files, e.g. QPJOBLOG of a submitted job or the "
+        + "QPRTJOB output of MC's server jobs: list them, then give file, job and number)");
   }
 
   private static final java.util.regex.Pattern QUERY_TABLE = java.util.regex.Pattern.compile(
@@ -1865,12 +1914,22 @@ public class McpServer {
       return toolResult(pretty.writeValueAsString(result), false);
     }
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
+    /* Followed like a build's command: whats_running shows it, cancel stops it (a CALL that hangs, a MSGW) */
+    BuildProgress progress = new BuildProgress(BuildProgress.COMMAND);
+    progress.stage("running the command");
+    progress.jobName = buildJob;
+    executor.watch(progress, jobWatch, null);
     Timestamp since = executor.getCurrentTime();
+    commandRun = progress;  // only now: from here the finally below ends it
     boolean ok = true;
     try {
       executor.executeCommand(command.replace("'", "''"), since);  // inside QCMDEXC('...'): quotes doubled
     } catch (CompilerException e) {
       ok = false;
+      if (progress.cancelRequested) result.put("cancelled", progress.cancelSteps);
+    } finally {
+      /* a command that ended by itself while a cancel was stopping it succeeded */
+      progress.finish(ok ? BuildProgress.SUCCEEDED : progress.cancelRequested ? BuildProgress.CANCELLED : BuildProgress.FAILED, null, null);
     }
     result.put("success", ok);
     ArrayNode messages = result.putArray("messages");

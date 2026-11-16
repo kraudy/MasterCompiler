@@ -369,6 +369,9 @@ final class SqlTools {
         }
         if (shown < meta.getColumnCount()) {
           result.put("columnsOmitted", meta.getColumnCount() - shown);
+          /* which ones, so a query can name the columns it needs */
+          ArrayNode omitted = result.putArray("omittedColumns");
+          for (int c = shown + 1; c <= meta.getColumnCount(); c++) omitted.add(meta.getColumnLabel(c));
         }
         ArrayNode data = result.putArray("rows");
         int count = 0;

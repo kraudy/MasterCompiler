@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.StringJoiner;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,7 +72,11 @@ final class SqlQuery {
     }
     out.append(result.path("rowCount").asInt()).append(result.path("rowCount").asInt() == 1 ? " row" : " rows");
     if (result.has("moreRows")) out.append(". ").append(result.path("moreRows").asText());
-    if (result.has("columnsOmitted")) out.append(". ").append(result.path("columnsOmitted").asInt()).append(" more columns not shown");
+    if (result.has("columnsOmitted")) {
+      StringJoiner names = new StringJoiner(" ", ": ", "");
+      for (JsonNode name : result.path("omittedColumns")) names.add(name.asText());
+      out.append(". ").append(result.path("columnsOmitted").asInt()).append(" more columns not shown").append(names);
+    }
     return out.toString();
   }
 }

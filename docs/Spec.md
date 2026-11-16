@@ -217,6 +217,33 @@ Command successful: CRTBNDRPG PGM(*CURLIB/HELLO5) SRCSTMF(''/home/ROBKRAUDY/buil
 Command successful: DLTOBJ OBJ(*LIBL/BNDHELLO) OBJTYPE(*BNDDIR)
 ```
 
+## What a build leaves in the current library
+
+Besides the target objects, a build creates:
+
+* **`EVFEVENT`**: MC adds `OPTION(*EVENTF)` to `CRTBNDRPG`, `CRTBNDCL`, `CRTBNDC`, `CRT*MOD`, `CRTSQLRPGI`,
+  `CRTSRVPGM`, `CRTDSPF`, `CRTPF` and `CRTLF`, so each compile writes its errors to a member of `EVFEVENT` (the build
+  report reads them). Taking `OPTION` out of `defaults` does not remove it: MC's own default stays. To build without
+  it, set the option yourself; a spec's `OPTION` replaces MC's. The report then takes compile errors from the joblog only.
+
+  ```yaml
+  defaults:
+    OPTION: "*NOEVENTF"
+  ```
+
+* **`QPFSRC`, `QLFSRC`, `QDSPFSRC`, ... and their members**: DDS and OPM sources compile from a member, so a stream file
+  is copied in first (`CRTSRCPF` when the source file is missing, `ADDPFM`, `CPYFRMSTMF`). These commands show only in
+  `plan`'s hooks, not among the targets. `clean` removes the members MC wrote (`membersRemoved`); the source files stay.
+* **Spooled files**: compile listings go to the user's output queue. A build over MCP runs in a `QUSER` server job, so
+  its spooled files land in `nnn/<user>/QPRTJOB` together with every earlier one of that user; tell yours by the job,
+  name, number and creation time (`spool` lists them newest first). RPG and C compiles take `OUTPUT(*NONE)` to skip the
+  listing; `CRTBNDCL` rejects it (CPD0847), so send its listings to an output queue of your own with a hook:
+
+  ```yaml
+  before:
+    - Cmd: OVRPRTF FILE(*PRTF) OUTQ(MYLIB/MYOUTQ) OVRSCOPE(*JOB)
+  ```
+
 ## Duplicated commands
 
 If you have a hook like this

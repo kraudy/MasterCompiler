@@ -4,6 +4,11 @@ import java.sql.Connection;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,6 +117,30 @@ final class HostConnections {
     e.reason = why;
     logger.info("IBM i {} connection {}{}: {}", purpose.label(), e.opens > 1 ? "reopened" : "opened",
         job != null ? " (job " + job + ")" : "", why);
+    writeTally();
+  }
+
+  /*
+   * MC started by an SSH MCP server (-Dmc.opens): totalOpens in this file, rewritten at each open (a new file renamed
+   * over the old: never half written), so the server on the PC still has the count after this process ends
+   */
+  private Path tally;
+
+  synchronized void tallyTo(String path) {
+    if (path == null || path.trim().isEmpty()) return;
+    tally = Paths.get(path);
+    writeTally();  // 0 now: a missing file later means unknown, not none
+  }
+
+  private void writeTally() {
+    if (tally == null) return;
+    try {
+      Path next = tally.resolveSibling(tally.getFileName() + ".new");
+      Files.write(next, String.valueOf(totalOpens()).getBytes(StandardCharsets.US_ASCII));
+      Files.move(next, tally, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    } catch (Exception e) {
+      logger.debug("Sign-on count not written to {}: {}", tally, e.getMessage());
+    }
   }
 
   synchronized void closed(Purpose purpose, String reason) {

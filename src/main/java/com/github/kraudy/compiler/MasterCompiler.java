@@ -82,9 +82,9 @@ public class MasterCompiler{
     this.connection = connection;
     this.connection.setAutoCommit(true);
 
-    // User
+    /* User: loaded only when a migration needs its home directory; loading calls an API through the command host
+       server, a QZRCSRVS job and one more sign-on that every plan and build would pay */
     this.currentUser = new User(system, system.getUserId());
-    this.currentUser.loadUserInformation();
 
   }
 

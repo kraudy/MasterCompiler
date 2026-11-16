@@ -79,6 +79,21 @@ public final class SshTarget implements AutoCloseable {
    */
   private static final int[] RETRY_SECONDS = { 2, 5, 10 };
 
+  /*
+   * Silence the connection survives: a keep-alive every 15 s, and after MC_SSH_ALIVE_SECONDS (default 60, at least 30)
+   * without any answer from the IBM i the connection counts as lost. A host that goes quiet while it compiles can be
+   * given longer; a real drop is then noticed that much later.
+   */
+  static final int ALIVE_INTERVAL_SECONDS = 15;
+
+  static int aliveSeconds() {
+    try {
+      return Math.max(30, Integer.parseInt(System.getenv().getOrDefault("MC_SSH_ALIVE_SECONDS", "60").trim()));
+    } catch (NumberFormatException e) {
+      return 60;
+    }
+  }
+
   public static SshTarget connect(String host, int port, String user, String password, String privateKeyPath) throws Exception {
     for (int attempt = 0; ; attempt++) {
       try {
@@ -145,9 +160,9 @@ public final class SshTarget implements AutoCloseable {
     session.setConfig("PreferredAuthentications", keys == 0 ? "password,keyboard-interactive"
         : hasPassword ? "publickey,password,keyboard-interactive" : "publickey");
     session.setUserInfo(new AcceptNewHosts(password, strict));
-    /* A link that stops answering (VPN drop, stuck firewall) ends the session after ~60 s instead of hanging */
-    session.setServerAliveInterval(15_000);
-    session.setServerAliveCountMax(3);
+    /* A link that stops answering (VPN drop, stuck firewall) ends the session after aliveSeconds() instead of hanging */
+    session.setServerAliveInterval(ALIVE_INTERVAL_SECONDS * 1000);
+    session.setServerAliveCountMax(aliveSeconds() / ALIVE_INTERVAL_SECONDS - 1);
     session.connect(30_000);
     logger.info("SSH connected to {}@{}:{}", user, host, port);
     return new SshTarget(session);
