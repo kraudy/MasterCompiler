@@ -33,6 +33,9 @@ public class ArgParser {
     CURLIB        (null, "curlib",       Kind.VALUE, "Current library for the build job (CHGCURLIB)"),
     READ_ONLY     (null, "read-only",    Kind.FLAG,  "With --mcp: a read-only server for another IBM i (sql, find_object, find_source, object_info, export_rows); --libl lists the only libraries it reads"),
     SINGLE_CONNECTION (null, "single-connection", Kind.FLAG, "With --mcp: one IBM i connection (the build job's) for sql, checkRows, the job monitor and copy_rows: fewer sign-ons, queries wait for builds"),
+    MAX_SIGN_ONS  (null, "max-sign-ons", Kind.VALUE, "With --mcp: at most this many sign-ons to the IBM i over the server's life (SSH, MC's connections there, 5250 sessions); a call that needs one more is refused"),
+    NO_OVERWRITE  (null, "no-overwrite", Kind.FLAG,  "With --mcp: build refuses to replace an object this project did not build (noOverwrite: true by default), and over --ssh with --push the sync refuses to replace or delete a file it did not upload"),
+    NO_INITIAL_SYNC (null, "no-initial-sync", Kind.FLAG, "With --mcp --ssh: start MC on the IBM i with only the spec files uploaded; the sources go up with the first call that reads them (open_project's sync: false)"),
     MAX_ROWS      (null, "max-rows",     Kind.VALUE, "With --read-only: most rows one query or copy may read"),
     MASK_COLUMNS  (null, "mask-columns", Kind.VALUE, "With --read-only: columns (comma-separated) sql shows masked and copy_rows must replace"),
     SSH           (null, "ssh",          Kind.FLAG,  "With --mcp: reach the IBM i over SSH (like Code for IBM i) and run MC there"),
@@ -162,6 +165,9 @@ public class ArgParser {
   private boolean strictHostKey;
   private boolean readOnly;
   private boolean singleConnection;
+  private int maxSignOns = -1;
+  private boolean noOverwrite;
+  private boolean noInitialSync;
   private int maxRows;
   private String maskColumns;
   private boolean hostServers;
@@ -284,6 +290,8 @@ public class ArgParser {
       case STRICT_HOST_KEY: strictHostKey = true; break;
       case READ_ONLY:     readOnly = true; break;
       case SINGLE_CONNECTION: singleConnection = true; break;
+      case NO_OVERWRITE:  noOverwrite = true; break;
+      case NO_INITIAL_SYNC: noInitialSync = true; break;
       case HOST_SERVERS:  hostServers = true; break;
       case INSTALL_SKILLS: installSkills = true; break;
       case VERSION:       version = true; break;
@@ -358,6 +366,14 @@ public class ArgParser {
         }
         break;
       case MASK_COLUMNS:  maskColumns = value; break;
+      case MAX_SIGN_ONS:
+        try {
+          maxSignOns = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+          throw new IllegalArgumentException("--max-sign-ons needs a number: " + value);
+        }
+        if (maxSignOns < 0) throw new IllegalArgumentException("--max-sign-ons needs 0 or more: " + value);
+        break;
       case SSH_PORT:
         try {
           sshPort = Integer.parseInt(value.trim());
@@ -499,6 +515,8 @@ public class ArgParser {
     if (installSkills || version) return;  // need nothing else
     if (readOnly && !mcp) throw new IllegalArgumentException("--read-only goes with --mcp");
     if (singleConnection && (!mcp || readOnly)) throw new IllegalArgumentException("--single-connection goes with --mcp (not --read-only, which has one connection)");
+    if ((maxSignOns >= 0 || noOverwrite) && !mcp) throw new IllegalArgumentException("--max-sign-ons and --no-overwrite go with --mcp");
+    if (noInitialSync && !(mcp && ssh)) throw new IllegalArgumentException("--no-initial-sync goes with --mcp --ssh");
     if ((maxRows != 0 || maskColumns != null) && !readOnly) {
       throw new IllegalArgumentException("--max-rows and --mask-columns go with --read-only");
     }
@@ -814,6 +832,21 @@ public class ArgParser {
   /** {@code --single-connection}: the MCP server holds only the build connection. */
   public boolean isSingleConnection() {
     return singleConnection;
+  }
+
+  /** {@code --max-sign-ons}: the most sign-ons over the server's life; -1 when there is no limit. */
+  public int getMaxSignOns() {
+    return maxSignOns;
+  }
+
+  /** {@code --no-overwrite}: build's noOverwrite by default; over SSH with --push, a sync that replaces nothing foreign. */
+  public boolean isNoOverwrite() {
+    return noOverwrite;
+  }
+
+  /** {@code --no-initial-sync}: the first session starts with the spec files only. */
+  public boolean isNoInitialSync() {
+    return noInitialSync;
   }
 
   /** {@code --read-only}: an MCP server that only reads, for a second IBM i. */

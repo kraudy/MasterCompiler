@@ -717,6 +717,8 @@ public class MasterCompiler{
     result.error = error;
     result.writes = targetWrites.get(key);
     result.bindingDirectories = targetBndDirs.get(key);
+    result.existed = key.objectExists();
+    result.compiled = !dryRun && compileEnd != null;  // also when a hook after it failed
     if (key.objectExists() && key.isRecreate() && key.getObjectTypeEnum() == CompilationPattern.ObjectType.BNDDIR) {
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *BNDDIR and create it again (recreate: true): "
           + "only the spec's entries remain";

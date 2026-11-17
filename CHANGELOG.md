@@ -3,6 +3,23 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.38
+
+- `--max-sign-ons N`: a sign-on budget over the server's life (SSH, MC's connections on the IBM i, 5250); a call that
+  needs one more is refused before it signs on. Over SSH the PC keeps the one count (MC there asks it first).
+- `open_project` `sync: false` / `--no-initial-sync`: MC starts on the IBM i with only the spec files, so `sql`,
+  `inventory` and `status` (`sync.wouldUpload`, `sync.notOurs`) can check the IBM i before the sources go up.
+- `plan` lists `wouldReplace` (objects there that this project did not build); `build` `noOverwrite: true` (default
+  with `--no-overwrite`) refuses them before anything runs. With `--push` and `--no-overwrite` the sync refuses to
+  replace or delete files it did not upload. A target whose compile ran counts as built also when a hook after it failed.
+- `run_command` runs read-only display commands (DSPFFD, DSPFD, DSPDBR, DSPPGMREF, ...) on `protectedLibs`, from
+  QSYS, with their output to spool, an outfile in the current library, or QTEMP.
+- `screen_open` returns the session's job (`number/user/name`, status); `screen_close` waits up to 15 s and says
+  whether it ended.
+- `inventory` (objects with creation time and owner, source members, an IFS folder) saved by name, and
+  `clean` `since: <name>` deletes only what is new since it (`keep` for what stays), after a preview.
+- `clean_remote` answers with `remains`: what is left in `~/mc`, MC processes, the current library, sign-ons.
+
 ## v0.3.37
 
 - Over SSH (MC on the IBM i) the build job works in the project copy: a spec without a `CHGCURDIR` hook finds its

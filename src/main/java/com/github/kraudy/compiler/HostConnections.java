@@ -94,13 +94,20 @@ final class HostConnections {
     return to != null ? to : purpose;
   }
 
+  /* Before a service of the AS400 object is used (COMMAND, FILES): a sign-on of --max-sign-ons unless it is open */
+  synchronized void beforeService(Purpose purpose) {
+    Entry e = entries.get(purpose);
+    if (e == null || !e.open) SignOnBudget.take(purpose.label() + " service");
+  }
+
   /* This purpose runs on the build connection */
   boolean onBuild(Purpose purpose) {
     return route(purpose) == Purpose.BUILD;
   }
 
-  /* Opens a JDBC connection for a purpose and records it */
+  /* Opens a JDBC connection for a purpose and records it (one sign-on of --max-sign-ons) */
   Connection open(Purpose purpose, String reason, Callable<Connection> opener) throws Exception {
+    SignOnBudget.take(purpose.label() + " connection (" + reason + ")");
     Connection connection = opener.call();
     opened(purpose, JobWatch.jobName(connection), reason);
     return connection;

@@ -5,14 +5,24 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Paths;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.LinkedHashMap;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
@@ -161,8 +171,11 @@ public class McpServer {
       ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(c)).setLevel(ch.qos.logback.classic.Level.INFO);
     }
     SecretPrompt.sender(this::sendLine);
+    if (parser.getMaxSignOns() >= 0) SignOnBudget.limit(parser.getMaxSignOns());
+    if (SignOnBudget.fromPc()) SignOnBudget.askPc(this::sendLine);  // started by an SSH MCP server that keeps the budget
     if (!readOnlyMode) ScreenTools.systemCcsid(this::screenCcsidForScreens);
     if (!readOnlyMode) ScreenTools.specLibraryList(this::libraryListForScreens);
+    if (!readOnlyMode) ScreenTools.jobQuery(this::rowsForScreens);
     if (!IBMiDotEnv.isIBMi()) TrustStores.warnIfNone();
     logger.info("MasterCompiler MCP server ready");
 
@@ -192,6 +205,7 @@ public class McpServer {
     JsonNode params = request.path("params");
 
     if (SecretPrompt.answer(request)) return;  // the client's answer to MC's own request (elicitation)
+    if (SignOnBudget.answer(request)) return;  // the SSH MCP server's answer: may MC sign on once more
     if (id == null) return;  // notification (notifications/initialized, cancelled, ...)
 
     /* Each tool call on its own thread: the next request is read at once */
@@ -310,13 +324,19 @@ public class McpServer {
 
     ObjectNode open = mapper.createObjectNode();
     open.put("type", "object");
-    open.putObject("properties").putObject("path").put("type", "string").put("description",
+    ObjectNode openProps = open.putObject("properties");
+    openProps.putObject("path").put("type", "string").put("description",
         "Absolute path of the repository on this machine (clone it first)");
+    openProps.putObject("sync").put("type", "boolean").put("description", "Over SSH. true (default): MC on the IBM i "
+        + "starts with the sources uploaded. false: only the spec files go up at its start, so sql, find_object and status "
+        + "can check the IBM i first (status: sync.wouldUpload, sync.notOurs); the first call that reads the sources "
+        + "uploads the rest");
     open.putArray("required").add("path");
     tools.add(tool("open_project",
         "Open or switch the project (repository) the other tools work on. Needed when MasterCompiler started outside a "
         + "repository (status says 'no project'); with a project open it switches, once no call is running. Over SSH "
-        + "the next call uploads the new project's sources.",
+        + "the next call uploads the new project's sources (sync: false: the spec files only, the rest with the first "
+        + "call that reads them).",
         open));
 
     ObjectNode clean = mapper.createObjectNode();
@@ -334,8 +354,32 @@ public class McpServer {
         + "and call again with confirm: true only if they agree. Also removes those objects' EVFEVENT members, and the source "
         + "members MC's builds created for them (DDS and OPM sources: membersWouldRemove / membersRemoved; never a member "
         + "MC did not create or that changed since). Only the current library. With "
-        + "formerTargets: true it deletes the objects MC built for targets taken out of the spec instead.",
+        + "formerTargets: true it deletes the objects MC built for targets taken out of the spec instead. With since: "
+        + "an inventory's name, it deletes what is new in the current library (and the inventory's IFS folder) since that "
+        + "inventory instead: objects and source members new or created again, files new, only this user's.",
         clean));
+    ((ObjectNode) clean.get("properties")).putObject("since").put("type", "string").put("description",
+        "The name of an inventory taken with save: what is new since it (objects created since, also by hooks, called "
+        + "programs or a dump; members; files in its IFS folder) instead of the targets");
+    ObjectNode keepList = ((ObjectNode) clean.get("properties")).putObject("keep");
+    keepList.put("type", "array");
+    keepList.putObject("items").put("type", "string");
+    keepList.put("description", "With since: entries of the preview to leave alone, as it lists them (\"VATDEF *FILE\", "
+        + "\"QRPGSRC(A)\", a path): new since the inventory but not this session's");
+
+    ObjectNode inventory = mapper.createObjectNode();
+    inventory.put("type", "object");
+    ObjectNode invProps = inventory.putObject("properties");
+    invProps.putObject("library").put("type", "string").put("description", "Library to list (default: the current library)");
+    invProps.putObject("ifs").put("type", "string").put("description", "An IFS folder to list too (absolute; over SSH: "
+        + "MC on the IBM i lists it, without following symbolic links, up to " + Inventory.MAX_FILES + " files)");
+    invProps.putObject("save").put("type", "string").put("description", "Save it under this name in .mc/inventory/, for clean since");
+    tools.add(tool("inventory",
+        "What a library holds now (objects with type, attribute, owner and creation time; source members with their "
+        + "creation time) and, with ifs, what a folder holds. Take one with save before a session and clean since: that "
+        + "name afterwards deletes only what the session added (hooks, called programs and dumps included), after a "
+        + "preview. Reads only.",
+        inventory));
     if (parser.isSsh()) {
       ObjectNode cleanRemote = mapper.createObjectNode();
       cleanRemote.put("type", "object");
@@ -612,7 +656,8 @@ public class McpServer {
     tools.add(tool("run_command",
         "Run one CL command in MasterCompiler's IBM i job (the build job: this user, the spec's library list), e.g. to "
         + "start or end an application after a deploy (SBMJOB, ENDJOB). Refused when it names a protectedLibs library, or when "
-        + "the spec has none; "
+        + "the spec has none, except the display commands that only read (" + String.join(", ",
+        new TreeSet<String>(ReadOnlyCommands.COMMANDS.keySet())) + ") written with keywords: their OUTPUT(*PRINT) goes to spool, an OUTFILE(*CURLIB/NAME) or QTEMP; "
         + "nothing else about its effects is checked. First call without confirm and show the user the command; call "
         + "again with confirm: true only if they agree. Returns success and the job's messages; logged in "
         + ".mc/commands.log.",
@@ -699,7 +744,8 @@ public class McpServer {
     close.put("type", "object");
     close.putObject("properties");
     tools.add(tool("screen_close",
-        "Close the 5250 session. Sign off first (SIGNOFF on a command line, or the program's exit then SIGNOFF) so the job ends.",
+        "Close the 5250 session. Sign off first (SIGNOFF on a command line, or the program's exit then SIGNOFF) so the job ends. "
+        + "Waits up to 15 s and returns the job (number/user/name) with ended: true, or its status and the ENDJOB that ends it.",
         close));
   }
 
@@ -840,6 +886,10 @@ public class McpServer {
         "build only (default false): DDS and OPM sources compile from a source member; one that exists and this "
         + "project's builds did not write (or that changed since) is not replaced: its target fails with failedAt "
         + "replaceMember, and plan warns first. true replaces every such member of this build: only after the user agreed");
+    props.putObject("noOverwrite").put("type", "boolean").put("description",
+        "build only (default false, true with --no-overwrite): a plan runs first, and when an object the build would "
+        + "replace is there and this project did not build it (not in .mc/built-objects.json), nothing runs: the answer "
+        + "lists them. plan lists the same objects in wouldReplace");
     props.putObject("showExternal").put("type", "boolean").put("description",
         "true: list the objects the sources use that the project does not build ('external': \"CUSTSRV *SRVPGM\" -> "
         + "the targets using it); by default only externalCount");
@@ -957,6 +1007,7 @@ public class McpServer {
         case "plan":   return build(args, true, null);
         case "impact": return impact(args);
         case "clean":  return clean(args);
+        case "inventory": return inventory(args);
         case "joblog": return joblog();
         case "find_source":   return findSource(args);
         case "sql":           return sql(args);
@@ -1226,31 +1277,25 @@ public class McpServer {
   private ObjectNode build(JsonNode args, boolean dryRun, BuildProgress progress) throws Exception {
     connect();
     BuildSpec spec = loadSpec();
-
-    MasterCompiler compiler = new MasterCompiler(system, connection, spec, dryRun,
-        parser.isDebug(), parser.isVerbose(), false, false, parser.isNoMigrate());
-    compiler.setCollectReport(true);
-    compiler.setProgress(progress, jobWatch);
-    Code4iConfig code4i = MasterCompiler.code4i(parser);
-    compiler.setLibraryHooks(MasterCompiler.libraryHooks(parser, code4i));
-    compiler.setPush(MasterCompiler.pushDir(parser, code4i, spec));
-    /* One round trip should show every error: keep going unless the agent asks otherwise */
-    compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));
-    /* A source member this project did not write is replaced only once the user agreed */
-    compiler.setReplaceMembers(args.path("replaceMembers").asBoolean(false));
-
-    Set<String> files = files(args, spec);
-    List<String> targets = new java.util.ArrayList<String>();
-    for (JsonNode target : args.path("targets")) if (!target.asText("").trim().isEmpty()) targets.add(target.asText().trim());
-    if (!targets.isEmpty()) {
-      if (files != null || args.hasNonNull("since")) throw new IllegalArgumentException("'targets' names what to build: leave out 'files' and 'since'");
-      compiler.setOnlyTargets(String.join(",", targets));
-    } else if (files != null) compiler.setChangedFiles(files);
-    else if (args.hasNonNull("since")) compiler.setSince(args.get("since").asText());
-
+    /* noOverwrite: a plan first; an object there that this project did not build stops it before anything runs */
+    if (!dryRun && args.path("noOverwrite").asBoolean(parser.isNoOverwrite())) {
+      MasterCompiler check = compiler(args, spec, true, null);
+      check.build();
+      List<String> foreign = FormerTargets.foreign(projectDir(), check.getReport());
+      if (!foreign.isEmpty()) {
+        return toolResult("Refused (noOverwrite): this build would replace " + foreign.size() + " object(s) this project "
+            + "did not build (not in " + FormerTargets.FILE + "): " + String.join(", ", foreign) + ". Nothing ran. Show "
+            + "this to the user; build with noOverwrite: false replaces them once they agree.", true);
+      }
+    }
+    MasterCompiler compiler = compiler(args, spec, dryRun, progress);
     if (!dryRun) objectsChanged = true;  // also when it fails: what it compiled before is replaced
     compiler.build();
     BuildReport report = compiler.getReport();
+    if (dryRun) {
+      List<String> foreign = FormerTargets.foreign(projectDir(), report);
+      if (!foreign.isEmpty()) report.wouldReplace = foreign;
+    }
     FormerTargets.update(projectDir(), report);  // before compact: every current target is still listed
     if (!dryRun) report.screenSession = ScreenTools.sessionHint(ScreenTools.built(pretty.valueToTree(report.targets)));
     report.compact(args.path("minSeverity").asInt(20), args.path("showSkipped").asBoolean(false));
@@ -1264,6 +1309,31 @@ public class McpServer {
     text.put("elapsedSeconds", (System.currentTimeMillis() - progress.started) / 1000);
     text.setAll((ObjectNode) pretty.valueToTree(report));
     return toolResult(pretty.writeValueAsString(text), !report.success);
+  }
+
+  /* A MasterCompiler for this call's selection (targets, files or since) */
+  private MasterCompiler compiler(JsonNode args, BuildSpec spec, boolean dryRun, BuildProgress progress) throws Exception {
+    MasterCompiler compiler = new MasterCompiler(system, connection, spec, dryRun,
+        parser.isDebug(), parser.isVerbose(), false, false, parser.isNoMigrate());
+    compiler.setCollectReport(true);
+    compiler.setProgress(progress, jobWatch);
+    Code4iConfig code4i = MasterCompiler.code4i(parser);
+    compiler.setLibraryHooks(MasterCompiler.libraryHooks(parser, code4i));
+    compiler.setPush(MasterCompiler.pushDir(parser, code4i, spec));
+    /* One round trip should show every error: keep going unless the agent asks otherwise */
+    compiler.setKeepGoing(!dryRun && args.path("keepGoing").asBoolean(true));
+    /* A source member this project did not write is replaced only once the user agreed */
+    compiler.setReplaceMembers(args.path("replaceMembers").asBoolean(false));
+
+    Set<String> files = files(args, spec);
+    List<String> targets = new ArrayList<String>();
+    for (JsonNode target : args.path("targets")) if (!target.asText("").trim().isEmpty()) targets.add(target.asText().trim());
+    if (!targets.isEmpty()) {
+      if (files != null || args.hasNonNull("since")) throw new IllegalArgumentException("'targets' names what to build: leave out 'files' and 'since'");
+      compiler.setOnlyTargets(String.join(",", targets));
+    } else if (files != null) compiler.setChangedFiles(files);
+    else if (args.hasNonNull("since")) compiler.setSince(args.get("since").asText());
+    return compiler;
   }
 
   private ObjectNode impact(JsonNode args) throws Exception {
@@ -1371,6 +1441,7 @@ public class McpServer {
 
   /* Lists (confirm false) or deletes (confirm true) the targets that exist in the current library, dependents first */
   private ObjectNode clean(JsonNode args) throws Exception {
+    if (args.hasNonNull("since")) return cleanSince(args);
     connect();
     BuildSpec spec = loadSpec();
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
@@ -1474,6 +1545,147 @@ public class McpServer {
           : "Nothing deleted yet. Show this list to the user; if they agree, call clean again with confirm: true.");
     }
     return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* inventory: a library's objects and source members, and an IFS folder's files; saved by name for clean since */
+  private ObjectNode inventory(JsonNode args) throws Exception {
+    connectWithLibraryList();
+    String library = args.path("library").asText(currentLibrary()).trim().toUpperCase(Locale.ROOT);
+    if (!library.matches("[A-Z0-9#$@_]{1,10}")) return toolResult("'library' is a library name", true);
+    String folder = args.hasNonNull("ifs") ? args.get("ifs").asText().trim() : null;
+    ObjectNode taken;
+    try {
+      taken = Inventory.take(readOnlyConnection(), library, folder);
+      String name = args.path("save").asText("").trim();
+      if (!name.isEmpty()) {
+        Inventory.save(projectDir(), name, taken);
+        taken.put("saved", Inventory.FOLDER + "/" + name + ".json");
+        taken.put("next", "clean with since: \"" + name + "\" lists what is new since this one, to delete it");
+      }
+    } catch (IllegalArgumentException | NoSuchFileException e) {
+      return toolResult(e.getMessage(), true);
+    }
+    return toolResult(pretty.writeValueAsString(taken), false);
+  }
+
+  /* clean since: the entries each preview listed, by inventory name; a confirm deletes only those */
+  private final Map<String, Set<String>> cleanPreviews = new ConcurrentHashMap<String, Set<String>>();
+
+  /* clean since: what is new in the current library (and the inventory's folder) since an inventory */
+  private ObjectNode cleanSince(JsonNode args) throws Exception {
+    String name = args.path("since").asText("").trim();
+    JsonNode before;
+    try {
+      before = Inventory.load(projectDir(), name);
+    } catch (IllegalArgumentException e) {
+      return toolResult(e.getMessage(), true);
+    }
+    connectWithLibraryList();
+    String curlib = currentLibrary();
+    String library = before.path("library").asText();
+    if (!library.equalsIgnoreCase(curlib) || protectedLibs().stream().anyMatch(p -> p.trim().equalsIgnoreCase(library))) {
+      return toolResult("clean since deletes only in the current library (" + curlib + "), when it is not in protectedLibs: "
+          + "inventory " + name + " is of " + library, true);
+    }
+    String folder = before.path("ifs").path("folder").asText(null);
+    ObjectNode now = Inventory.take(connection, library, folder);
+    JsonNode added = Inventory.diff(before, now);
+    Map<String, String> fileOwners = new LinkedHashMap<String, String>();
+    for (JsonNode o : now.path("objects")) if ("*FILE".equals(o.path("type").asText())) fileOwners.put(o.path("name").asText(), o.path("owner").asText());
+    boolean truncated = before.path("ifs").path("truncated").asBoolean(false) || now.path("ifs").path("truncated").asBoolean(false);
+    String user = system.getUserId();
+    boolean confirmed = args.path("confirm").asBoolean(false);
+    ObjectNode result = mapper.createObjectNode();
+    result.put("library", library);
+    result.put("since", name + " (" + before.path("taken").asText() + ")");
+    result.put("confirmed", confirmed);
+    ArrayNode objects = result.putArray(confirmed ? "deleted" : "wouldDelete");
+    ArrayNode members = result.putArray(confirmed ? "membersRemoved" : "membersWouldRemove");
+    ArrayNode files = result.putArray(confirmed ? "filesDeleted" : "filesWouldDelete");
+    ArrayNode failed = result.putArray("notDeleted");
+    Set<String> keep = new HashSet<String>();  // what the user keeps (another session's, say): as the preview names it
+    for (JsonNode k : args.path("keep")) keep.add(k.asText().trim().toUpperCase(Locale.ROOT));
+    String own = projectDir().getCanonicalPath() + "/.mc/";  // MC's working files (this inventory among them) stay
+    Set<String> previewed = confirmed ? cleanPreviews.get(name) : null;
+    if (confirmed && previewed == null) {
+      return toolResult("Call clean with since: \"" + name + "\" without confirm first: confirm deletes only what that "
+          + "preview listed", true);
+    }
+    Set<String> listed = new HashSet<String>();  // this preview's entries
+    Set<String> newFiles = new HashSet<String>();
+    for (JsonNode o : Inventory.deleteOrder(added.path("objects"))) {
+      String label = o.path("name").asText() + " " + o.path("type").asText();
+      String command = Inventory.deleteCommand(library, o);
+      if ("*FILE".equals(o.path("type").asText())) newFiles.add(o.path("name").asText());  // its members go (or stay) with it
+      if (keep.contains(label.toUpperCase(Locale.ROOT))) failed.add(label + ": kept (keep)");
+      else if (confirmed && !previewed.contains(label)) failed.add(label + ": new since the preview, not in it");
+      else if (!o.path("owner").asText().equalsIgnoreCase(user)) failed.add(label + ": owned by " + o.path("owner").asText());
+      else if (command == null) failed.add(label + ": no delete command for its type here");
+      else if (!confirmed || runCl(command, failed, label)) {
+        objects.add(label);
+        listed.add(label);
+      }
+    }
+    for (JsonNode m : added.path("members")) {
+      if (newFiles.contains(m.path("file").asText())) continue;  // a new file's: with it
+      String label = m.path("file").asText() + "(" + m.path("member").asText() + ")";
+      String fileOwner = fileOwners.getOrDefault(m.path("file").asText(), "");
+      if (keep.contains(label.toUpperCase(Locale.ROOT))) failed.add(label + ": kept (keep)");
+      else if (!fileOwner.equalsIgnoreCase(user)) failed.add(label + ": its file is owned by " + fileOwner);
+      else if (confirmed && !previewed.contains(label)) failed.add(label + ": new since the preview, not in it");
+      else if (!confirmed || runCl("RMVM FILE(" + library + "/" + m.path("file").asText() + ") MBR(" + m.path("member").asText() + ")", failed, label)) {
+        members.add(label);
+        listed.add(label);
+      }
+    }
+    if (truncated) {
+      failed.add("files in " + folder + ": the inventory or the folder now has over " + Inventory.MAX_FILES + " files, so "
+          + "what is new cannot be told apart: none deleted");
+    }
+    for (JsonNode f : truncated ? mapper.createArrayNode() : added.path("files")) {
+      String path = f.path("path").asText();
+      if (path.startsWith(own)) continue;
+      if (keep.contains(path.toUpperCase(Locale.ROOT))) {
+        failed.add(path + ": kept (keep)");
+        continue;
+      }
+      if (!Inventory.deletable(f, folder, user)) {
+        failed.add(path + ": not this user's, or not inside " + folder);
+        continue;
+      }
+      if (confirmed && !previewed.contains(path)) {
+        failed.add(path + ": new since the preview, not in it");
+        continue;
+      }
+      listed.add(path);
+      try {
+        if (confirmed) Files.delete(Paths.get(path));
+        files.add(path);
+      } catch (Exception e) {
+        failed.add(path + ": " + e.getMessage());
+      }
+    }
+    if (confirmed) cleanPreviews.remove(name);
+    else cleanPreviews.put(name, listed);
+    if (!confirmed) {
+      result.put("next", objects.size() + members.size() + files.size() == 0 ? "Nothing to delete."
+          : "Nothing deleted yet. Show this list to the user: what is new may also be another session's or job's (same "
+            + "user, same library). If they agree, call clean again with since and confirm: true, and keep: [the entries "
+            + "as listed here] for what stays.");
+    }
+    return toolResult(pretty.writeValueAsString(result), false);
+  }
+
+  /* One CL command on the build connection; false (and why in 'failed') when it failed */
+  private boolean runCl(String command, ArrayNode failed, String label) {
+    try (PreparedStatement ps = connection.prepareStatement("CALL QSYS2.QCMDEXC(?)")) {
+      ps.setString(1, command);
+      ps.execute();
+      return true;
+    } catch (SQLException e) {
+      failed.add(label + ": " + e.getMessage());
+      return false;
+    }
   }
 
   /* Its compile's EVFEVENT member, when there is one (not every command writes it; same-named targets share it) */
@@ -1695,6 +1907,7 @@ public class McpServer {
     }
     if (!IBMiDotEnv.isIBMi() && TrustStores.caStore() == null) result.put("tls", TrustStores.NO_CA);
     result.set("hostConnections", connections.toJson());
+    if (SignOnBudget.status() != null) result.set("signOnBudget", SignOnBudget.status());
     if (router() != null) result.set("connections", router.connectionsStatus());
     return toolResult(pretty.writeValueAsString(result), false);
   }
@@ -1871,6 +2084,8 @@ public class McpServer {
       result.put("newJob", "A build ran since the last call: this call starts a new job, so it activates the objects as they "
           + "are now (unless the system reuses its remote command jobs)");
     }
+    connections.beforeService(HostConnections.Purpose.COMMAND);  // --max-sign-ons: its command job signs on
+    if (debug && !IBMiDotEnv.isIBMi()) connections.beforeService(HostConnections.Purpose.FILES);  // the helper's source
     ProgramCaller.Around around = null;
     if (debug) {
       String helper = ProgramDebugger.ensureHelper(system, connection, curlib);
@@ -1918,11 +2133,17 @@ public class McpServer {
       return toolResult("'command' is one CL command on one line (up to 5000 characters)", true);
     }
     String upper = command.toUpperCase(java.util.Locale.ROOT);
-    if (protectedLibs().isEmpty()) {
+    boolean display = ReadOnlyCommands.isOne(command);  // reads only: protectedLibs may be named
+    if (display) {
+      connectWithLibraryList();
+      String refused = ReadOnlyCommands.check(command, currentLibrary(), protectedLibs());
+      if (refused != null) return toolResult("Refused: " + refused, true);
+      command = ReadOnlyCommands.fromQsys(command);
+    } else if (protectedLibs().isEmpty()) {
       return toolResult("Refused: the spec sets no protectedLibs, so nothing keeps a command from production data. "
           + protectedLibsHint(), true);
     }
-    for (String lib : protectedLibs()) {
+    for (String lib : display ? Collections.<String>emptyList() : protectedLibs()) {
       if (java.util.regex.Pattern.compile("(?<![A-Z0-9_$#@])" + java.util.regex.Pattern.quote(lib.trim().toUpperCase(java.util.Locale.ROOT))
           + "(?![A-Z0-9_$#@])").matcher(upper).find()) {
         return toolResult("Refused: the command names " + lib.trim().toUpperCase() + ", a protectedLibs library", true);
@@ -1934,9 +2155,15 @@ public class McpServer {
     result.put("job", buildJob);
     result.put("user", system.getUserId());
     result.put("currentLibrary", currentLibrary());
-    result.put("notChecked", "It runs as written in MasterCompiler's job, as this user, with the spec's library list. Only "
-        + "the protectedLibs names are checked (as words in the command); what the command or the programs it calls or "
-        + "submits do is not");
+    if (display) {
+      result.put("readsOnly", ReadOnlyCommands.name(command) + " only displays: it may name protectedLibs libraries. Its "
+          + "output is a spooled file (OUTPUT(*PRINT): read it with spool) or the outfile it names in the current library "
+          + "or QTEMP (read it with sql)");
+    } else {
+      result.put("notChecked", "It runs as written in MasterCompiler's job, as this user, with the spec's library list. "
+          + "Only the protectedLibs names are checked (as words in the command); what the command or the programs it "
+          + "calls or submits do is not");
+    }
     if (!args.path("confirm").asBoolean(false)) {
       result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
       return toolResult(pretty.writeValueAsString(result), false);
@@ -1982,6 +2209,7 @@ public class McpServer {
       return toolResult("upload_file runs where the project's files are: MasterCompiler on the PC (VS Code) uploads them", true);
     }
     connect();
+    connections.beforeService(HostConnections.Purpose.FILES);
     try {
       return toolResult(pretty.writeValueAsString(FileUpload.handle(args, projectDir(), FileUpload.over(system))), false);
     } catch (IllegalArgumentException e) {
@@ -1996,6 +2224,7 @@ public class McpServer {
           + "runs it", true);
     }
     connect();
+    connections.beforeService(HostConnections.Purpose.FILES);
     try {
       return toolResult(pretty.writeValueAsString(FileDownload.handle(args, projectDir(), FileDownload.over(system))), false);
     } catch (IllegalArgumentException e) {
@@ -2074,6 +2303,7 @@ public class McpServer {
     }
 
     String outDir = (intoRepo ? project.getPath() : new File(project, ".mc/sources").getPath()).replace(File.separatorChar, '/');
+    if (!IBMiDotEnv.isIBMi()) connections.beforeService(HostConnections.Purpose.FILES);
     LibraryImporter importer = new LibraryImporter(system, connection, parser.isVerbose());
     importer.setKeepExisting(intoRepo && !args.path("refresh").asBoolean(false));
     importer.setWriteReportFile(false);
@@ -2287,6 +2517,7 @@ public class McpServer {
           + "yourself. A .env (IBMI_HOSTNAME, IBMI_USERNAME, IBMI_PASSWORD) is only for a person running the jar in a terminal or CI.");
     }
     if (signOn == null) signOn = buildSignOn();
+    SignOnBudget.take("the build connection (" + reason + ")");
     connection = signedOn(() -> {
       system = MasterCompiler.connect(parser);
       system.addConnectionListener(connections.listener());
@@ -2352,6 +2583,25 @@ public class McpServer {
   }
 
   /* For screen_open: the CHGLIBL with the build job's library list, read now if the build job is free */
+  /* The 5250 job's state for ScreenTools: only on the connection already open, between calls (no sign-on) */
+  private List<String> rowsForScreens(String sql) {
+    try {
+      BuildProgress running = lastBuild;
+      Connection open = connection;
+      if (open == null || open.isClosed() || (running != null && running.isRunning())
+          || !lane.tryAcquire(5, java.util.concurrent.TimeUnit.SECONDS)) return null;
+      try (java.sql.Statement stmt = open.createStatement(); java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+        List<String> rows = new ArrayList<String>();
+        while (rs.next()) rows.add(rs.getString(1));
+        return rows;
+      } finally {
+        lane.release();
+      }
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
   private String libraryListForScreens() {
     try {
       BuildProgress running = lastBuild;

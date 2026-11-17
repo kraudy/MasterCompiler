@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -46,6 +47,7 @@ public class BuildReport {
   public String cancelled;       // cancel tool: how the build was stopped
   public String skippedNote;     // compact without showSkipped: the skipped targets are only counted
   public List<String> formerTargets;  // objects MC built for targets the spec no longer has (clean formerTargets: true)
+  public List<String> wouldReplace;   // plan: objects there now that this project did not build (build noOverwrite refuses them)
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
   public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
@@ -86,6 +88,8 @@ public class BuildReport {
     public List<CompileError> messages;  // its informational ones (severity 0, e.g. CPC5D0B Service program created)
     public List<JoblogMessage> joblog;
     public List<JoblogMessage> hookJoblog;  // messages while the target's hooks ran (tests, CPYF, ...): never compile errors
+    @JsonIgnore public boolean existed;     // its object was there before (FormerTargets: wouldReplace)
+    @JsonIgnore public boolean compiled;    // its compile command ran to the end: the object is this project's now
 
     public TargetResult(String target, String status) {
       this.target = target;

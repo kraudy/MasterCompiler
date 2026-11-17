@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
@@ -56,6 +57,8 @@ public class SshMcpProxy {
   private volatile File project;  // null until open_project when the server started with none
   private volatile boolean setupStarted;
   private volatile String remoteDir;
+  private volatile boolean syncPending;  // --no-initial-sync / open_project sync: false: only the spec files are up yet
+  private volatile JsonNode syncPreview;  // for the status being answered
   private volatile String host;  // set once connected (the home directory may come from the IBM i)
 
   /*
@@ -106,6 +109,7 @@ public class SshMcpProxy {
 
     code4i = MasterCompiler.code4i(parser);
     configure(code4i);
+    if (parser.getMaxSignOns() >= 0) SignOnBudget.limit(parser.getMaxSignOns());  // MC on the IBM i asks this server
     TrustStores.warnIfNone();  // screen_open runs from here
     router = new ReadOnlyConnections.Router(McpServer.folderOf(project), true, code4i != null ? code4i.name : null);
     SignOnGuard.known(buildTarget);
@@ -121,6 +125,7 @@ public class SshMcpProxy {
     SecretPrompt.sender(this::send);
     ScreenTools.systemCcsid(this::remoteScreenCcsid);
     ScreenTools.specLibraryList(() -> remoteStatus().path("libraryListCommand").asText(null));
+    ScreenTools.jobQuery(this::rowsOverSsh);
     BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
     String line;
     try {
@@ -134,6 +139,7 @@ public class SshMcpProxy {
           continue;
         }
         if (SecretPrompt.answer(request)) continue;  // the client's answer to a 5250 secret request from here
+        if (SignOnBudget.isAnswerId(request)) continue;  // only this server answers MC's sign-on requests
         JsonNode id = request.get("id");
         if (id == null) continue;  // notifications: the remote server ignores them as well
         String called = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
@@ -222,6 +228,7 @@ public class SshMcpProxy {
     port = sshPort.number;
     logger.info("SSH port {} ({})", port, sshPort.origin);
     project = parser.getProjectRoot() != null ? new File(parser.getProjectRoot()).getCanonicalFile() : null;
+    syncPending = parser.isNoInitialSync();
     SignOnGuard.project(McpServer.folderOf(project));
     buildTarget = new SignOnGuard.Target(code4i != null ? code4i.name : host, host, user, Passwords.get(user + "@" + host));
   }
@@ -258,8 +265,9 @@ public class SshMcpProxy {
     stage("2/5 checking MasterCompiler on the IBM i");
     String jar = ensureRemoteJar(ssh, home);
     long jarDone = System.currentTimeMillis();
-    stage("3/5 syncing the sources to " + remoteDir);
-    int uploaded = sync(projectFiles(project), true);
+    stage(syncPending ? "3/5 uploading the spec files only to " + remoteDir + " (the sources go with the first call that reads them)"
+        : "3/5 syncing the sources to " + remoteDir);
+    int uploaded = syncPending ? upload(specFiles(), false) : sync(projectFiles(project), true);
     logger.info("Sources synced: {} files uploaded ({} s for MC, {} s for sources)", uploaded,
         (jarDone - start) / 1000, (System.currentTimeMillis() - jarDone) / 1000);
     return jar;
@@ -303,7 +311,8 @@ public class SshMcpProxy {
     String text;
     boolean error = true;
     try {
-      String path = mapper.readTree(line).path("params").path("arguments").path("path").asText("");
+      JsonNode arguments = mapper.readTree(line).path("params").path("arguments");
+      String path = arguments.path("path").asText("");
       Session s = session;
       /* builds still queued were sent after open_project (the calls thread runs in order): they run in the new project */
       boolean busy = !s.inFlight.isEmpty() || remoteBuild != null || !pendingImports.isEmpty()
@@ -321,6 +330,7 @@ public class SshMcpProxy {
         if (!same) {
           if (project != null && setupStarted && s.ready.isDone()) lost(s, "the project changed to " + next);
           project = next;
+          syncPending = !arguments.path("sync").asBoolean(!parser.isNoInitialSync());
           SignOnGuard.project(next);
           router.close();
           router = new ReadOnlyConnections.Router(next, true, code4i != null ? code4i.name : null);
@@ -414,6 +424,7 @@ public class SshMcpProxy {
   }
 
   private SshTarget signOnSsh() throws Exception {
+    SignOnBudget.take("SSH to " + host);
     SshTarget connected = SignOnGuard.signOn(buildTarget, () -> SshTarget.connect(host, port, user, buildTarget.password,
         code4i != null ? code4i.privateKeyPath : null));
     sshSignOns.incrementAndGet();
@@ -635,8 +646,8 @@ public class SshMcpProxy {
       s = connected();
     } catch (Exception e) {
       Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-      sendToolError(line, "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + cause.getMessage()
-          + ". The next call tries again.");
+      sendToolError(line, cause instanceof SignOnBudget.Exhausted ? cause.getMessage()
+          : "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + cause.getMessage() + ". The next call tries again.");
       return;
     }
     String forward = beforeForwarding(line);
@@ -818,6 +829,12 @@ public class SshMcpProxy {
 
   /* MC's status on the IBM i, asked of the running session only (never a reason to connect); empty when unknown */
   private JsonNode remoteStatus() {
+    return ownCall("status", mapper.createObjectNode(), 30);
+  }
+
+  /* A tool call of this server's own to MC on the IBM i, in the running session only: its answer's text as JSON,
+     empty when there is no session, no answer in time, or the answer is not JSON (an error text) */
+  private JsonNode ownCall(String tool, ObjectNode arguments, int seconds) {
     Session s = session;
     if (!s.usable()) return mapper.createObjectNode();
     String own = "mc-proxy-" + ownIds.incrementAndGet();
@@ -828,12 +845,13 @@ public class SshMcpProxy {
       request.put("jsonrpc", "2.0");
       request.put("id", own);
       request.put("method", "tools/call");
-      request.putObject("params").put("name", "status").putObject("arguments");
+      request.putObject("params").put("name", tool).set("arguments", arguments);
       writeRemote(s, mapper.writeValueAsString(request));
-      return mapper.readTree(answer.get(30, java.util.concurrent.TimeUnit.SECONDS)
+      JsonNode text = mapper.readTree(answer.get(seconds, TimeUnit.SECONDS)
           .path("result").path("content").path(0).path("text").asText("{}"));
+      return text.isObject() ? text : mapper.createObjectNode();
     } catch (Exception e) {
-      logger.info("Could not read MC's status on the IBM i: {}", e.getMessage());
+      logger.info("No answer to {} from MC on the IBM i: {}", tool, e.getMessage());
       return mapper.createObjectNode();
     } finally {
       ownCalls.remove(own);
@@ -903,6 +921,8 @@ public class SshMcpProxy {
             + "once they answered (a run_command that hangs: whats_running, then cancel).";
         error = true;
       } else {
+        /* The current library as MC there sees it, while it still runs: only on a connection already open */
+        JsonNode library = libraryBeforeClean();
         /* The session's own SSH connection stops MC and deletes the files: no new sign-on while it is up */
         SshTarget kept = s.ssh;
         s.ssh = null;  // lost() ends MC's channel only
@@ -912,7 +932,14 @@ public class SshMcpProxy {
         try {
           stopEarlier();
           collectOpens();
-          text = cleanRemote(jar) + ". The next tool that needs the IBM i uploads MasterCompiler and the sources again.";
+          ObjectNode done = mapper.createObjectNode();
+          String cleaned = cleanRemote(jar);
+          error = cleaned.contains("did not finish");
+          done.put("done", cleaned);
+          done.set("remains", remains(library));
+          done.put("next", "The next tool that needs the IBM i signs on again and uploads MasterCompiler and the sources: "
+              + "everything left is listed in remains, so no call is needed to check it.");
+          text = done.toPrettyString();
         } finally {
           ssh.close();
         }
@@ -929,6 +956,49 @@ public class SshMcpProxy {
     result.putArray("content").addObject().put("type", "text").put("text", text);
     result.put("isError", error);
     return result;
+  }
+
+  /* One query through QShell's db2 in the SSH job (no sign-on); null when SSH is not up or it failed */
+  private List<String> rowsOverSsh(String sql) {
+    SshTarget open = ssh;
+    if (open == null || !open.isConnected()) return null;
+    String out = open.execQuiet(env("MC_REMOTE_QSH", "/QOpenSys/usr/bin/qsh") + " -c " + SshTarget.quote("db2 \"" + sql + "\""));
+    if (out == null) return null;
+    List<String> rows = new ArrayList<String>();
+    for (String line : out.split("\\R")) rows.add(line);
+    return rows;
+  }
+
+  /* clean_remote: MC's inventory of the current library, when the connection it reads on is open (no sign-on) */
+  private JsonNode libraryBeforeClean() {
+    JsonNode status = remoteStatus();
+    for (JsonNode c : status.path("hostConnections").path("connections")) {
+      String purpose = c.path("purpose").asText();
+      String reads = status.path("hostConnections").path("sharing").path("read-only").asText("read-only");
+      if (c.path("open").asBoolean(false) && purpose.equals(reads)) return ownCall("inventory", mapper.createObjectNode(), 120);
+    }
+    return null;
+  }
+
+  /* clean_remote: what is still on the IBM i, over the SSH connection that cleaned (no sign-on) */
+  private ObjectNode remains(JsonNode library) {
+    ObjectNode remains = mapper.createObjectNode();
+    String mc = remoteHome + "/mc";
+    ArrayNode folder = remains.putArray("mcFolder");
+    String left = ssh.execQuiet("ls -A " + SshTarget.quote(mc) + " 2>/dev/null");
+    if (left != null) for (String name : left.split("\\R")) if (!name.trim().isEmpty()) folder.add(mc + "/" + name.trim());
+    ArrayNode running = remains.putArray("mcProcesses");
+    String ps = ssh.execQuiet("ps -e -o pid=,args= | grep -F -e " + SshTarget.quote(mc + "/") + " | grep -v grep");
+    if (ps != null) for (String line : ps.split("\\R")) if (line.contains("-jar")) running.add(line.trim());
+    if (library != null && library.has("objects")) {
+      remains.set("currentLibrary", library);
+    } else {
+      remains.put("currentLibrary", "not listed: MC there had no open connection to read it on (that would have been a "
+          + "sign-on). Call inventory before clean_remote to have it here.");
+    }
+    remains.set("signOns", signOns(mapper.missingNode()));
+    if (SignOnBudget.status() != null) remains.set("signOnBudget", SignOnBudget.status());
+    return remains;
   }
 
   /* download_file over this server's SSH session, once it is up: no sign-on of its own */
@@ -983,6 +1053,14 @@ public class SshMcpProxy {
           response = mapper.readTree(line);
         } catch (Exception notJson) {
           send(line);
+          continue;
+        }
+        if (SignOnBudget.METHOD.equals(response.path("method").asText())) {  // MC there asks before it signs on
+          try {
+            writeRemote(s, mapper.writeValueAsString(SignOnBudget.decide(response)));
+          } catch (Exception e) {
+            logger.warn("Could not answer MC's sign-on request: {}", e.getMessage());  // it refuses after its wait
+          }
           continue;
         }
         String id = response.path("id").asText();
@@ -1051,6 +1129,7 @@ public class SshMcpProxy {
             + "whats_running, or stop it with cancel.");
         return null;
       }
+      if (tool.equals("status")) syncPreview = syncPending ? syncPreview() : null;  // what the first sync would do
       if (tool.equals("sql") && ResultFiles.wanted(request.path("params").path("arguments"))) {
         pendingResults.put(request.path("id").toString(), request.path("params").path("arguments"));  // the file is written here
         return line;
@@ -1125,8 +1204,11 @@ public class SshMcpProxy {
     into.put("startup", stage);
     into.put("localProjectFolder", project != null ? project.getAbsolutePath() : null);
     into.put("ibmiProjectFolder", remoteDir);
+    JsonNode preview = syncPreview;
+    if (syncPending) into.set("sync", preview != null ? preview : mapper.createObjectNode().put("pending", true));
     into.set("connections", router.connectionsStatus());
     into.set("signOns", signOns(into.path("hostConnections").path("totalOpens")));
+    if (SignOnBudget.status() != null) into.set("signOnBudget", SignOnBudget.status());
     return into;
   }
 
@@ -1258,47 +1340,105 @@ public class SshMcpProxy {
   /*
    * mirror (a full sync): files in the IBM i copy that the project no longer has (renamed, moved, deleted)
    * are removed too, so they cannot become a second target. Only in MC's own folder (<home>/mc/...),
-   * never in a --push folder the user chose; MC's .mc/ working files stay.
+   * never in a --push folder the user chose; MC's .mc/ working files stay. While the first sync is still to come
+   * (--no-initial-sync, open_project sync: false) any sync is that whole one.
    */
   int sync(Set<String> localFiles, boolean mirror) throws Exception {
-    localFiles = withoutSecrets(localFiles);
-    logger.info("Comparing {} local files with the copy on the IBM i", localFiles.size());
-    Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
-    SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
-    Map<String, File> changed = new LinkedHashMap<String, File>();
+    boolean whole = mirror || syncPending;
+    int uploaded = upload(syncPending ? projectFiles(project) : localFiles, whole);
+    if (whole) syncPending = false;
+    return uploaded;
+  }
+
+  /* What a sync would change on the IBM i, worked out before anything is written there */
+  static final class SyncPlan {
+    final Map<String, File> upload = new LinkedHashMap<String, File>();  // relative path -> the local file
+    final List<String> remove = new ArrayList<String>();   // deleted here (a since list) or, mirroring, not in the project
+    final List<String> notOurs = new ArrayList<String>();  // --push: there now, replaced or removed, never uploaded from here
+  }
+
+  private SyncPlan plan(Set<String> localFiles, boolean mirror, Map<String, long[]> remoteFiles, SyncManifest manifest)
+      throws Exception {
+    SyncPlan plan = new SyncPlan();
+    Set<String> localRel = new java.util.HashSet<String>();
     for (String path : localFiles) {
       File local = new File(path);
       String rel = relative(local);
       if (rel == null) continue;  // outside the project
+      localRel.add(rel);
       long[] attrs = remoteFiles.get(rel);
       if (!local.isFile()) {
-        if (attrs != null) ssh.exec("rm -f " + SshTarget.quote(remoteDir + "/" + rel));
-        manifest.remove(rel);
+        if (attrs != null) plan.remove.add(rel);
+        else manifest.remove(rel);
         continue;
       }
-      if (attrs != null && unchanged(manifest, rel, local, attrs)) continue;
-      changed.put(rel, local);
+      if (attrs != null && unchanged(manifest, rel, local, attrs, parser.getPush() == null)) continue;
+      plan.upload.put(rel, local);
     }
-
     if (mirror && parser.getPush() == null) {
-      Set<String> localRel = new java.util.HashSet<String>();
-      for (String path : localFiles) {
-        String rel = relative(new File(path));
-        if (rel != null) localRel.add(rel);
-      }
-      List<String> gone = new ArrayList<String>();
       for (String rel : remoteFiles.keySet()) {
-        if (!localRel.contains(rel) && !rel.startsWith(".mc/") && !rel.equals(".mc-sync.tar")) gone.add(rel);
+        if (!localRel.contains(rel) && !rel.startsWith(".mc/") && !rel.equals(".mc-sync.tar")) plan.remove.add(rel);
       }
-      for (String rel : gone) manifest.remove(rel);
-      if (!gone.isEmpty()) {
-        logger.info("Removing {} files from the IBM i copy that the project no longer has: {}", gone.size(),
-            gone.size() <= 10 ? String.join(", ", gone) : String.join(", ", gone.subList(0, 10)) + ", ...");
-        for (int i = 0; i < gone.size(); i += 50) {
-          StringBuilder rm = new StringBuilder("rm -f");
-          for (String rel : gone.subList(i, Math.min(gone.size(), i + 50))) rm.append(' ').append(SshTarget.quote(remoteDir + "/" + rel));
-          ssh.exec(rm.toString());
-        }
+    }
+    /* MC's own copy (its marker names this project) holds only what this project put there */
+    if (parser.getPush() != null) {
+      for (String rel : plan.upload.keySet()) if (remoteFiles.containsKey(rel) && manifest.get(rel) == null) plan.notOurs.add(rel);
+      for (String rel : plan.remove) if (manifest.get(rel) == null) plan.notOurs.add(rel);
+    }
+    return plan;
+  }
+
+  /* status while the first sync is still to come: what it would do, nothing written */
+  private JsonNode syncPreview() {
+    ObjectNode preview = mapper.createObjectNode();
+    preview.put("pending", true);
+    try {
+      SyncPlan plan = plan(withoutSecrets(projectFiles(project)), true, ssh.listTree(remoteDir), SyncManifest.load(project, host + ":" + remoteDir));
+      preview.put("wouldUpload", plan.upload.size());
+      preview.put("wouldRemove", plan.remove.size());
+      plan.notOurs.forEach(preview.putArray("notOurs")::add);
+    } catch (Exception e) {
+      preview.put("error", "could not compare with " + remoteDir + ": " + e.getMessage());
+    }
+    preview.put("note", "Only the spec files are on the IBM i yet: the first call that reads the sources (plan, build, "
+        + "impact, run_command, call_program, ...) uploads the rest. sql, find_object and status run before it.");
+    return preview;
+  }
+
+  /* --no-initial-sync / sync: false: the spec files only (MC there reads the spec at its start) */
+  private Set<String> specFiles() {
+    Set<String> files = new LinkedHashSet<String>();
+    File[] top = project.listFiles();
+    if (top != null) {
+      for (File f : top) {
+        String name = f.getName();
+        if (f.isFile() && (name.equals("Rules.mk") || name.endsWith(".yaml") || name.endsWith(".yml"))) files.add(f.getPath());
+      }
+    }
+    if (parser.getSpecName() != null) files.add(new File(project, parser.getSpecName()).getPath());
+    return files;
+  }
+
+  private int upload(Set<String> localFiles, boolean mirror) throws Exception {
+    localFiles = withoutSecrets(localFiles);
+    logger.info("Comparing {} local files with the copy on the IBM i", localFiles.size());
+    Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
+    SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
+    SyncPlan plan = plan(localFiles, mirror, remoteFiles, manifest);
+    if (parser.isNoOverwrite() && !plan.notOurs.isEmpty()) {
+      throw new IllegalStateException("--no-overwrite: the sync would replace or delete " + plan.notOurs.size() + " file(s) in "
+          + remoteDir + " that this project did not upload (" + String.join(", ", plan.notOurs.subList(0,
+          Math.min(10, plan.notOurs.size()))) + (plan.notOurs.size() > 10 ? ", ..." : "") + "). Nothing was synced.");
+    }
+    Map<String, File> changed = plan.upload;
+    for (String rel : plan.remove) manifest.remove(rel);
+    if (!plan.remove.isEmpty()) {
+      logger.info("Removing {} files from the IBM i copy that the project no longer has: {}", plan.remove.size(),
+          plan.remove.size() <= 10 ? String.join(", ", plan.remove) : String.join(", ", plan.remove.subList(0, 10)) + ", ...");
+      for (int i = 0; i < plan.remove.size(); i += 50) {
+        StringBuilder rm = new StringBuilder("rm -f");
+        for (String rel : plan.remove.subList(i, Math.min(plan.remove.size(), i + 50))) rm.append(' ').append(SshTarget.quote(remoteDir + "/" + rel));
+        ssh.exec(rm.toString());
       }
     }
 
@@ -1335,11 +1475,9 @@ public class SshMcpProxy {
       if (parser.getPush() == null && changed.size() < TAR_FROM) ssh.restrict(uploaded);  // the tar already set 600
       for (Map.Entry<String, File> file : changed.entrySet()) {
         File local = file.getValue();
-        if (local.length() <= SyncManifest.HASH_UP_TO) {
-          manifest.put(file.getKey(), local.length(), local.lastModified() / 1000, sha256(local));
-        } else {
-          manifest.remove(file.getKey());
-        }
+        /* over 1 MB without its hash, but recorded: this project uploaded it (--no-overwrite) */
+        manifest.put(file.getKey(), local.length(), local.lastModified() / 1000,
+            local.length() <= SyncManifest.HASH_UP_TO ? sha256(local) : null);
       }
     }
     manifest.save();
@@ -1351,7 +1489,7 @@ public class SshMcpProxy {
    * within the same second looks identical otherwise). When the IBM i did not keep the time but this file is exactly
    * what the last sync uploaded, it is unchanged too. Files over 1 MB are compared by size and time only.
    */
-  private static boolean unchanged(SyncManifest manifest, String rel, File local, long[] remote) throws Exception {
+  private static boolean unchanged(SyncManifest manifest, String rel, File local, long[] remote, boolean adopt) throws Exception {
     long size = local.length();
     long mtime = local.lastModified() / 1000;
     if (remote[0] != size) return false;
@@ -1361,7 +1499,8 @@ public class SshMcpProxy {
         && sha.equals(known.path("sha256").asText());
     if (remote[1] == mtime) {
       if (known != null && sha != null && !sameAsUploaded) return false;  // same size and time, other content
-      if (known == null && sha != null) manifest.put(rel, size, mtime, sha);
+      /* recorded as this project's only in MC's own copy: in a --push folder it may be someone else's (--no-overwrite) */
+      if (known == null && sha != null && adopt) manifest.put(rel, size, mtime, sha);
       return true;
     }
     return sameAsUploaded && known.path("mtime").asLong(-1) == mtime;
@@ -1497,7 +1636,8 @@ public class SshMcpProxy {
     /* exec: java keeps the shell's pid, written where a later session finds it (stopEarlier) */
     String pids = SshTarget.quote(remoteHome + "/mc/.mc");
     StringBuilder command = new StringBuilder(startCommand(jar, "(umask 077 && mkdir -p " + pids + ") && echo $$ > "
-        + SshTarget.quote(pidPath()) + " && exec ", " -Dmc.session=" + token + " -Dmc.opens=" + SshTarget.quote(opensPath())))
+        + SshTarget.quote(pidPath()) + " && exec ", " -Dmc.session=" + token + " -Dmc.opens=" + SshTarget.quote(opensPath())
+        + (SignOnBudget.limited() ? " -D" + SignOnBudget.FROM_PC + "=true" : "")))
         .append(" --mcp --project ").append(SshTarget.quote(remoteDir));
     /* the same spec as on the PC: --spec names a file inside the uploaded copy */
     if (parser.getSpecName() != null) command.append(" --spec ").append(SshTarget.quote(parser.getSpecName()));
@@ -1507,6 +1647,7 @@ public class SshMcpProxy {
     for (int i = 0; i < libraries.size(); i++) command.append(' ').append(i % 2 == 0 ? libraries.get(i) : SshTarget.quote(libraries.get(i)));
     if (parser.isVerbose()) command.append(" -v");
     if (parser.isSingleConnection()) command.append(" --single-connection");
+    if (parser.isNoOverwrite()) command.append(" --no-overwrite");  // build's noOverwrite default there
     return command.toString();
   }
 

@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +40,70 @@ final class ScreenTools {
   private static volatile File projectFolder;
   private static volatile ScreenRecording recording;  // record: true
   private static volatile String[] sessionMeta;       // host, port, tls, ccsid: a recording's meta line
+  private static volatile String[] sessionJob;        // device, user: the interactive job's name and user
+  private static volatile String sessionJobName;      // number/user/name, once looked up
+
+  /* The display's name on the sign-on screen: "Display . . . :  QPADEV0012" (IBM's), "Display name. . . : ..." (PUB400) */
+  static final Pattern DEVICE = Pattern.compile("Display(?: name)?\\s*(?:\\.\\s*)+:\\s*([A-Z][A-Z0-9#$@_]{0,9})");
+  private static final int CLOSE_WAIT_SECONDS = 15;
+
+  /* Rows of one SQL query (first column), on a connection that is open already: no sign-on; null when there is none */
+  private static volatile Function<String, List<String>> query;
+
+  static void jobQuery(Function<String, List<String>> runner) {
+    query = runner;
+  }
+
+  static String device(List<String> lines) {
+    for (int r = 0; r < Math.min(8, lines.size()); r++) {
+      Matcher m = DEVICE.matcher(lines.get(r));
+      if (m.find()) return m.group(1);
+    }
+    return null;
+  }
+
+  /* The job's number/user/name and status, as "MCJOB <job> <status>" rows (none when it ended), and an MCOK row that
+     says the query ran (an error is not an ended job) */
+  static String jobSql(String device, String user) {
+    return "SELECT 'MCJOB ' CONCAT JOB_NAME CONCAT ' ' CONCAT COALESCE(JOB_STATUS, '') FROM TABLE(QSYS2.ACTIVE_JOB_INFO("
+        + "JOB_NAME_FILTER => '" + device + "', DETAILED_INFO => 'NONE')) X WHERE JOB_NAME LIKE '%/" + user + "/" + device + "'"
+        + " UNION ALL SELECT 'MCOK' FROM SYSIBM.SYSDUMMY1";
+  }
+
+  /* The session's job now: {job, status}, {ended: true}, or null when it cannot be asked */
+  private static ObjectNode job(String[] deviceUser) {
+    Function<String, List<String>> q = query;
+    if (deviceUser == null || q == null) return null;
+    List<String> rows;
+    try {
+      rows = q.apply(jobSql(deviceUser[0], deviceUser[1]));
+    } catch (Exception e) {
+      logger.info("Could not look up the 5250 job: {}", e.getMessage());
+      return null;
+    }
+    if (rows == null || rows.stream().noneMatch(r -> r != null && r.trim().equals("MCOK"))) return null;
+    ObjectNode job = mapper.createObjectNode();
+    for (String row : rows) {
+      int at = row == null ? -1 : row.indexOf("MCJOB ");
+      if (at < 0) continue;
+      String[] parts = row.substring(at + 6).trim().split("\\s+");
+      job.put("job", parts[0]);
+      job.put("status", parts.length > 1 ? parts[1] : "");
+      return job;
+    }
+    return job.put("ended", true);
+  }
+
+  /* For the answers: the job (number/user/name once it was found, else user/device), and what is known of it */
+  private static ObjectNode jobAnswer(String[] deviceUser, ObjectNode found) {
+    ObjectNode job = found != null ? found : mapper.createObjectNode();
+    if (deviceUser == null) return job.put("note", "the sign-on display named no display device: the job is not known");
+    if (job.has("job")) sessionJobName = job.get("job").asText();
+    job.put("job", sessionJobName != null ? sessionJobName : deviceUser[1] + "/" + deviceUser[0]);
+    if (found == null) job.put("note", "state not looked up: no open connection to ask on (that would be a sign-on)");
+    return job;
+  }
+
 
   /* What a display attribute byte (0x20-0x3F) shows, as tn5250-rs draws it (IBM 5250 color display) */
   static final Map<Integer, String> DISPLAY = new HashMap<Integer, String>();
@@ -188,6 +255,9 @@ final class ScreenTools {
         return result("The first screen from " + target.host + " is not a sign-on display (user field, then a hidden "
             + "password field), so MasterCompiler did not type the password. It showed:\n" + text(screen), true);
       }
+      String device = device(screen.lines());  // its name is the job's name
+      sessionJob = device != null ? new String[] { device, target.user.toUpperCase(Locale.ROOT) } : null;
+      sessionJobName = null;
       Screen5250.Field userField = input.get(0);
       Screen5250.Field passwordField = input.get(1);
       /* Other hidden fields (a PASSCODE): asked of the user before Enter, so an empty one is not a refused sign-on.
@@ -199,6 +269,7 @@ final class ScreenTools {
         SignOnGuard.check(target);  // a password already refused: no code asked, no try
         Long refused = codeRefused(target);
         if (refused != null) {
+          SignOnBudget.take("a password check before a 5250 sign-on with a code");
           try {
             /* The password alone: right, and IBM i's count of failed sign-ons starts again; wrong, a refusal like any */
             SignOnGuard.signOn(target, () -> {
@@ -237,6 +308,7 @@ final class ScreenTools {
       }
       final boolean withCode = askedOthers;
       if (withCode) codeRefused(target, System.currentTimeMillis());  // until it works: a dropped try leaves the mark
+      SignOnBudget.take("the 5250 sign-on");
       SignOnGuard.signOn(target, () -> {
         screen.fill(userField, target.user);
         fillHidden(screen, passwordField, target.password);
@@ -271,6 +343,11 @@ final class ScreenTools {
       for (String line : messages) shown.add(line);
     }
     answer.put("signedOn", target.user + "@" + target.name);
+    ObjectNode found = job(sessionJob);
+    if (found != null && found.has("ended")) {  // not among the active jobs (yet): what is known
+      found = (ObjectNode) jobAnswer(sessionJob, mapper.createObjectNode()).put("note", "not found among the active jobs");
+    }
+    answer.set("job", jobAnswer(sessionJob, found));
     if (args.path("libraryList").asBoolean(true)) {
       java.util.function.Supplier<String> spec = specLibraryList;
       answer.put("libraryList", applyLibraryList(screen, spec != null ? spec.get() : null, wait));
@@ -560,14 +637,30 @@ final class ScreenTools {
     return result(mapper.writeValueAsString(raw(screen, args, answer)), false);
   }
 
-  private static ObjectNode closeSession() {
+  private static ObjectNode closeSession() throws Exception {
     if (session == null) return result("No 5250 session is open.", false);
     session.close();
     session = null;
     stopRecording();
     writeWatchText("(session closed " + LocalTime.now().withNano(0) + ")\n");
-    return result("5250 session closed. If it was not signed off first, the job may stay as a disconnected job "
-        + "(QDEVRCYACN) until the system ends it.", false);
+    ObjectNode answer = mapper.createObjectNode();
+    answer.put("closed", true);
+    /* Whether the job ended: asked until it is gone, for a while */
+    ObjectNode job = job(sessionJob);
+    for (int i = 0; i < CLOSE_WAIT_SECONDS && job != null && !job.has("ended"); i++) {
+      Thread.sleep(1000);
+      job = job(sessionJob);
+    }
+    answer.set("job", jobAnswer(sessionJob, job));
+    if (job != null && !job.has("ended")) {
+      answer.put("note", "The job is still there after " + CLOSE_WAIT_SECONDS + " s (status " + job.path("status").asText()
+          + "): not signed off first, it may stay as a disconnected job (QDEVRCYACN) until the system ends it; ENDJOB "
+          + "JOB(" + job.path("job").asText() + ") ends it.");
+    } else if (job == null) {
+      answer.put("note", "If it was not signed off first, the job may stay as a disconnected job (QDEVRCYACN) until the "
+          + "system ends it.");
+    }
+    return result(mapper.writeValueAsString(answer), false);
   }
 
   private static Screen5250 current() {

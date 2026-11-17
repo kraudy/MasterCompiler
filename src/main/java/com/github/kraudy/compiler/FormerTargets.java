@@ -65,7 +65,7 @@ final class FormerTargets {
     for (BuildReport.TargetResult t : report.targets) {
       String object = object(t.target);
       current.add(object);
-      if (!report.dryRun && BuildReport.BUILT.equals(t.status) && !t.target.toUpperCase().startsWith("*CURLIB.")) {
+      if (!report.dryRun && (BuildReport.BUILT.equals(t.status) || t.compiled) && !t.target.toUpperCase().startsWith("*CURLIB.")) {
         if (!t.target.equals(all.path(object).asText(null))) {
           all.put(object, t.target);
           changed = true;
@@ -79,6 +79,16 @@ final class FormerTargets {
       if (!current.contains(e.getKey())) former.add(e.getValue().asText());
     }
     if (!former.isEmpty()) report.formerTargets = former;
+  }
+
+  /* A plan's targets whose object is there now and was not built by this project (not recorded here) */
+  static List<String> foreign(File project, BuildReport report) {
+    ObjectNode all = read(project);
+    List<String> foreign = new ArrayList<String>();
+    for (BuildReport.TargetResult t : report.targets) {
+      if (t.existed && !all.has(object(t.target))) foreign.add(object(t.target));
+    }
+    return foreign;
   }
 
   /* The recorded targets whose object no current target builds */
