@@ -52,6 +52,13 @@ final class SyncManifest {
     return node != null && node.isObject() ? (ObjectNode) node : root.putObject(key);
   }
 
+  /* Relative paths recorded for this folder */
+  java.util.Set<String> names() {
+    java.util.Set<String> out = new java.util.LinkedHashSet<String>();
+    files().fieldNames().forEachRemaining(out::add);
+    return out;
+  }
+
   /* The entry for a file, or null */
   JsonNode get(String rel) {
     JsonNode entry = files().get(rel);

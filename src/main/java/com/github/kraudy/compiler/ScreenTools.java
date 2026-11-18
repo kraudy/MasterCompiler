@@ -199,6 +199,7 @@ final class ScreenTools {
   static synchronized void closeAll() {
     if (session != null) session.close();
     session = null;
+    rebuiltSinceOpen.clear();
     stopRecording();
   }
 
@@ -393,18 +394,106 @@ final class ScreenTools {
     return null;
   }
 
-  /* After the sign-on: CHGLIBL on the first screen's command line. What happened, for the answer */
-  private static String applyLibraryList(Screen5250 screen, String chglibl, int wait) throws java.io.IOException {
+  /* The Command Entry display (CALL QCMD): its command line takes 313 positions on a 24 x 80 display, a menu's 153 */
+  static final String COMMAND_ENTRY = "CALL QCMD";
+  static final int COMMAND_ENTRY_ROOM = 313;
+
+  /* Markers on IBM i CL command-line screens vs QSH/STRSQL screens that also draw ===> */
+  private static final List<String> CL_SCREEN_MARKERS = java.util.Arrays.asList(
+      "Selection or command", "Parameters or command", "Type command, press Enter", "Command Entry");
+  private static final List<String> NON_CL_SCREEN_MARKERS = java.util.Arrays.asList(
+      "Enter SQL statements", "F4=End of File", "QSH Command Entry");
+
+  static boolean isClCommandScreen(List<String> lines) {
+    boolean hasMarker = false, hasPrompt = false;
+    for (String line : lines) {
+      for (String nonCl : NON_CL_SCREEN_MARKERS) if (line.contains(nonCl)) return false;
+      for (String cl : CL_SCREEN_MARKERS) if (line.contains(cl)) hasMarker = true;
+      if (line.contains("F4=Prompt")) hasPrompt = true;
+    }
+    return hasMarker || hasPrompt;
+  }
+
+  /*
+   * One CL command on the screen's command line (===>), and the key pressed. Longer than that line, it goes on the
+   * Command Entry display: CALL QCMD first (only from a CL command screen), where the session then stays. Returns
+   * how it went there (null: typed where it was); nothing of the command is typed when it fits nowhere.
+   */
+  static String typeCommand(Screen5250 screen, String command, int aid, String key, int wait) throws IOException {
+    List<String> lines = screen.lines();
+    Screen5250.Field line = commandLine(lines, screen.inputFields(), screen.cols());
+    if (line == null) throw new IllegalArgumentException("This screen has no command line (===>): nothing was typed");
+    String how = null;
+    if (command.length() > line.length) {
+      if (command.length() > COMMAND_ENTRY_ROOM) {
+        throw new IllegalArgumentException("The command is " + command.length() + " characters, longer than the Command "
+            + "Entry display's command line (" + COMMAND_ENTRY_ROOM + "), the longest a 5250 session takes: nothing was "
+            + "typed. run_command runs one CL command of up to 5000 characters in MasterCompiler's job (over SSH also "
+            + "before the sources go up, open_project sync: false)");
+      }
+      if (!isClCommandScreen(lines)) {
+        throw new IllegalArgumentException("This screen's '===>' field is " + line.length + " positions and does not "
+            + "look like a CL command line (QSH/SQL/program screen): nothing was typed. Exit to a CL command line (or "
+            + COMMAND_ENTRY + ") or use run_command");
+      }
+      screen.fill(line, COMMAND_ENTRY);
+      screen.press(Screen5250.AID_ENTER, key == null ? null : "Enter");
+      Screen5250.Field entry = screen.waitForInput(wait) ? commandLine(screen.lines(), screen.inputFields(), screen.cols()) : null;
+      if (entry == null || entry.length < command.length()) {
+        throw new IllegalStateException(COMMAND_ENTRY + " showed no command line of " + command.length() + " positions, so "
+            + "the command was not typed. The screen now:\n" + text(screen));
+      }
+      how = "longer than this screen's command line (" + line.length + " positions): typed on the Command Entry display ("
+          + COMMAND_ENTRY + ", " + entry.length + " positions), where the session stays; F3 goes back";
+      line = entry;
+    }
+    screen.fill(line, command);
+    screen.press(aid, key);
+    return how;
+  }
+
+  /* After the sign-on: CHGLIBL on the first screen's command line (returning from QCMD if used). What happened, for the answer */
+  static String applyLibraryList(Screen5250 screen, String chglibl, int wait) throws java.io.IOException {
     if (chglibl == null) return "not applied: the build job's library list is not known now (a build runs, or MC is not "
         + "connected); type CHGLIBL on a command line";
-    Screen5250.Field line = commandLine(screen.lines(), screen.inputFields(), screen.cols());
-    if (line == null) return "not applied: the first screen has no command line (===>); type it where there is one: " + chglibl;
-    if (chglibl.length() > line.length) return "not applied: longer than the command line; type it in parts: " + chglibl;
-    screen.fill(line, chglibl);
-    screen.press(Screen5250.aid("ENTER"));
-    screen.waitForInput(wait);
-    String message = lastLine(screen.lines());
+    String how;
+    try {
+      how = typeCommand(screen, chglibl, Screen5250.AID_ENTER, null, wait);
+    } catch (IllegalArgumentException | IllegalStateException e) {
+      if (screen.waitingForInput() && screen.lines().stream().anyMatch(l -> l.contains("Command Entry"))) {
+        screen.press(Screen5250.aid("F3"));
+        screen.waitForInput(wait);
+      }
+      return "not applied: " + e.getMessage() + "\n" + chglibl;
+    }
+    if (!screen.waitForInput(wait)) {
+      return "outcome unknown: timed out waiting after " + chglibl + (how != null ? " (still on Command Entry)" : "");
+    }
+    String message;
+    if (how != null) {
+      message = commandEntryMessage(screen.lines());
+      screen.press(Screen5250.aid("F3"));
+      screen.waitForInput(wait);
+    } else {
+      message = lastLine(screen.lines());
+    }
     return chglibl + (message.isEmpty() ? "" : " -> " + message);
+  }
+
+  private static String commandEntryMessage(List<String> lines) {
+    String bottom = lastLine(lines);
+    if (!bottom.isEmpty() && !bottom.startsWith("F3=") && !bottom.startsWith("F11=") && !bottom.startsWith("F24=")) {
+      return bottom;
+    }
+    for (int r = lines.size() - 1; r >= 0; r--) {
+      String t = lines.get(r).trim();
+      if (!t.equals("Bottom") && !t.equals("More...")) continue;
+      for (int p = r - 1; p >= 0; p--) {
+        String msg = lines.get(p).trim();
+        if (!msg.isEmpty() && !msg.startsWith(">")) return msg;
+      }
+    }
+    return "";
   }
 
   private static String lastLine(List<String> lines) {
@@ -586,7 +675,8 @@ final class ScreenTools {
     Screen5250 screen = current();
     String recordingNote = record(screen, args);
     String key = args.path("key").asText("Enter");
-    if (key.equalsIgnoreCase("Reset")) {
+    boolean reset = key.equalsIgnoreCase("Reset");
+    if (reset && !args.has("command")) {
       screen.reset();
       return result(mapper.writeValueAsString(view(screen)), false);
     }
@@ -594,6 +684,49 @@ final class ScreenTools {
       return result("The IBM i is still working on the previous key (keyboard locked). Call screen to wait for it.", true);
     }
     screen.reset();
+    boolean attention = key.equalsIgnoreCase("Attn") || key.equalsIgnoreCase("Attention");
+    int aid = attention || reset ? 0 : Screen5250.aid(key);
+    if (aid < 0) {
+      throw new IllegalArgumentException("Unknown key '" + key + "': Enter, F1-F24, PageUp, PageDown, Help, Print, "
+          + "Clear, Attn or Reset");
+    }
+    String commandEntry = null;
+    if (args.has("command")) {
+      if (attention || reset) throw new IllegalArgumentException("A command goes with a key that sends it (Enter, F4, ...), not " + key);
+      for (Iterator<String> names = args.fieldNames(); names.hasNext();) {
+        String name = names.next();
+        if (!WITH_COMMAND.contains(name)) {
+          throw new IllegalArgumentException("'command' goes without '" + name + "' (it may open the Command Entry "
+              + "display first): send that in another screen_send");
+        }
+      }
+      String cmd = args.get("command").isTextual() ? args.get("command").asText().trim() : "";
+      if (cmd.isEmpty()) throw new IllegalArgumentException("Give the CL 'command', e.g. CALL PGM(PGM1) or QSH CMD('...')");
+      if (cmd.contains("\n") || cmd.contains("\r")) {
+        throw new IllegalArgumentException("'command' is one CL command on one line: nothing was typed");
+      }
+      commandEntry = typeCommand(screen, cmd, aid, key, waitSeconds(args));
+    } else {
+      typeFields(screen, args);
+      if (attention) screen.attention();
+      else screen.press(aid, key);
+    }
+    boolean ready = screen.waitForInput(waitSeconds(args));
+    ObjectNode answer = view(screen);
+    if (commandEntry != null) answer.put("commandEntry", commandEntry);
+    if (!ready && !screen.closed()) {
+      answer.put("note", "The IBM i is still working (no input asked yet): call screen to wait for the next display.");
+    }
+    if (recordingNote != null) answer.put("recording", recordingNote);
+    return result(mapper.writeValueAsString(raw(screen, args, answer)), false);
+  }
+
+  /* screen_send's arguments that go with 'command': it may change the screen first, so none of this screen's fields */
+  static final Set<String> WITH_COMMAND = new java.util.HashSet<String>(java.util.Arrays.asList(
+      "command", "key", "waitSeconds", "raw", "record"));
+
+  /* screen_send's fields, ask and cursor, on the screen as it is */
+  private static void typeFields(Screen5250 screen, JsonNode args) throws Exception {
     List<Screen5250.Field> input = screen.inputFields();
     JsonNode values = args.path("fields");
     for (Iterator<Map.Entry<String, JsonNode>> it = values.fields(); it.hasNext();) {
@@ -603,7 +736,13 @@ final class ScreenTools {
         throw new IllegalArgumentException("Field " + entry.getKey() + " is a hidden (password) field: never pass its "
             + "value. Put its number in 'ask' instead: MasterCompiler asks the user for it and types it.");
       }
-      screen.fill(f, entry.getValue().asText());
+      String text = entry.getValue().asText();
+      if (text.length() > f.length && f == commandLine(screen.lines(), input, screen.cols())) {
+        throw new IllegalArgumentException("'" + text + "' is longer than the command line (" + f.length + " positions): "
+            + "nothing was sent. A CL command goes in 'command' instead: one of up to " + COMMAND_ENTRY_ROOM
+            + " characters is typed on the Command Entry display (" + COMMAND_ENTRY + ")");
+      }
+      screen.fill(f, text);
     }
     /* ask: hidden fields whose value MasterCompiler asks of the user (never seen by the agent) */
     for (JsonNode which : args.path("ask")) {
@@ -618,29 +757,13 @@ final class ScreenTools {
     if (args.has("cursor")) {
       screen.moveCursor(args.path("cursor").path("row").asInt(), args.path("cursor").path("col").asInt());
     }
-    if (key.equalsIgnoreCase("Attn") || key.equalsIgnoreCase("Attention")) {
-      screen.attention();
-    } else {
-      int aid = Screen5250.aid(key);
-      if (aid < 0) {
-        throw new IllegalArgumentException("Unknown key '" + key + "': Enter, F1-F24, PageUp, PageDown, Help, Print, "
-            + "Clear, Attn or Reset");
-      }
-      screen.press(aid, key);
-    }
-    boolean ready = screen.waitForInput(waitSeconds(args));
-    ObjectNode answer = view(screen);
-    if (!ready && !screen.closed()) {
-      answer.put("note", "The IBM i is still working (no input asked yet): call screen to wait for the next display.");
-    }
-    if (recordingNote != null) answer.put("recording", recordingNote);
-    return result(mapper.writeValueAsString(raw(screen, args, answer)), false);
   }
 
   private static ObjectNode closeSession() throws Exception {
     if (session == null) return result("No 5250 session is open.", false);
     session.close();
     session = null;
+    rebuiltSinceOpen.clear();
     stopRecording();
     writeWatchText("(session closed " + LocalTime.now().withNano(0) + ")\n");
     ObjectNode answer = mapper.createObjectNode();

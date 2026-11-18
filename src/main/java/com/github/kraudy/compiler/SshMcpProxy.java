@@ -1134,6 +1134,10 @@ public class SshMcpProxy {
         pendingResults.put(request.path("id").toString(), request.path("params").path("arguments"));  // the file is written here
         return line;
       }
+      if (tool.equals("run_command") && syncPending) {
+        upload(specFiles(), false);  // it reads only the spec (protectedLibs): the sources may stay off the IBM i
+        return line;
+      }
       if (tool.equals("call_program") || tool.equals("debug_program") || tool.equals("find_export") || tool.equals("run_command")) {
         sync(projectFiles(project), true);  // they read the sources (run_command: protectedLibs in the spec) in the IBM i copy
         return line;
@@ -1401,22 +1405,29 @@ public class SshMcpProxy {
       preview.put("error", "could not compare with " + remoteDir + ": " + e.getMessage());
     }
     preview.put("note", "Only the spec files are on the IBM i yet: the first call that reads the sources (plan, build, "
-        + "impact, run_command, call_program, ...) uploads the rest. sql, find_object and status run before it.");
+        + "impact, call_program, ...) uploads the rest. sql, find_object, inventory, run_command and status run before it.");
     return preview;
   }
 
-  /* --no-initial-sync / sync: false: the spec files only (MC there reads the spec at its start) */
+  /* --no-initial-sync / sync: false: the spec files only (plus any uploaded spec file deleted locally) */
   private Set<String> specFiles() {
     Set<String> files = new LinkedHashSet<String>();
     File[] top = project.listFiles();
     if (top != null) {
       for (File f : top) {
-        String name = f.getName();
-        if (f.isFile() && (name.equals("Rules.mk") || name.endsWith(".yaml") || name.endsWith(".yml"))) files.add(f.getPath());
+        if (f.isFile() && isSpecFile(f.getName())) files.add(f.getPath());
       }
     }
     if (parser.getSpecName() != null) files.add(new File(project, parser.getSpecName()).getPath());
+    for (String rel : SyncManifest.load(project, host + ":" + remoteDir).names()) {
+      if (isSpecFile(rel)) files.add(new File(project, rel).getPath());
+    }
     return files;
+  }
+
+  private boolean isSpecFile(String rel) {
+    if (rel.equals(parser.getSpecName())) return true;
+    return !rel.contains("/") && (rel.equals("Rules.mk") || rel.endsWith(".yaml") || rel.endsWith(".yml"));
   }
 
   private int upload(Set<String> localFiles, boolean mirror) throws Exception {

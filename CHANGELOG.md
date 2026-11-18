@@ -3,6 +3,15 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.39
+
+- `screen_send` `command`: runs a CL command of up to 313 characters in a 5250 session (longer than a menu's
+  153-position `===>` line opens `CALL QCMD` first from a CL command screen and types it there; `screen_open`'s
+  `libraryList` uses the same path and returns with `F3`).
+- `run_command` over SSH with `open_project` `sync: false` / `--no-initial-sync` syncs only the spec files so CL
+  checks run on the existing MC job before the sources go up, and `protectedLibs` reads from the spec or base
+  overlay without requiring sources first.
+
 ## v0.3.38
 
 - `--max-sign-ons N`: a sign-on budget over the server's life (SSH, MC's connections on the IBM i, 5250); a call that

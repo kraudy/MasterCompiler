@@ -328,8 +328,8 @@ public class McpServer {
     openProps.putObject("path").put("type", "string").put("description",
         "Absolute path of the repository on this machine (clone it first)");
     openProps.putObject("sync").put("type", "boolean").put("description", "Over SSH. true (default): MC on the IBM i "
-        + "starts with the sources uploaded. false: only the spec files go up at its start, so sql, find_object and status "
-        + "can check the IBM i first (status: sync.wouldUpload, sync.notOurs); the first call that reads the sources "
+        + "starts with the sources uploaded. false: only the spec files go up at its start, so sql, find_object, inventory, "
+        + "run_command and status can check the IBM i first (status: sync.wouldUpload, sync.notOurs); the first call that reads the sources "
         + "uploads the rest");
     open.putArray("required").add("path");
     tools.add(tool("open_project",
@@ -728,6 +728,11 @@ public class McpServer {
     cursorProp.put("description", "Optional {row, col} to put the cursor before the key (e.g. on a list line for F4 or F2)");
     sendProps.putObject("waitSeconds").put("type", "integer")
         .put("description", "How long to wait for the next screen (default 30)");
+    sendProps.putObject("command").put("type", "string")
+        .put("description", "One CL command for the screen's command line (===>), instead of fields: typed there when it "
+        + "fits (a menu's takes 153 positions), else on the Command Entry display (MasterCompiler calls QCMD first; its "
+        + "line takes " + ScreenTools.COMMAND_ENTRY_ROOM + ", and the answer says so in commandEntry). Longer: run_command. "
+        + "Goes only with key, waitSeconds, raw and record");
     ObjectNode askProp = sendProps.putObject("ask");
     askProp.put("type", "array");
     askProp.putObject("items").put("type", "string");
@@ -735,7 +740,8 @@ public class McpServer {
         + "user for each in a password box and types it; the value never reaches you");
     rawProperties(sendProps);
     tools.add(tool("screen_send",
-        "Type into the 5250 screen's input fields and press a key, as a user at the terminal; returns the next screen. "
+        "Type into the 5250 screen's input fields (or one CL command on its command line: 'command') and press a key, "
+        + "as a user at the terminal; returns the next screen. "
         + "Never pass a hidden (password) field's value: name it in 'ask' and MasterCompiler asks the user for it in a "
         + "password box. Runs as the signed-on user: ask the user before commands or programs that change data.",
         send));
@@ -1715,9 +1721,11 @@ public class McpServer {
       executor.executeCommand(hook);
     }
     BuildSpec spec;
+    File settings = specSettingsFile();
     try {
-      spec = loadSpec();
+      spec = loadSpecOrSettings();
     } catch (Exception noSpecYet) {
+      if (settings != null && settings.isFile()) throw noSpecYet;
       return;  // e.g. an empty repository import_source is filling
     }
     for (CommandObject hook : spec.before) {
@@ -1881,7 +1889,7 @@ public class McpServer {
     ArrayNode prot = result.putArray("protectedLibs");
     for (String lib : protectedLibs()) prot.add(lib);
     try {
-      BuildSpec spec = loadSpec();
+      BuildSpec spec = loadSpecOrSettings();
       ArrayNode up = result.putArray("uploadFolders");  // where upload_file may write on the IBM i
       for (String f : spec.uploadFolders) up.add(f);
       ArrayNode from = result.putArray("uploadSources");  // folders on the PC it may take files from, besides the project
@@ -1938,12 +1946,29 @@ public class McpServer {
     }
   }
 
+  /* The file holding protectedLibs and overlay settings: --base, the scan's mc-base.yaml, or the -f / build.yaml spec */
+  private File specSettingsFile() {
+    if (!parser.hasProject()) return null;
+    if (parser.getBaseFile() != null) return new File(parser.getBaseFile());
+    if (parser.hasScan()) return new File(parser.getScanRoot(), SpecGenerator.DEFAULT_BASE_NAME);
+    if (parser.hasFile()) return new File(parser.getYamlFile());
+    return null;
+  }
+
+  /* Reads spec settings (before library-list hooks, uploadFolders) even before sources exist (e.g. open_project sync: false) */
+  private BuildSpec loadSpecOrSettings() throws Exception {
+    try {
+      return loadSpec();
+    } catch (Exception noSpec) {
+      File base = parser.hasScan() ? specSettingsFile() : null;
+      if (base == null || !base.isFile()) throw noSpec;
+      return Utilities.deserializeOverlay(base.getPath());
+    }
+  }
+
   /* What a refusal for missing protectedLibs asks for: the line, and the file on the user's PC it goes in */
   private String protectedLibsHint() {
-    /* the file this server reads the spec from: --base, the scan's mc-base.yaml, the -f / build.yaml spec (TOBi: none) */
-    File file = parser.getBaseFile() != null ? new File(parser.getBaseFile())
-        : parser.hasScan() ? new File(parser.getScanRoot(), SpecGenerator.DEFAULT_BASE_NAME)
-        : parser.hasFile() ? new File(parser.getYamlFile()) : null;
+    File file = specSettingsFile();
     if (file == null) return ProtectedLibs.howToSet(null);
     boolean exists = file.isFile();
     String path = file.getAbsolutePath();
@@ -1959,8 +1984,13 @@ public class McpServer {
 
   private List<String> protectedLibs() {
     try {
-      return loadSpec().protectedLibs;
-    } catch (Exception noSpec) {
+      File file = specSettingsFile();
+      if (file == null || !file.isFile()) return new java.util.ArrayList<String>();
+      BuildSpec spec = parser.hasScan() ? Utilities.deserializeOverlay(file.getPath()) : loadSpec();
+      List<String> libs = new java.util.ArrayList<String>();
+      for (String lib : spec.protectedLibs) if (lib != null && !lib.trim().isEmpty()) libs.add(lib.trim().toUpperCase());
+      return libs;
+    } catch (Exception invalidOrNoSpec) {
       return new java.util.ArrayList<String>();
     }
   }
