@@ -50,8 +50,67 @@ Master compiler follows unix philosophy in various parts of its design. One of t
 | Code | Meaning |
 |------|---------|
 | `0` | Build (or generation) succeeded |
-| `1` | A target or command failed |
+| `1` | A target or command failed (with `--tool`, `--script`, `--batch` or a `--socket` client: a call failed) |
 | `2` | Invalid arguments |
+| `3` | `--socket` client: no server answers at that path, or it went away before it answered |
+
+## Scripts and shell pipes
+
+The MCP server speaks JSON-RPC on stdin/stdout, so a shell script can drive it without a custom harness. One server
+holds one IBM i job (and over `--ssh` one SSH session) for all of a script's calls.
+
+* `--tool <name> [--args-json '<object>' | --args-file <file|->]`, repeatable: runs the server in this process over
+  those calls, one at a time, and prints one JSON line per call; then exits (`1` if a call failed). Every MCP tool works
+  (`status`, `sql`, `plan`, `build`, `spool`, `joblog`, `run_command`, `upload_file`, `download_file`, `screen_*`,
+  `inventory`, `clean`, ...). Implies `--batch --rpc`. Add `--ssh --project <folder>` to run MC on the IBM i over SSH.
+
+  ```bash
+  java -jar MasterCompiler.jar --tool status --tool sql --args-json '{"statement":"VALUES CURRENT USER"}'
+  {"jsonrpc":"2.0","id":1,"result":{"curlib":"MYLIB", ...}}
+  {"jsonrpc":"2.0","id":2,"result":{"columns":["00001"],"rows":[["ME"]],"rowCount":1}}
+  ```
+* `--script <file|->`: the same over a file of JSON-RPC requests (NDJSON, or pretty-printed as `jq` writes it).
+* `--mcp --socket <path>`: a server that stays up on a Unix domain socket (Java 16+), one client after another, keeping
+  its IBM i connection between them. It prints `{"method":"notifications/ready",...}` on stdout (and on `--ready-fd N`)
+  once it listens. The socket is rw for its owner only; a socket file left by a server that ended is replaced, a live one
+  is refused. `{"method":"shutdown"}` stops it, as does SIGTERM (the socket file is removed).
+* `--socket <path>` without `--mcp`: the client. It sends `--tool` calls, a `--script`, or the JSON-RPC lines on stdin
+  to that server, one at a time, and prints each answer; it waits up to 30 s for the server's socket to appear.
+
+  ```bash
+  java -jar MasterCompiler.jar --mcp --socket /tmp/mc.sock --project . &
+  java -jar MasterCompiler.jar --socket /tmp/mc.sock --tool plan
+  java -jar MasterCompiler.jar --socket /tmp/mc.sock --tool build --args-json '{"files":["qrpglesrc/hello.pgm.rpgle"]}'
+  echo '{"jsonrpc":"2.0","id":1,"method":"shutdown"}' | java -jar MasterCompiler.jar --socket /tmp/mc.sock
+  ```
+
+What the server does for scripts:
+
+* Input: one JSON-RPC message per line, a `Content-Length:` header block, or JSON over several lines (when its first line
+  ends open: `{`, `[`, `,` or `:`). Output: always one compact line per message. Every request gets exactly one answer:
+  text that is not JSON gets `-32700`, a message that is not JSON-RPC `-32600`, an unknown method `-32601` (also over
+  `--ssh`). Ids are kept as sent (`1` and `"1"` differ); an id still waiting for its answer is refused.
+* Tool results carry `structuredContent` (the JSON object of their text, so it is parsed once; clients on MCP
+  `2025-06-18` or later, or without `initialize`) and, when they failed, `_meta.errorKind`: `NO_PROJECT`, `NO_CREDENTIALS`,
+  `SIGN_ON_LIMIT`, `AUTH_BLOCKED`, `SSH_LOST`, `CONNECTION_FAILED`, `BUILD_BUSY`, `PROTECTED_LIB`, `INQMSGRPY_WAIT`,
+  `SQL_ERROR`, `UNKNOWN_TOOL`, `REFUSED`, `NOT_FOUND`, `INVALID_ARGS`, `TOOL_ERROR`; a failed build `COMPILE_FAILED`,
+  `HOOK_FAILED`, `TESTS_FAILED`, `TIMEOUT`, `CANCELLED` or `BUILD_FAILED`; another JSON result `TOOL_FAILED`.
+* `--rpc`: a tool's result is its JSON itself (`{"text": ...}` when it answered text), a failed call a JSON-RPC error
+  `-32000` with `data.errorKind` (and `data.result`), and a method may name a tool: `{"id":1,"method":"status"}`.
+  `initialize` is optional.
+* When the input ends (`printf ... | mc --mcp`), `--exit-on-eof drain` (the default) answers every request already read,
+  and over stdio waits for a build or `run_command` still running, before it closes the IBM i connection; for at most
+  `--drain-timeout` seconds (900), then whatever is left is answered with `DRAIN_TIMEOUT` (`-32001`: the result is
+  unknown). `--exit-on-eof abort` exits at once.
+* `--batch`: no dialog, console prompt, `SSH_ASKPASS` or URL elicitation (a 5250 secret is refused with why); the next
+  request is read once the last one was answered, so the answers come in order; a `build` that answers `running` is
+  followed with `build_status` under the same id until it ends; exit code `1` when a call failed. `--fail-fast` sends no
+  request after the first that failed; `--confirm` sets `confirm: true` on calls that do not set `confirm` (no preview
+  round trip; `confirm: false` stays).
+
+`-` for stdin and stdout: `--json -` writes the JSON (build report, `--sql` rows, `--call` result) to stdout and moves
+logs and the text table to stderr; `--fetch <path> -o -` writes the file's bytes to stdout; `--sql -`, `--call-params -`,
+`--args-file -` and `--script -` read stdin (only one of them, and not with `--password-stdin`).
 
 ## Params permutation
 

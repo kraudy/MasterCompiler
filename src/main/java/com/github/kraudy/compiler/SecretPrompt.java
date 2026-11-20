@@ -1,5 +1,6 @@
 package com.github.kraudy.compiler;
 
+import java.awt.GraphicsEnvironment;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
@@ -34,6 +35,8 @@ final class SecretPrompt {
 
   private static volatile JsonNode capabilities = mapper.createObjectNode();
   private static volatile Consumer<String> sender;
+  private static volatile boolean noPrompts;  // --batch: nobody to type a secret
+  private static volatile boolean gone;       // the client's input ended: nobody opens a page any more
   private static final Map<String, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<String, CompletableFuture<JsonNode>>();
   private static final AtomicInteger ids = new AtomicInteger();
   private static final SecureRandom random = new SecureRandom();
@@ -44,6 +47,17 @@ final class SecretPrompt {
   static void client(JsonNode params) {
     JsonNode caps = params.path("capabilities");
     capabilities = caps.isObject() ? caps : mapper.createObjectNode();
+    gone = false;
+  }
+
+  /* The client's input ended: questions waiting for it fail now, and no new one is asked */
+  static void clientGone() {
+    gone = true;
+    for (String id : pending.keySet()) {
+      CompletableFuture<JsonNode> waiting = pending.remove(id);
+      if (waiting != null) waiting.complete(mapper.createObjectNode().set("error",
+          mapper.createObjectNode().put("message", "the client's input ended")));
+    }
   }
 
   /* How this server writes a JSON-RPC message to the client */
@@ -60,12 +74,17 @@ final class SecretPrompt {
     return true;
   }
 
+  /* --batch: no page and no dialog; a screen that needs a secret is refused with why */
+  static void noPrompts() {
+    noPrompts = true;
+  }
+
   static boolean urlElicitation() {
-    return capabilities.path("elicitation").has("url") && sender != null;
+    return !noPrompts && !gone && capabilities.path("elicitation").has("url") && sender != null;
   }
 
   static boolean desktop() {
-    return !java.awt.GraphicsEnvironment.isHeadless();
+    return !noPrompts && !gone && !GraphicsEnvironment.isHeadless();
   }
 
   /* What can ask here, for a preview or an error */

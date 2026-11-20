@@ -3,6 +3,20 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.40
+
+- Scripts and shell pipes (docs/Cli.md, "Scripts and shell pipes"): `--tool <name> [--args-json | --args-file]`
+  (repeatable) and `--script <file|->` run the MCP tools over one IBM i connection and print one JSON line each;
+  `--mcp --socket <path>` keeps a server up on a Unix domain socket (`--ready-fd`, `shutdown`), and `--socket <path>`
+  is its client. Exit codes: `1` a call failed, `3` the socket server could not be reached.
+- The MCP server answers every request once: on end of input it drains (`--exit-on-eof drain|abort`,
+  `--drain-timeout`) instead of dropping calls in flight; `-32700` / `-32600` also over `--ssh`; `Content-Length` and
+  multi-line JSON input.
+- Tool results carry `structuredContent` and, when they failed, `_meta.errorKind`; `--rpc` returns the tool's JSON
+  itself and failures as JSON-RPC errors; `--batch` (no dialogs or prompts, ordered answers, builds followed to the
+  end), `--fail-fast`, `--confirm`.
+- `-` for stdin / stdout: `--json -`, `--fetch <path> -o -`, `--sql -`, `--call-params -`; `--name=value` options.
+
 ## v0.3.39
 
 - `screen_send` `command`: runs a CL command of up to 313 characters in a 5250 session (longer than a menu's

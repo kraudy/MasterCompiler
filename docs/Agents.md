@@ -85,4 +85,6 @@ never the password.
 
 With the `mastercompiler` server registered, use its tools. Without it, a terminal agent can run the jar directly
 (`--scan`, `--dry-run`, `--json`, `--remote`; see the [mastercompiler skill](../skills/mastercompiler/SKILL.md)) with the
-password from the same file or command. An authentication failure is never a reason to switch from one to the other.
+password from the same file or command. An authentication failure is never a reason to switch from one to the other. For
+several calls from a shell script, `--tool <name> --args-json '<object>'` (repeatable) or a `--mcp --socket <path>`
+server keeps one IBM i job across them ([Scripts and shell pipes](Cli.md#scripts-and-shell-pipes)).

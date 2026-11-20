@@ -192,12 +192,18 @@ java -jar MC.jar -f build.yaml --since origin/master # what git says changed + d
 java -jar MC.jar -f build.yaml --push /home/USER/build --json report.json   # upload, then build
 java -jar MC.jar -f build.yaml --diff                # sources newer than their objects + dependents
 java -jar MC.jar -f build.yaml -c                    # delete built objects at the end
+java -jar MC.jar --project . --tool plan --tool build   # MCP tools from a script: one JSON line each, one IBM i job
 ```
+
+Several calls from a script (one sign-on for all): `--tool <name> --args-json '<object>'` (repeatable, any MCP tool;
+add `--ssh` to run over SSH), `--script <file>` (JSON-RPC lines), or a `--mcp --socket <path>` server that stays up
+with `--socket <path> --tool ...` as its client. Failures carry `errorKind`; see "Scripts and shell pipes" in docs/Cli.md.
 
 Flags: `-x` debug, `-v` verbose (combine as `-xv`), `--no-migrate` (skip
 member ↔ stream file migration), `--lib <name>` (library for scanned targets).
 
-**Exit codes:** `0` success, `1` a target or command failed, `2` invalid arguments.
+**Exit codes:** `0` success, `1` a target or command failed (with `--tool` / `--script`: a call failed), `2` invalid
+arguments, `3` a `--socket` server could not be reached.
 
 **`-k`, `--keep-going`:** by default MC stops at the first failed target. With `-k` it
 skips only that target's dependents (reported as `blocked`) and builds everything else,

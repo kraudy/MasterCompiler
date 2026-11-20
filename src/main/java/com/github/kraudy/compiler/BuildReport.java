@@ -1,6 +1,5 @@
 package com.github.kraudy.compiler;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -300,6 +299,6 @@ public class BuildReport {
     ObjectMapper mapper = new ObjectMapper()
         .enable(SerializationFeature.INDENT_OUTPUT)
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
-    mapper.writeValue(new File(path), this);
+    mapper.writeValue(Stdio.open(path), this);
   }
 }

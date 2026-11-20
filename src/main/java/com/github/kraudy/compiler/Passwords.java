@@ -28,14 +28,16 @@ final class Passwords {
   private static String commandOrigin;
   private static String fromCommand; // its output, once per run
   private static String asked;       // SSH_ASKPASS's answer, once per run
-  private static boolean prompting;  // set by init: off for the MCP server
+  private static boolean prompting;  // set by init: off for the MCP server and --batch
+  private static boolean batch;      // --batch: no SSH_ASKPASS either
   private static String prompted;    // typed once per run
 
   private Passwords() {}
 
   /* Called once after the arguments were validated: reads --password-stdin, and a prompt is only for non-MCP runs */
   static synchronized void init(ArgParser parser) throws Exception {
-    prompting = !parser.isMcp();
+    prompting = !parser.isMcp() && !parser.isBatch();
+    batch = parser.isBatch();
     String env = System.getenv("IBMI_PASSWORD_COMMAND");
     commandLine = parser.getPasswordCommand() != null ? parser.getPasswordCommand() : env != null && !env.trim().isEmpty() ? env : null;
     commandOrigin = parser.getPasswordCommand() != null ? "--password-command" : "IBMI_PASSWORD_COMMAND";
@@ -95,7 +97,7 @@ final class Passwords {
   /* SSH_ASKPASS, when ssh itself would use it: always with SSH_ASKPASS_REQUIRE force/prefer, never with never, else only without a terminal and with a display */
   static String askpassProgram() {
     String program = System.getenv("SSH_ASKPASS");
-    if (program == null || program.trim().isEmpty()) return null;
+    if (program == null || program.trim().isEmpty() || batch) return null;
     String require = System.getenv("SSH_ASKPASS_REQUIRE");
     if ("never".equals(require)) return null;
     if ("force".equals(require) || "prefer".equals(require)) return program;

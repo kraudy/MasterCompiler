@@ -1,11 +1,20 @@
 package com.github.kraudy.compiler;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /*
  * Simple Unix-style CLI argument parser.
@@ -82,7 +91,19 @@ public class ArgParser {
     INQMSGRPY     (null, "inqmsgry",     Kind.FLAG,  "With --call: answer the program's inquiry messages with their default reply (CHGJOB INQMSGRPY(*DFT)) instead of waiting for a reply forever"),
     SQL           (null, "sql",          Kind.VALUE, "Run one read-only SELECT / VALUES / WITH query and print the rows (tab-separated; --json <file> writes them as JSON; --max-rows, --libl, --curlib)"),
     FETCH         (null, "fetch",        Kind.VALUE, "Copy an IFS stream file to this PC: /path/file on the IBM i; -o <file or folder> (default: the current folder). Repeat --fetch with -o <folder> to copy several files in one run"),
-    JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path");
+    JSON          (null, "json",         Kind.VALUE, "Write a JSON build report (status, commands, joblog, compile errors) to this path; - writes it to stdout (then logs and the --sql / --call table go to stderr)"),
+    TOOL          (null, "tool",         Kind.VALUE, "Call this MCP tool (status, sql, plan, build, spool, run_command, screen_open, ...) and print its result as one JSON line; repeat for several calls over one IBM i connection (implies --batch --rpc; with --ssh over SSH)"),
+    ARGS_JSON     (null, "args-json",    Kind.VALUE, "With --tool: the arguments of the --tool before it, a JSON object, e.g. '{\"statement\":\"VALUES 1\"}'"),
+    ARGS_FILE     (null, "args-file",    Kind.VALUE, "With --tool: the arguments of the --tool before it, read from this JSON file (- for stdin)"),
+    SCRIPT        (null, "script",       Kind.VALUE, "Run the JSON-RPC requests in this file (- for stdin; NDJSON or pretty-printed JSON) over one connection and exit (implies --batch)"),
+    SOCKET        (null, "socket",       Kind.VALUE, "With --mcp: serve on this Unix domain socket instead of stdio, one client after another, keeping the IBM i connection between them (Java 16+). Without --mcp: send --tool / --script / stdin requests to that server and print the answers"),
+    READY_FD      (null, "ready-fd",     Kind.VALUE, "With --mcp --socket: also write the ready notification to this file descriptor once the socket listens"),
+    RPC           (null, "rpc",          Kind.FLAG,  "Plain JSON-RPC for scripts: a tool's result is its JSON itself, a failed call a JSON-RPC error with data.errorKind, and a method may name a tool ({\"id\":1,\"method\":\"status\"})"),
+    BATCH         (null, "batch",        Kind.FLAG,  "Non-interactive: no dialog, prompt or SSH_ASKPASS; one request at a time in order; a build that answers 'running' is followed to its end; exit code 1 when a call failed"),
+    FAIL_FAST     (null, "fail-fast",    Kind.FLAG,  "With --batch: send no request after the first that failed"),
+    CONFIRM       (null, "confirm",      Kind.FLAG,  "With --batch: confirm: true for every tool call that does not set confirm (no preview round trip); confirm: false stays"),
+    EXIT_ON_EOF   (null, "exit-on-eof",  Kind.VALUE, "With --mcp: when the input ends, drain (default: answer every request already read, then exit) or abort (exit at once)"),
+    DRAIN_TIMEOUT (null, "drain-timeout", Kind.VALUE, "Seconds a drain waits for the answers (and a build still running over stdio) before it answers them with DRAIN_TIMEOUT (default 900)");
 
     final String shortName;
     final String longName;
@@ -100,6 +121,10 @@ public class ArgParser {
       return kind == Kind.FLAG;
     }
   }
+
+  /* Options whose value may be "-": stdin or stdout (Stdio) */
+  private static final Set<Option> DASH_VALUES = EnumSet.of(Option.JSON, Option.SQL, Option.CALL_PARAMS,
+      Option.OUTPUT, Option.ARGS_FILE, Option.SCRIPT);
 
   private static final Map<String, Option> SHORT_OPTIONS;
   private static final Map<String, Option> LONG_OPTIONS;
@@ -178,6 +203,17 @@ public class ArgParser {
   private boolean help;
   private String next;
   private String nextFile;  // --next-file: removed once setup saved the request
+  private final List<String[]> tools = new ArrayList<String[]>();  // --tool name, its --args-json / --args-file (null: none)
+  private final List<Boolean> toolArgsFromStdin = new ArrayList<Boolean>();
+  private String script;
+  private String socket;
+  private int readyFd = -1;
+  private boolean rpc;
+  private boolean batch;
+  private boolean failFast;
+  private boolean confirm;
+  private String exitOnEof;
+  private int drainTimeout = -1;
 
   private final String[] args;
 
@@ -200,9 +236,15 @@ public class ArgParser {
         if (name.isEmpty()) {
           throw new IllegalArgumentException("Empty option: " + arg);
         }
-        Option opt = LONG_OPTIONS.get(name);
+        int equals = name.indexOf('=');  // --name=value
+        Option opt = LONG_OPTIONS.get(equals < 0 ? name : name.substring(0, equals));
         if (opt == null) {
           throw new IllegalArgumentException("Unknown option: " + arg);
+        }
+        if (equals >= 0) {
+          if (opt.isFlag()) throw new IllegalArgumentException(arg.substring(0, equals + 2) + " takes no value");
+          setValue(opt, name.substring(equals + 1));
+          continue;
         }
         i = apply(opt, arg, args, i);
         continue;
@@ -257,7 +299,7 @@ public class ArgParser {
       throw new IllegalArgumentException("Missing value for " + rawArg);
     }
     String value = args[index + 1];
-    if (value.startsWith("-")) {
+    if (value.startsWith("-") && !(Stdio.dash(value) && DASH_VALUES.contains(opt))) {
       throw new IllegalArgumentException(
           "Value for " + rawArg + " cannot start with '-': " + value);
     }
@@ -297,6 +339,10 @@ public class ArgParser {
       case VERSION:       version = true; break;
       case HELP:          help = true; break;
       case KEEP_GOING:    keepGoing = true; break;
+      case RPC:           rpc = true; break;
+      case BATCH:         batch = true; break;
+      case FAIL_FAST:     failFast = true; break;
+      case CONFIRM:       confirm = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
     }
@@ -352,6 +398,37 @@ public class ArgParser {
       case CALL_PARAMS:   callParams = value; break;
       case SQL:           sql = value; break;
       case FETCH:         fetch.add(value); break;
+      case TOOL:
+        tools.add(new String[] { value, null });
+        toolArgsFromStdin.add(false);
+        break;
+      case ARGS_JSON:
+      case ARGS_FILE: {
+        if (tools.isEmpty()) throw new IllegalArgumentException("--" + opt.longName + " goes after the --tool it is for");
+        String[] last = tools.get(tools.size() - 1);
+        if (last[1] != null) throw new IllegalArgumentException("--tool " + last[0] + " has its arguments already");
+        if (opt == Option.ARGS_JSON) {
+          last[1] = value;
+        } else if (Stdio.dash(value)) {
+          last[1] = value;
+          toolArgsFromStdin.set(tools.size() - 1, true);
+        } else {
+          try {
+            last[1] = new String(Files.readAllBytes(new File(value).toPath()), StandardCharsets.UTF_8);
+          } catch (IOException e) {
+            throw new IllegalArgumentException("--args-file " + value + " cannot be read: " + e.getMessage());
+          }
+        }
+        break;
+      }
+      case SCRIPT:        script = value; break;
+      case SOCKET:        socket = value; break;
+      case EXIT_ON_EOF:
+        if (!value.equals("drain") && !value.equals("abort")) throw new IllegalArgumentException("--exit-on-eof is drain or abort: " + value);
+        exitOnEof = value;
+        break;
+      case READY_FD:      readyFd = number(opt, value); break;
+      case DRAIN_TIMEOUT: drainTimeout = number(opt, value); break;
       case LIBL:
         libl = value;
         break;
@@ -391,11 +468,20 @@ public class ArgParser {
     }
   }
 
+  private static int number(Option opt, String value) {
+    try {
+      int n = Integer.parseInt(value.trim());
+      if (n >= 0) return n;
+    } catch (NumberFormatException e) { /* the message below */ }
+    throw new IllegalArgumentException("--" + opt.longName + " needs a number, 0 or more: " + value);
+  }
+
   /**
    * Validate mutual exclusion / required inputs after parse.
    * Call before using getters that require a mode.
    */
   public void validate() {
+    if (validateScripting()) return;  // a --socket client: nothing else to check
     if (doctor) {
       if (mcp || setupVscode || remote || installSkills || version || importSelection != null || yamlFile != null
           || scanRoot != null || tobiRoot != null || push != null) {
@@ -431,7 +517,7 @@ public class ArgParser {
     if (cleanRemote && !remote) {
       throw new IllegalArgumentException("--clean-remote goes with --remote");
     }
-    if (passwordStdin && mcp) {
+    if (passwordStdin && stdinIsProtocol()) {
       throw new IllegalArgumentException("--password-stdin cannot be used with --mcp: stdin is the protocol channel");
     }
     if (inqmsgry && call == null) {
@@ -1030,6 +1116,114 @@ public class ArgParser {
 
   public boolean isMcp() {
     return mcp;
+  }
+
+  /*
+   * Scripts: --tool / --script run an MCP server in this process over their requests (as --mcp --batch); --socket
+   * without --mcp is the client of a --mcp --socket server. "-" values are read here, before the checks that use them.
+   */
+  private boolean validateScripting() {
+    boolean requests = !tools.isEmpty() || script != null;
+    if (tools.size() > 0 && script != null) throw new IllegalArgumentException("Use either --tool or --script");
+    /* what would read stdin: only one may */
+    Map<String, Boolean> stdinUsers = new LinkedHashMap<String, Boolean>();
+    stdinUsers.put("--password-stdin", passwordStdin);
+    stdinUsers.put("--sql -", Stdio.dash(sql));
+    stdinUsers.put("--call-params -", Stdio.dash(callParams));
+    stdinUsers.put("--args-file -", toolArgsFromStdin.contains(true));
+    stdinUsers.put("--script -", Stdio.dash(script));
+    stdinUsers.put("the MCP requests", stdinIsProtocol() || socketClient() && !requests);
+    stdinUsers.values().removeIf(used -> !used);
+    if (stdinUsers.size() > 1 || toolArgsFromStdin.indexOf(true) != toolArgsFromStdin.lastIndexOf(true)) {
+      throw new IllegalArgumentException("Only one input can come from stdin: " + String.join(", ", stdinUsers.keySet()));
+    }
+    if (Stdio.dash(outputFile) && (fetch.size() != 1)) throw new IllegalArgumentException("-o - (stdout) goes with one --fetch path");
+    sql = Stdio.text(sql);
+    callParams = Stdio.text(callParams);
+    for (String[] tool : tools) {
+      tool[1] = Stdio.text(tool[1]);
+      if (tool[1] == null) continue;
+      JsonNode parsed;
+      try {
+        parsed = new ObjectMapper().readTree(tool[1]);
+      } catch (Exception e) {
+        parsed = null;
+      }
+      if (parsed == null || !parsed.isObject()) throw new IllegalArgumentException("--tool " + tool[0] + ": its arguments are a JSON object, e.g. '{\"statement\":\"VALUES 1\"}'");
+    }
+    if (requests && mcp && socket != null) throw new IllegalArgumentException("--tool / --script go to a --socket server from a client: leave out --mcp");
+    if (requests && socket == null) {
+      if (mcp) throw new IllegalArgumentException("--tool / --script run the server themselves: leave out --mcp (or use --mcp --socket and a client)");
+      mcp = true;
+    }
+    if (requests) batch = true;
+    if (!tools.isEmpty()) rpc = true;
+    if (socketClient()) {
+      if (ssh || readOnly || projectRoot != null || yamlFile != null || remote || setupVscode || exitOnEof != null || readyFd >= 0) {
+        throw new IllegalArgumentException("--socket without --mcp is the client of a running --mcp --socket server: it takes "
+            + "--tool, --args-json, --args-file, --script, --rpc, --batch, --fail-fast, --confirm, --drain-timeout, -v");
+      }
+      return true;
+    }
+    if (readyFd >= 0 && socket == null) throw new IllegalArgumentException("--ready-fd goes with --mcp --socket");
+    if ((rpc || batch || exitOnEof != null || drainTimeout >= 0) && !mcp) {
+      throw new IllegalArgumentException("--rpc, --batch, --exit-on-eof and --drain-timeout go with --mcp, --tool, --script or --socket");
+    }
+    if ((failFast || confirm) && !batch) throw new IllegalArgumentException("--fail-fast and --confirm go with --batch (or --tool / --script)");
+    return false;
+  }
+
+  /* stdin carries the MCP requests: a server on stdio that has no --tool / --script requests of its own */
+  private boolean stdinIsProtocol() {
+    return mcp && socket == null && tools.isEmpty() && (script == null || Stdio.dash(script));
+  }
+
+  /** {@code --socket} without {@code --mcp}: the client of a running {@code --mcp --socket} server. */
+  public boolean socketClient() {
+    return socket != null && !mcp;
+  }
+
+  /** {@code --tool}: tool names and their arguments as JSON (null: none). */
+  public List<String[]> getTools() {
+    return tools;
+  }
+
+  public String getScript() {
+    return script;
+  }
+
+  public String getSocket() {
+    return socket;
+  }
+
+  public int getReadyFd() {
+    return readyFd;
+  }
+
+  public boolean isRpc() {
+    return rpc;
+  }
+
+  public boolean isBatch() {
+    return batch;
+  }
+
+  public boolean isFailFast() {
+    return failFast;
+  }
+
+  public boolean isConfirm() {
+    return confirm;
+  }
+
+  /** {@code --exit-on-eof}: drain, abort, or null for the default. */
+  public String getExitOnEof() {
+    return exitOnEof;
+  }
+
+  /** {@code --drain-timeout} seconds, -1 for the default. */
+  public int getDrainTimeout() {
+    return drainTimeout;
   }
 
   /** {@code --push} IFS directory, or null when sources are already on the IBM i. */

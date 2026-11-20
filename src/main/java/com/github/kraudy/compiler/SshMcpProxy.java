@@ -8,6 +8,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -102,7 +103,8 @@ public class SshMcpProxy {
     this.parser = parser;
   }
 
-  public void serve() throws Exception {
+  /* Serves its clients (stdin, the --tool / --script requests, or --socket clients) until they end; the exit code */
+  public int serve() throws Exception {
     protocolOut = new PrintStream(System.out, true, "UTF-8");
     System.setOut(System.err);  // stdout is the protocol channel
     MasterCompiler.quietLogs(parser.isVerbose());
@@ -121,89 +123,13 @@ public class SshMcpProxy {
      */
     if (project != null) startSetup();
 
-    McpServer local = new McpServer(parser);
+    local = new McpServer(parser);
     SecretPrompt.sender(this::send);
     ScreenTools.systemCcsid(this::remoteScreenCcsid);
     ScreenTools.specLibraryList(() -> remoteStatus().path("libraryListCommand").asText(null));
     ScreenTools.jobQuery(this::rowsOverSsh);
-    BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-    String line;
     try {
-      while ((line = in.readLine()) != null) {
-        if (line.trim().isEmpty()) continue;
-        JsonNode request;
-        try {
-          request = mapper.readTree(line);
-        } catch (Exception e) {
-          logger.error("Not a JSON-RPC message, ignored: {}", line);
-          continue;
-        }
-        if (SecretPrompt.answer(request)) continue;  // the client's answer to a 5250 secret request from here
-        if (SignOnBudget.isAnswerId(request)) continue;  // only this server answers MC's sign-on requests
-        JsonNode id = request.get("id");
-        if (id == null) continue;  // notifications: the remote server ignores them as well
-        String called = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
-        /* open_project after the calls already queued, so none of them meets a half-changed project */
-        if (called.equals("open_project")) {
-          String open = line;
-          calls.execute(() -> openProject(open));
-          continue;
-        }
-        JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
-        /* status before MC runs on the IBM i: answered here, with the stage it is at */
-        if (result == null && "tools/call".equals(request.path("method").asText(""))
-            && "status".equals(request.path("params").path("name").asText(""))
-            && !session.usable()) {
-          sendResult(id, statusHere());
-          continue;
-        }
-        if ("tools/call".equals(request.path("method").asText(""))
-            && "status".equals(request.path("params").path("name").asText(""))) {
-          pendingStatus.add(id.toString());
-        }
-        if (result != null) {
-          sendResult(id, result);
-          continue;
-        }
-        String tool = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
-        /* build_status, whats_running, cancel: straight to the IBM i, never behind a sync or another call */
-        if (McpServer.NEVER_QUEUED.contains(tool)) {
-          Session s = session;
-          if (!s.usable()) {
-            sendToolError(line, "MasterCompiler is not running on the IBM i (stage " + stage + "): no build to follow or cancel "
-                + "from here. The next call that needs the IBM i (plan, build, ...) connects again, and first stops the MC "
-                + "this server left running there.");
-            continue;
-          }
-          if (tool.equals("cancel") && queuedBuilds.get() > 0 && remoteBuild == null) {
-            boolean confirm = request.path("params").path("arguments").path("confirm").asBoolean(false);
-            if (confirm) dropQueuedBuilds = true;
-            ObjectNode answer = mapper.createObjectNode();
-            answer.putArray("content").addObject().put("type", "text").put("text", confirm
-                ? "The build had not started on the IBM i yet (its sources were being uploaded): it will not start."
-                : "A build is waiting for its sources to be uploaded and has not started on the IBM i. Show this to the "
-                  + "user; with confirm: true it will not start.");
-            answer.put("isError", false);
-            sendResult(id, answer);
-            continue;
-          }
-          if (!tool.equals("whats_running")) buildCalls.add(id.toString());
-          forwardTo(s, line);
-          continue;
-        }
-        /* 5250 tools on a thread of their own: one waiting for the user (a PASSCODE) does not hold up the rest */
-        if (ScreenTools.TOOLS.contains(tool)) {
-          String screenCall = line;
-          screenCalls.execute(() -> forward(screenCall));
-          continue;
-        }
-        if (tool.equals("build")) {
-          buildCalls.add(id.toString());
-          queuedBuilds.incrementAndGet();
-        }
-        String call = line;
-        calls.execute(() -> forward(call));  // one at a time, in order
-      }
+      return RpcChannel.serve(parser, protocolOut, this::session);
     } finally {
       closing = true;  // no new session from here on
       calls.shutdownNow();
@@ -212,6 +138,99 @@ public class SshMcpProxy {
       if (ssh != null) ssh.close();
       router.close();
       ScreenTools.closeAll();
+    }
+  }
+
+  private McpServer local;  // answers initialize and tools/list here
+  private volatile RpcChannel channel;  // the client being served: answers go to it
+
+  /* One client: its requests until its input ends and they are answered (the channel waits for them) */
+  private void session(RpcChannel client) throws Exception {
+    channel = client;
+    SecretPrompt.client(mapper.createObjectNode());  // this client's capabilities come with its initialize
+    RpcChannel.Message message;
+    while ((message = client.next()) != null) {
+      String line = message.line();
+      JsonNode request = message.node;
+      if (SecretPrompt.answer(request)) continue;  // the client's answer to a 5250 secret request from here
+      if (SignOnBudget.isAnswerId(request)) continue;  // only this server answers MC's sign-on requests
+      JsonNode id = request.get("id");
+      if (id == null) continue;  // notifications: the remote server ignores them as well
+      String called = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
+      /* open_project after the calls already queued, so none of them meets a half-changed project */
+      if (called.equals("open_project")) {
+        String open = line;
+        calls.execute(() -> openProject(open));
+        continue;
+      }
+      JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
+      /* status before MC runs on the IBM i: answered here, with the stage it is at */
+      if (result == null && "tools/call".equals(request.path("method").asText(""))
+          && "status".equals(request.path("params").path("name").asText(""))
+          && !session.usable()) {
+        sendResult(id, statusHere());
+        continue;
+      }
+      if ("tools/call".equals(request.path("method").asText(""))
+          && "status".equals(request.path("params").path("name").asText(""))) {
+        pendingStatus.add(id.toString());
+      }
+      if (result != null) {
+        sendResult(id, result);
+        continue;
+      }
+      String tool = "tools/call".equals(request.path("method").asText("")) ? request.path("params").path("name").asText("") : "";
+      /* build_status, whats_running, cancel: straight to the IBM i, never behind a sync or another call */
+      if (McpServer.NEVER_QUEUED.contains(tool)) {
+        Session s = session;
+        if (!s.usable()) {
+          sendToolError(line, "MasterCompiler is not running on the IBM i (stage " + stage + "): no build to follow or cancel "
+              + "from here. The next call that needs the IBM i (plan, build, ...) connects again, and first stops the MC "
+              + "this server left running there.");
+          continue;
+        }
+        if (tool.equals("cancel") && queuedBuilds.get() > 0 && remoteBuild == null) {
+          boolean confirm = request.path("params").path("arguments").path("confirm").asBoolean(false);
+          if (confirm) dropQueuedBuilds = true;
+          ObjectNode answer = mapper.createObjectNode();
+          answer.putArray("content").addObject().put("type", "text").put("text", confirm
+              ? "The build had not started on the IBM i yet (its sources were being uploaded): it will not start."
+              : "A build is waiting for its sources to be uploaded and has not started on the IBM i. Show this to the "
+                + "user; with confirm: true it will not start.");
+          answer.put("isError", false);
+          sendResult(id, answer);
+          continue;
+        }
+        if (!tool.equals("whats_running")) buildCalls.add(id.toString());
+        forwardTo(s, line);
+        continue;
+      }
+      /* 5250 tools on a thread of their own: one waiting for the user (a PASSCODE) does not hold up the rest */
+      if (ScreenTools.TOOLS.contains(tool)) {
+        String screenCall = line;
+        screenCalls.execute(() -> forward(screenCall));
+        continue;
+      }
+      if (tool.equals("build")) {
+        buildCalls.add(id.toString());
+        queuedBuilds.incrementAndGet();
+      }
+      String call = line;
+      calls.execute(() -> forward(call));  // one at a time, in order
+    }
+    if (client.stdio()) awaitRemoteBuild(client);
+  }
+
+  /* The input ended (--exit-on-eof drain): a build still running on the IBM i ends before the SSH session closes */
+  private void awaitRemoteBuild(RpcChannel client) throws InterruptedException {
+    if (remoteBuild == null || client.drainLeft() == 0) return;
+    logger.info("Input ended: waiting for build {} on the IBM i to end before closing (--drain-timeout)", remoteBuild);
+    try {
+      while (client.drainLeft() > 0 && remoteBuildRunning(client.drainLeft())) Thread.sleep(Math.min(2000, client.drainLeft()));
+    } catch (InterruptedException e) {
+      throw e;
+    } catch (Exception e) {
+      logger.warn("Could not follow build {}: {}", remoteBuild, e.getMessage());
     }
   }
 
@@ -531,8 +550,14 @@ public class SshMcpProxy {
   private boolean summarize(String remoteReport, int status) {
     File local = null;
     try {
-      local = parser.getJsonReport() != null ? new File(parser.getJsonReport()) : File.createTempFile("mc-report", ".json");
+      boolean toFile = parser.getJsonReport() != null && !Stdio.dash(parser.getJsonReport());
+      local = toFile ? new File(parser.getJsonReport()) : File.createTempFile("mc-report", ".json");
       ssh.download(remoteReport, local);
+      if (Stdio.dash(parser.getJsonReport())) {  // --json -: the report to stdout
+        try (OutputStream out = Stdio.open(Stdio.DASH)) {
+          Files.copy(local.toPath(), out);
+        }
+      }
       System.out.println(RemoteSummary.format(mapper.readTree(local), status, host));
       return true;
     } catch (Exception e) {
@@ -541,7 +566,7 @@ public class SshMcpProxy {
       logger.debug("Remote report not read", e);
       return false;
     } finally {
-      if (local != null && parser.getJsonReport() == null) local.delete();
+      if (local != null && (parser.getJsonReport() == null || Stdio.dash(parser.getJsonReport()))) local.delete();
       ssh.execQuiet("rm -f " + SshTarget.quote(remoteReport));
     }
   }
@@ -790,6 +815,11 @@ public class SshMcpProxy {
 
   /* Asks the IBM i (build_status, not seen by VS Code) whether the build it ran last is still running */
   private boolean remoteBuildRunning() throws Exception {
+    return remoteBuildRunning(60_000);
+  }
+
+  /* The same, waiting at most this many milliseconds for the answer */
+  private boolean remoteBuildRunning(long waitMillis) throws Exception {
     Session s = session;
     String id = remoteBuild;
     if (id == null) return false;
@@ -805,7 +835,7 @@ public class SshMcpProxy {
     params.putObject("arguments").put("buildId", id);
     try {
       writeRemote(s, mapper.writeValueAsString(request));
-      JsonNode response = answer.get(60, java.util.concurrent.TimeUnit.SECONDS);
+      JsonNode response = answer.get(Math.max(1, waitMillis), TimeUnit.MILLISECONDS);
       synchronized (s) {
         if (s.ending == null) noteBuild(response);  // an ended session's build state is not the next one's
       }
@@ -1736,21 +1766,16 @@ public class SshMcpProxy {
     return abs;
   }
 
-  private synchronized void send(String line) {
-    protocolOut.println(line);
-    protocolOut.flush();
+  private void send(String line) {
+    channel.write(line);
   }
 
   private void sendResult(JsonNode id, JsonNode result) {
-    try {
-      ObjectNode response = mapper.createObjectNode();
-      response.put("jsonrpc", "2.0");
-      response.set("id", id);
-      response.set("result", result);
-      send(mapper.writeValueAsString(response));
-    } catch (Exception e) {
-      logger.error("Could not answer the request", e);
-    }
+    ObjectNode response = mapper.createObjectNode();
+    response.put("jsonrpc", "2.0");
+    response.set("id", id);
+    response.set("result", result);
+    channel.write(response);
   }
 
   private void sendToolError(String requestLine, String message) {
@@ -1762,7 +1787,7 @@ public class SshMcpProxy {
       ObjectNode result = response.putObject("result");
       result.putArray("content").addObject().put("type", "text").put("text", message);
       result.put("isError", true);
-      send(mapper.writeValueAsString(response));
+      channel.write(response);
     } catch (Exception e) {
       logger.error("Could not answer the tool call", e);
     }

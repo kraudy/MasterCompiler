@@ -1,10 +1,7 @@
 package com.github.kraudy.compiler;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Paths;
@@ -57,6 +54,7 @@ public class McpServer {
       .enable(SerializationFeature.INDENT_OUTPUT)
       .setSerializationInclusion(JsonInclude.Include.NON_NULL);
   private PrintStream protocolOut;
+  private volatile RpcChannel channel;  // the client being served: answers go to it
 
   private AS400 system;
   private Connection connection;
@@ -160,8 +158,8 @@ public class McpServer {
     disconnect();
   }
 
-  /* Reads requests until stdin closes */
-  public void serve() throws Exception {
+  /* Serves its clients (stdin, the --tool / --script requests, or --socket clients) until they end; the exit code */
+  public int serve() throws Exception {
     /* stdout is the protocol channel: everything else (logback, libraries) goes to stderr */
     protocolOut = new PrintStream(System.out, true, "UTF-8");
     System.setOut(System.err);
@@ -178,28 +176,32 @@ public class McpServer {
     if (!readOnlyMode) ScreenTools.jobQuery(this::rowsForScreens);
     if (!IBMiDotEnv.isIBMi()) TrustStores.warnIfNone();
     logger.info("MasterCompiler MCP server ready");
-
-    BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-    String line;
     try {
-      while ((line = in.readLine()) != null) {
-        if (line.trim().isEmpty()) continue;
-        handle(line);
-      }
+      return RpcChannel.serve(parser, protocolOut, this::session);
     } finally {
       close();
     }
   }
 
-  private void handle(String line) {
-    JsonNode request;
-    try {
-      request = mapper.readTree(line);
-    } catch (Exception e) {
-      sendError(null, -32700, "Parse error");
-      return;
-    }
+  /* One client: its requests until its input ends and they are answered */
+  private void session(RpcChannel client) throws Exception {
+    channel = client;
+    SecretPrompt.client(mapper.createObjectNode());  // this client's capabilities come with its initialize
+    RpcChannel.Message message;
+    while ((message = client.next()) != null) handle(message.node);
+    if (client.stdio()) awaitWork(client);
+  }
 
+  /* The input ended (--exit-on-eof drain): a build or run_command still running ends before the connection closes */
+  private void awaitWork(RpcChannel client) throws InterruptedException {
+    for (BuildProgress work : new BuildProgress[] { lastBuild, commandRun }) {
+      if (work == null || !work.isRunning() || client.drainLeft() == 0) continue;
+      logger.info("Input ended: waiting for {} to end before closing the connection (--drain-timeout)", work.id);
+      while (work.isRunning() && client.drainLeft() > 0) Thread.sleep(200);
+    }
+  }
+
+  private void handle(JsonNode request) {
     JsonNode id = request.get("id");
     String method = request.path("method").asText("");
     JsonNode params = request.path("params");
@@ -2711,12 +2713,7 @@ public class McpServer {
     }
   }
 
-  private synchronized void send(JsonNode message) {
-    try {
-      protocolOut.println(mapper.writeValueAsString(message));
-      protocolOut.flush();
-    } catch (Exception e) {
-      logger.error("Could not send MCP message", e);
-    }
+  private void send(JsonNode message) {
+    channel.write(message);
   }
 }

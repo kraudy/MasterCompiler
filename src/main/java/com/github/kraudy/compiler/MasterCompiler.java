@@ -1284,6 +1284,12 @@ public class MasterCompiler{
       }
       debug = parser.isDebug();
       verbose = parser.isVerbose() && !parser.isMcp();  // the MCP server shows its own in status
+      /* --batch: nobody to answer a dialog or a prompt; "-" outputs: stdout carries the data alone, logs go to stderr */
+      if (parser.isBatch()) {
+        System.setProperty("java.awt.headless", "true");
+        SecretPrompt.noPrompts();
+      }
+      if (Stdio.dash(parser.getJsonReport()) || Stdio.dash(parser.getOutputFile())) Stdio.takeStdout();
 
       if (parser.isVersion()) {
         System.out.println("MasterCompiler " + version());
@@ -1316,6 +1322,12 @@ public class MasterCompiler{
         System.out.println();
         System.out.println(NextSteps.text(null));
         return exitCode;
+      }
+
+      /* --socket without --mcp: the client of a running --mcp --socket server (it signs on to nothing itself) */
+      if (parser.socketClient()) {
+        quietLogs(parser.isVerbose());
+        return RpcChannel.client(parser);
       }
 
       SshTarget.strictHostKey = parser.isStrictHostKey();
@@ -1383,10 +1395,10 @@ public class MasterCompiler{
       }
 
       /* MCP server: one IBM i job kept across tool calls; stdout becomes the protocol channel */
+      /* --tool / --script: the same server over their requests; the exit code says whether a call failed */
       if (parser.isMcp()) {
-        if (parser.isSsh()) new SshMcpProxy(parser).serve();  // MC runs on the IBM i, reached over SSH
-        else new McpServer(parser).serve();
-        return exitCode;
+        if (parser.isSsh()) return new SshMcpProxy(parser).serve();  // MC runs on the IBM i, reached over SSH
+        return new McpServer(parser).serve();
       }
 
       /* Generate-only can run without IBMi when scanning a local tree or rewriting a spec */

@@ -1,6 +1,5 @@
 package com.github.kraudy.compiler;
 
-import java.io.File;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -138,7 +137,7 @@ final class CallRunner {
     collectSpool(system, connection, result, started);
 
     if (parser.getJsonReport() != null) {
-      mapper.writerWithDefaultPrettyPrinter().writeValue(new File(parser.getJsonReport()), result);
+      mapper.writerWithDefaultPrettyPrinter().writeValue(Stdio.open(parser.getJsonReport()), result);
     }
     System.out.println(format(result));
     return result.path("success").asBoolean(false) ? 0 : 1;

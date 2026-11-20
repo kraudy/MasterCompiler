@@ -2,6 +2,7 @@ package com.github.kraudy.compiler;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
@@ -80,25 +81,29 @@ final class DataFetch {
     /* The source's own time and CCSID, before the copy: a stale file is visible in the answer */
     long modified = 0;
     int ccsid = 0;
+    long copied;
     try { modified = file.lastModified(); } catch (Exception ignored) {}
     try { ccsid = file.getCCSID(); } catch (Exception ignored) {}
+    if (Stdio.dash(output)) {  // -o -: the bytes to stdout, the "Fetched" line to stderr
+      OutputStream out = Stdio.takeStdout();
+      try (InputStream in = new IFSFileInputStream(system, path, IFSFileInputStream.SHARE_ALL)) {
+        copied = copy(in, out);
+      }
+      out.flush();
+      System.out.println(fetched(path, copied, target, modified, ccsid));
+      return 0;
+    }
     File folder = target.getAbsoluteFile().getParentFile();
     if (folder != null && !folder.isDirectory() && !folder.mkdirs()) {
       System.err.println("Fetch failed: cannot create " + folder);
       return 1;
     }
-    long copied = 0;
     /* Into a new, uniquely named file next to the target (created exclusively, never an existing file or link), then moved over
        it: fetching onto the file itself (MC on the IBM i) cannot empty it first */
     File partial = java.nio.file.Files.createTempFile(target.getAbsoluteFile().getParentFile().toPath(), ".mc-fetch-", ".part").toFile();
     try (InputStream in = new IFSFileInputStream(system, path, IFSFileInputStream.SHARE_ALL);
          OutputStream out = new FileOutputStream(partial)) {
-      byte[] buffer = new byte[64 * 1024];
-      int n;
-      while ((n = in.read(buffer)) > 0) {
-        out.write(buffer, 0, n);
-        copied += n;
-      }
+      copied = copy(in, out);
     } catch (Exception e) {
       partial.delete();
       throw e;
@@ -106,6 +111,13 @@ final class DataFetch {
     java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     System.out.println(fetched(path, copied, target, modified, ccsid));
     return 0;
+  }
+
+  private static long copy(InputStream in, OutputStream out) throws IOException {
+    long copied = 0;
+    byte[] buffer = new byte[64 * 1024];
+    for (int n; (n = in.read(buffer)) > 0; copied += n) out.write(buffer, 0, n);
+    return copied;
   }
 
   /* The line the fetch prints: source, size, when it was last changed, and its CCSID when known */

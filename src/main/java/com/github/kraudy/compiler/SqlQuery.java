@@ -1,6 +1,5 @@
 package com.github.kraudy.compiler;
 
-import java.io.File;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -47,7 +46,7 @@ final class SqlQuery {
       return 1;
     }
     if (parser.getJsonReport() != null) {
-      new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(new File(parser.getJsonReport()), result);
+      new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(Stdio.open(parser.getJsonReport()), result);
     }
     System.out.println(format(result));
     return 0;
