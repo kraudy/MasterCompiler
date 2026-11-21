@@ -1,6 +1,7 @@
 package com.github.kraudy.compiler;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -87,6 +88,7 @@ class CommandFailureTest {
 
   @Test
   void downloadsFollowTheUmask(@TempDir Path folder) throws Exception {
+    assumeTrue(folder.getFileSystem().supportedFileAttributeViews().contains("posix"), "no POSIX file modes here (Windows)");
     File partial = DataFetch.partialFile(folder.toFile(), ".mc-download-");
     try {
       assertTrue(Files.getPosixFilePermissions(partial.toPath()).contains(PosixFilePermission.OWNER_WRITE));
