@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.io.SequenceInputStream;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -97,6 +98,9 @@ final class RpcChannel {
     FAILED_AT.put("protectedLibs", "PROTECTED_LIB");
   }
 
+  /* A failed tool's JSON: the field that says why, in one line, for the --rpc error's message (the first that has one) */
+  static final List<String> REASONS = Arrays.asList("error", "message");
+
   /* --batch: an answer still running (this field says which) is followed with this tool until it ends */
   static final Map<String, String> FOLLOW = Collections.singletonMap("buildId", "build_status");
 
@@ -160,10 +164,30 @@ final class RpcChannel {
     }
   }
 
-  /* The client's requests: --tool calls, the --script file, or stdin */
+  /*
+   * What a --socket client sends around its own requests: before them, --wait-ready's status that waits for the
+   * server's start-up; after them, --shutdown. Their ids are strings, apart from the numbers of the --tool calls.
+   */
+  static final String WAIT_READY = "{\"jsonrpc\":\"2.0\",\"id\":\"wait-ready\",\"method\":\"tools/call\","
+      + "\"params\":{\"name\":\"status\",\"arguments\":{\"wait\":true}}}\n";
+  static final String SHUTDOWN = "{\"jsonrpc\":\"2.0\",\"id\":\"shutdown\",\"method\":\"shutdown\"}\n";
+  static final String WAIT_READY_ID = "\"wait-ready\"";
+
+  /* The client's requests: --tool calls, the --script file, or stdin; with --wait-ready / --shutdown around them */
   static InputStream requests(ArgParser parser) throws IOException {
+    InputStream own = ownRequests(parser);
+    if (!parser.isWaitReady() && !parser.isShutdown()) return own;
+    return new SequenceInputStream(Collections.enumeration(Arrays.asList(
+        text(parser.isWaitReady() ? WAIT_READY : ""), own, text(parser.isShutdown() ? "\n" + SHUTDOWN : ""))));
+  }
+
+  private static InputStream text(String lines) {
+    return new ByteArrayInputStream(lines.getBytes(StandardCharsets.UTF_8));
+  }
+
+  private static InputStream ownRequests(ArgParser parser) throws IOException {
     if (parser.getScript() != null) return Stdio.dash(parser.getScript()) ? System.in : new FileInputStream(parser.getScript());
-    if (parser.getTools().isEmpty()) return System.in;
+    if (parser.getTools().isEmpty()) return parser.clientReadsStdin() || parser.getSocket() == null ? System.in : text("");
     StringBuilder lines = new StringBuilder();
     int id = 0;
     for (String[] tool : parser.getTools()) {
@@ -267,6 +291,7 @@ final class RpcChannel {
     boolean confirm;    // --confirm: confirm: true where a call does not say
     boolean relay;      // a --socket client: shutdown is for the server, passed on
     boolean finite;     // the requests are --tool calls or a --script file: reading them never waits
+    boolean waitReady;  // --wait-ready: its status call (the first request) must answer ready, or nothing more is sent
     Eof eof = Eof.DRAIN;
     int drainSeconds = DEFAULT_DRAIN_SECONDS;
 
@@ -278,11 +303,13 @@ final class RpcChannel {
       o.batch = parser.isBatch();
       o.failFast = parser.isFailFast();
       o.confirm = parser.isConfirm();
+      o.waitReady = parser.socketClient() && parser.isWaitReady();
       o.eof = parser.getExitOnEof() != null ? Eof.valueOf(parser.getExitOnEof().toUpperCase(Locale.ROOT))
           : inner ? Eof.ABORT : Eof.DRAIN;  // inner: the SSH server already waited for its answers
       o.drainSeconds = parser.getDrainTimeout() >= 0 ? parser.getDrainTimeout() : DEFAULT_DRAIN_SECONDS;
       o.finite = (parser.getSocket() == null || parser.socketClient())
-          && (!parser.getTools().isEmpty() || parser.getScript() != null && !Stdio.dash(parser.getScript()));
+          && (!parser.getTools().isEmpty() || parser.getScript() != null && !Stdio.dash(parser.getScript())
+              || parser.socketClient() && parser.getScript() == null && !parser.clientReadsStdin());
       return o;
     }
   }
@@ -542,10 +569,13 @@ final class RpcChannel {
       return null;
     }
     node.set("id", id);
-    boolean error = node.has("error") || result != null && result.path("isError").asBoolean(false);
+    /* --wait-ready's status: a server whose start-up or spec failed (state other than ready) is not ready */
+    boolean waitReady = options.waitReady && WAIT_READY_ID.equals(id.toString());
+    boolean error = node.has("error") || result != null && result.path("isError").asBoolean(false)
+        || waitReady && data != null && !"ready".equals(data.path("state").asText("ready"));
     if (error) {
       failed = true;
-      if (options.failFast) stop = true;
+      if (options.failFast || waitReady) stop = true;  // what comes after --wait-ready depends on it
     }
     sending.add(own);
     return options.rpc ? rpc(node, data) : node;
@@ -628,11 +658,19 @@ final class RpcChannel {
     String kind = result.path("_meta").path("errorKind").asText(errorKind(data, text));
     ObjectNode error = out.putObject("error");
     error.put("code", -32000);
-    error.put("message", data == null ? text : kind);
+    error.put("message", data == null ? text : kind + reason(data));
     ObjectNode details = error.putObject("data");
     details.put("errorKind", kind);
     if (data != null) details.set("result", data);
     return out;
+  }
+
+  /* ": <why>" from a failed tool's JSON, empty when it has no such field */
+  static String reason(JsonNode data) {
+    for (String field : REASONS) {
+      if (data.path(field).isTextual() && !data.get(field).asText().trim().isEmpty()) return ": " + data.get(field).asText().trim();
+    }
+    return "";
   }
 
   /* Drain timed out: what is still owed gets an error (sent by the caller, outside the lock), one answer per request */

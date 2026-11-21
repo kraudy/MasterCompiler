@@ -239,4 +239,85 @@ class RpcChannelTest {
     assertEquals("status", status.node.path("params").path("name").asText());
     assertThrows(IllegalArgumentException.class, () -> new ArgParser(new String[] { "--args-json", "{}" }));
   }
+
+  @Test
+  void socketFlagsGoWhereTheyBelong() {
+    /* --confirm on the server: every client's default; --fail-fast there only with --batch (it reads one at a time) */
+    ArgParser server = new ArgParser(new String[] { "--mcp", "--socket", "/tmp/mc-t.sock", "--confirm" });
+    try {
+      server.validate();
+    } catch (IllegalArgumentException e) {
+      assertFalse(e.getMessage().contains("--confirm"), e.getMessage());
+    }
+    assertTrue(server.isConfirm());
+    assertThrows(IllegalArgumentException.class, () -> new ArgParser(new String[] { "--mcp", "--confirm" }).validate());
+    IllegalArgumentException fast = assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] { "--mcp", "--socket", "/tmp/mc-t.sock", "--fail-fast" }).validate());
+    assertTrue(fast.getMessage().contains("--socket <path> --fail-fast"), fast.getMessage());
+    /* the client refuses the server's options, naming them, and the server the client's */
+    IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] { "--socket", "/tmp/mc-t.sock", "--ssh", "--tool", "status" }).validate());
+    assertTrue(e.getMessage().contains("--ssh goes on the server's start"), e.getMessage());
+    e = assertThrows(IllegalArgumentException.class,
+        () -> new ArgParser(new String[] { "--mcp", "--socket", "/tmp/mc-t.sock", "--wait-ready" }).validate());
+    assertTrue(e.getMessage().startsWith("--wait-ready goes on a client call"), e.getMessage());
+    assertThrows(IllegalArgumentException.class, () -> new ArgParser(new String[] { "--tool", "status", "--shutdown" }).validate());
+    assertTrue(ArgParser.getUsage().contains("--socket client (--socket <path>) takes --tool"));
+  }
+
+  @Test
+  void waitReadyAndShutdownWrapTheClientsRequests() throws Exception {
+    ArgParser parser = new ArgParser(new String[] { "--socket", "/tmp/mc-t.sock", "--wait-ready", "--tool", "sql",
+        "--args-json", "{\"statement\":\"VALUES 1\"}", "--shutdown" });
+    parser.validate();
+    assertFalse(parser.clientReadsStdin());
+    RpcChannel.Options options = RpcChannel.Options.of(parser);
+    assertTrue(options.finite);
+    options.batch = false;  // all three read at once here: a --batch client sends each once the last was answered
+    options.relay = true;   // as the client: shutdown is passed on to the server
+    options.drainSeconds = 0;
+    RpcChannel channel = new RpcChannel(RpcChannel.requests(parser), out, options, true);
+    RpcChannel.Message wait = channel.next();
+    assertEquals("status", wait.node.path("params").path("name").asText());
+    assertTrue(wait.node.path("params").path("arguments").path("wait").asBoolean());
+    assertEquals("sql", channel.next().node.path("params").path("name").asText());
+    assertEquals("shutdown", channel.next().method());
+    /* alone, they never wait for stdin */
+    ArgParser alone = new ArgParser(new String[] { "--socket", "/tmp/mc-t.sock", "--shutdown" });
+    alone.validate();
+    assertFalse(alone.clientReadsStdin());
+    assertTrue(RpcChannel.Options.of(alone).finite);
+    assertTrue(new ArgParser(new String[] { "--socket", "/tmp/mc-t.sock" }).clientReadsStdin());
+  }
+
+  /* The status answer to --wait-ready, and whether the plan after it is still read */
+  private RpcChannel.Message afterWaitReady(boolean waitReady, boolean isError, String text) throws Exception {
+    RpcChannel.Options options = options();
+    options.batch = true;
+    options.waitReady = waitReady;
+    RpcChannel channel = channel(RpcChannel.WAIT_READY + "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"plan\"}}\n", options);
+    RpcChannel.Message wait = channel.next();
+    ObjectNode answer = mapper.createObjectNode().put("jsonrpc", "2.0").put("id", wait.node.get("id").asText());
+    answer.putObject("result").put("isError", isError).putArray("content").addObject().put("type", "text").put("text", text);
+    channel.write(answer);
+    RpcChannel.Message next = channel.next();
+    assertEquals(isError || waitReady && text.contains("failed"), channel.failed());
+    return next;
+  }
+
+  @Test
+  void failedWaitReadyStopsTheRest() throws Exception {
+    assertNull(afterWaitReady(true, true, "Could not start MasterCompiler on the IBM i (stage 1/5 connecting): refused"));
+    assertNull(afterWaitReady(true, false, "{\"state\":\"failed\",\"error\":\"YAML must define at least one target\"}"));
+    assertNotNull(afterWaitReady(true, false, "{\"state\":\"ready\"}"));
+    /* a script's own request with that id is an ordinary one */
+    assertNotNull(afterWaitReady(false, true, "refused"));
+  }
+
+  @Test
+  void rpcErrorSaysWhy() {
+    assertEquals(": CPF3C50 Program X not created.", RpcChannel.reason(mapper.createObjectNode().put("success", false)
+        .put("error", "CPF3C50 Program X not created.")));
+    assertEquals("", RpcChannel.reason(mapper.createObjectNode().put("success", false)));
+  }
 }

@@ -3,6 +3,19 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.41
+
+- `--socket <path> --wait-ready` waits for the server's start-up (over SSH `5/5 ready`) instead of polling `status`
+  (`status` takes `wait: true`), and `--socket <path> --shutdown` ends the server after a running build or
+  `run_command` ended; `--confirm` on `--mcp --socket` is every client's default (`--fail-fast` goes on the client
+  call, or on the server with `--batch`); `--help` lists the server's and the client's options.
+- `download_file` `member` (`LIB/FILE/MBR`, QTEMP's too: the `run_command` job's) and `toCcsid`: MC's job copies it
+  as text (`CPYTOSTMF ... STMFCCSID(1208)` / `CPY ... TOCCSID`), downloads and deletes the copy. Downloads
+  (`download_file`, `--fetch`) follow the umask instead of `0600`.
+- A failed `run_command` says why: `error` (escape message, diagnostics once per id) and, for `CRTSQLCI` and the
+  other SQL precompilers, `listing` (the spooled listing's messages); `--rpc` errors carry that line in `message`.
+- `clean_remote` `since` (and `keep`): deletes what the session added since an inventory, then MC's files, in one call.
+
 ## v0.3.40
 
 - Scripts and shell pipes (docs/Cli.md, "Scripts and shell pipes"): `--tool <name> [--args-json | --args-file]`

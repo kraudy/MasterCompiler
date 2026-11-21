@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
@@ -164,9 +165,11 @@ public class SshMcpProxy {
         continue;
       }
       JsonNode result = local.localResult(request.path("method").asText(""), request.path("params"));
-      /* status before MC runs on the IBM i: answered here, with the stage it is at */
+      /* status before MC runs on the IBM i: answered here, with the stage it is at; with wait: true it is queued
+         like any call, which waits for the start-up (or fails with it) */
       if (result == null && "tools/call".equals(request.path("method").asText(""))
           && "status".equals(request.path("params").path("name").asText(""))
+          && !request.path("params").path("arguments").path("wait").asBoolean(false)
           && !session.usable()) {
         sendResult(id, statusHere());
         continue;
@@ -218,7 +221,7 @@ public class SshMcpProxy {
       String call = line;
       calls.execute(() -> forward(call));  // one at a time, in order
     }
-    if (client.stdio()) awaitRemoteBuild(client);
+    if (client.stdio() || client.shutdownAsked()) awaitRemoteBuild(client);  // shutdown: a running build ends first
   }
 
   /* The input ended (--exit-on-eof drain): a build still running on the IBM i ends before the SSH session closes */
@@ -865,8 +868,19 @@ public class SshMcpProxy {
   /* A tool call of this server's own to MC on the IBM i, in the running session only: its answer's text as JSON,
      empty when there is no session, no answer in time, or the answer is not JSON (an error text) */
   private JsonNode ownCall(String tool, ObjectNode arguments, int seconds) {
+    try {
+      JsonNode text = mapper.readTree(ownResult(tool, arguments, seconds).path("content").path(0).path("text").asText("{}"));
+      return text.isObject() ? text : mapper.createObjectNode();
+    } catch (Exception e) {
+      logger.info("No answer to {} from MC on the IBM i: {}", tool, e.getMessage());
+      return mapper.createObjectNode();
+    }
+  }
+
+  /* The same, the whole tool result (isError and its text); throws when there is no session or no answer in time */
+  private JsonNode ownResult(String tool, ObjectNode arguments, int seconds) throws Exception {
     Session s = session;
-    if (!s.usable()) return mapper.createObjectNode();
+    if (!s.usable()) throw new IllegalStateException("MasterCompiler is not running on the IBM i (stage " + stage + ")");
     String own = "mc-proxy-" + ownIds.incrementAndGet();
     CompletableFuture<JsonNode> answer = new CompletableFuture<JsonNode>();
     ownCalls.put(own, answer);
@@ -877,15 +891,23 @@ public class SshMcpProxy {
       request.put("method", "tools/call");
       request.putObject("params").put("name", tool).set("arguments", arguments);
       writeRemote(s, mapper.writeValueAsString(request));
-      JsonNode text = mapper.readTree(answer.get(seconds, TimeUnit.SECONDS)
-          .path("result").path("content").path(0).path("text").asText("{}"));
-      return text.isObject() ? text : mapper.createObjectNode();
-    } catch (Exception e) {
-      logger.info("No answer to {} from MC on the IBM i: {}", tool, e.getMessage());
-      return mapper.createObjectNode();
+      JsonNode result = answer.get(seconds, TimeUnit.SECONDS).path("result");
+      if (!result.path("content").isArray()) throw new IllegalStateException(tool + " on the IBM i did not answer a tool result");
+      return result;
+    } catch (TimeoutException e) {
+      throw new IllegalStateException(tool + " on the IBM i did not answer in " + seconds + " s");
+    } catch (ExecutionException e) {  // the session ended first
+      throw new IllegalStateException(tool + " on the IBM i got no answer: " + e.getCause().getMessage());
     } finally {
       ownCalls.remove(own);
     }
+  }
+
+  /* An ownResult's text; IllegalArgumentException with that text when the call failed there */
+  private static String ownText(JsonNode result) {
+    String text = result.path("content").path(0).path("text").asText("");
+    if (result.path("isError").asBoolean(false)) throw new IllegalArgumentException(text);
+    return text;
   }
 
   /* Calls for a read-only connection are answered here; compare gets what the other system holds */
@@ -908,7 +930,7 @@ public class SshMcpProxy {
         return null;
       }
       if ("clean_remote".equals(params.path("name").asText())) {  // ends MC there: run here, on the calls thread
-        sendResult(request.get("id"), cleanRemoteTool(params.path("arguments").path("confirm").asBoolean(false)));
+        sendResult(request.get("id"), cleanRemoteTool(params.path("arguments")));
         return null;
       }
       ObjectNode args = params.has("arguments") && params.get("arguments").isObject()
@@ -930,18 +952,25 @@ public class SshMcpProxy {
    * first (lost), its process is stopped over a new SSH connection, and only then are the files deleted. The next
    * call starts a new session, which uploads both again.
    */
-  private ObjectNode cleanRemoteTool(boolean confirm) {
+  private ObjectNode cleanRemoteTool(JsonNode args) {
+    boolean confirm = args.path("confirm").asBoolean(false);
+    String since = args.path("since").asText("").trim();
     String text;
     boolean error = false;
     try {
       Session s = connected();  // where the copy and the jar are: known once MC started there
       String jar = remoteJar;
       if (!confirm) {
-        text = "Nothing was deleted. On " + host + " clean_remote would stop MasterCompiler there and delete "
+        text = "Nothing was deleted. On " + host + " clean_remote would " + (since.isEmpty() ? ""
+                : "first delete what is new since inventory " + since + " (sinceClean below: clean since, by MC there), then ")
+            + "stop MasterCompiler there and delete "
             + (parser.getPush() != null ? "MC's jar " + jar + " (the --push folder " + remoteDir + " stays)"
                 : "the project copy " + remoteDir + " and MC's jar " + jar + " (kept while another MC server runs from it)")
-            + ". Library objects stay (clean deletes those). The next tool that needs the IBM i uploads both again. Show "
-            + "this to the user; if they agree, call again with confirm: true.";
+            + ". " + (since.isEmpty() ? "Library objects stay (clean deletes those; since: an inventory's name deletes "
+                + "what the session added, here too). " : "")
+            + "The next tool that needs the IBM i uploads both again. Show this to the user; if they agree, call again "
+            + "with confirm: true" + (since.isEmpty() ? "." : " (and the same since, with keep: for what stays).");
+        if (!since.isEmpty()) text += "\n\nsinceClean:\n" + ownText(ownResult("clean", sinceArgs(args, false), 600));
       } else if (remoteBuildRunning()) {
         text = "Build " + remoteBuild + " is running on the IBM i from this copy: nothing was deleted. Wait for it "
             + "(build_status) or stop it with cancel, then call clean_remote again.";
@@ -951,6 +980,15 @@ public class SshMcpProxy {
             + "once they answered (a run_command that hangs: whats_running, then cancel).";
         error = true;
       } else {
+        /* What the session added (inventory since), by MC there while it runs: a failure stops here, nothing else goes */
+        JsonNode sinceClean = since.isEmpty() ? null : mapper.readTree(ownText(ownResult("clean", sinceArgs(args, true), 600)));
+        List<String> left = new ArrayList<String>();  // not deleted, and not kept on purpose: the inventory stays for a retry
+        if (sinceClean != null) for (JsonNode n : sinceClean.path("notDeleted")) if (!n.asText().endsWith(": kept (keep)")) left.add(n.asText());
+        if (!left.isEmpty()) {
+          throw new IllegalArgumentException("clean since " + since + " did not delete everything, so MC's files on the IBM i "
+              + "stay (the inventory with them, to try again): " + String.join("; ", left) + "\n\nsinceClean:\n"
+              + sinceClean.toPrettyString());
+        }
         /* The current library as MC there sees it, while it still runs: only on a connection already open */
         JsonNode library = libraryBeforeClean();
         /* The session's own SSH connection stops MC and deletes the files: no new sign-on while it is up */
@@ -965,6 +1003,7 @@ public class SshMcpProxy {
           ObjectNode done = mapper.createObjectNode();
           String cleaned = cleanRemote(jar);
           error = cleaned.contains("did not finish");
+          if (sinceClean != null) done.set("sinceClean", sinceClean);
           done.put("done", cleaned);
           done.set("remains", remains(library));
           done.put("next", "The next tool that needs the IBM i signs on again and uploads MasterCompiler and the sources: "
@@ -978,6 +1017,9 @@ public class SshMcpProxy {
       text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage()
           + ". Nothing was deleted; --clean-remote with --remote cleans up from a shell.";
       error = true;
+    } catch (IllegalArgumentException e) {  // said by MC there, or clean since left something
+      text = e.getMessage();
+      error = true;
     } catch (Exception e) {
       text = "clean_remote did not finish: " + e.getMessage();
       error = true;
@@ -986,6 +1028,15 @@ public class SshMcpProxy {
     result.putArray("content").addObject().put("type", "text").put("text", text);
     result.put("isError", error);
     return result;
+  }
+
+  /* clean_remote since: the clean call for MC there (its preview, or the confirmed delete of what that preview listed) */
+  private ObjectNode sinceArgs(JsonNode args, boolean confirm) {
+    ObjectNode clean = mapper.createObjectNode();
+    clean.put("since", args.path("since").asText("").trim());
+    if (args.path("keep").isArray()) clean.set("keep", args.get("keep"));
+    clean.put("confirm", confirm);
+    return clean;
   }
 
   /* One query through QShell's db2 in the SSH job (no sign-on); null when SSH is not up or it failed */
@@ -1038,8 +1089,21 @@ public class SshMcpProxy {
     boolean error = false;
     try {
       connected();
-      text = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT)
-          .writeValueAsString(FileDownload.handle(args, project, FileDownload.over(ssh)));
+      ObjectNode done;
+      if (FileDownload.stageKind(args) == null) {
+        done = FileDownload.handle(args, project, FileDownload.over(ssh));
+      } else {
+        /* MC there copies it in its job (QTEMP is that job's); the copy comes over SFTP and is deleted */
+        FileDownload.stageCommand(args, "/check");  // wrong arguments: refused here, nothing runs there
+        String copy = mapper.readTree(ownText(ownResult("download_file", (ObjectNode) args, 600))).path("staged").asText("");
+        if (!copy.contains("/" + FileDownload.STAGED_PREFIX)) throw new IllegalStateException("MC on the IBM i named no copy");
+        try {
+          done = FileDownload.handleStaged(args, copy, project, FileDownload.over(ssh));
+        } finally {
+          ssh.execQuiet("rm -f " + SshTarget.quote(copy));
+        }
+      }
+      text = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT).writeValueAsString(done);
     } catch (ExecutionException e) {
       text = "Could not start MasterCompiler on the IBM i (stage " + stage + "): " + e.getCause().getMessage() + ". The next call tries again.";
       error = true;

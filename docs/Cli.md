@@ -73,15 +73,25 @@ holds one IBM i job (and over `--ssh` one SSH session) for all of a script's cal
 * `--mcp --socket <path>`: a server that stays up on a Unix domain socket (Java 16+), one client after another, keeping
   its IBM i connection between them. It prints `{"method":"notifications/ready",...}` on stdout (and on `--ready-fd N`)
   once it listens. The socket is rw for its owner only; a socket file left by a server that ended is replaced, a live one
-  is refused. `{"method":"shutdown"}` stops it, as does SIGTERM (the socket file is removed).
+  is refused. `{"method":"shutdown"}` (or a client's `--shutdown`) stops it, as does SIGTERM (the socket file is
+  removed); a build or `run_command` still running ends first, for at most `--drain-timeout` seconds.
 * `--socket <path>` without `--mcp`: the client. It sends `--tool` calls, a `--script`, or the JSON-RPC lines on stdin
   to that server, one at a time, and prints each answer; it waits up to 30 s for the server's socket to appear.
+  `--wait-ready` first sends `status` with `wait: true`: over SSH it answers once MC runs on the IBM i (`5/5 ready`),
+  so no polling is needed; a start-up that failed is a failed call (exit code `1`) and nothing after it is sent.
+  `--shutdown` ends the server after the other requests. With either, stdin is not read (use `--script -` for that).
+* Which options go where: the server's start takes `--ssh`, `--project`, `--read-only`, `-f`, `--exit-on-eof`,
+  `--ready-fd` and the connection options; a client takes `--tool`, `--args-json`, `--args-file`, `--script`,
+  `--wait-ready`, `--shutdown`. `--rpc`, `--batch`, `--fail-fast`, `--confirm`, `--drain-timeout` and `-v` go on
+  either: on the server they are every client's default (`--fail-fast` there only with `--batch`; on a client call
+  it needs nothing else). `--help` ends with this list.
 
   ```bash
-  java -jar MasterCompiler.jar --mcp --socket /tmp/mc.sock --project . &
+  java -jar MasterCompiler.jar --mcp --ssh --socket /tmp/mc.sock --project . --confirm &
+  java -jar MasterCompiler.jar --socket /tmp/mc.sock --wait-ready
   java -jar MasterCompiler.jar --socket /tmp/mc.sock --tool plan
   java -jar MasterCompiler.jar --socket /tmp/mc.sock --tool build --args-json '{"files":["qrpglesrc/hello.pgm.rpgle"]}'
-  echo '{"jsonrpc":"2.0","id":1,"method":"shutdown"}' | java -jar MasterCompiler.jar --socket /tmp/mc.sock
+  java -jar MasterCompiler.jar --socket /tmp/mc.sock --shutdown
   ```
 
 What the server does for scripts:
@@ -96,7 +106,9 @@ What the server does for scripts:
   `SQL_ERROR`, `UNKNOWN_TOOL`, `REFUSED`, `NOT_FOUND`, `INVALID_ARGS`, `TOOL_ERROR`; a failed build `COMPILE_FAILED`,
   `HOOK_FAILED`, `TESTS_FAILED`, `TIMEOUT`, `CANCELLED` or `BUILD_FAILED`; another JSON result `TOOL_FAILED`.
 * `--rpc`: a tool's result is its JSON itself (`{"text": ...}` when it answered text), a failed call a JSON-RPC error
-  `-32000` with `data.errorKind` (and `data.result`), and a method may name a tool: `{"id":1,"method":"status"}`.
+  `-32000` with `data.errorKind` (and `data.result`); its `message` is the errorKind and, when the result says why
+  (`error`, e.g. a failed `run_command`'s escape message and diagnostics), that line: `TOOL_FAILED: CPF3C50 Program X
+  not created. Diagnostics: CPD5D02 ...`. A method may name a tool: `{"id":1,"method":"status"}`.
   `initialize` is optional.
 * When the input ends (`printf ... | mc --mcp`), `--exit-on-eof drain` (the default) answers every request already read,
   and over stdio waits for a build or `run_command` still running, before it closes the IBM i connection; for at most

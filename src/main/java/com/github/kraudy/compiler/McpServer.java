@@ -33,6 +33,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400JDBCDataSource;
+import com.ibm.as400.access.IFSFile;
 
 import io.github.theprez.dotenv_ibmi.IBMiDotEnv;
 
@@ -189,7 +190,7 @@ public class McpServer {
     SecretPrompt.client(mapper.createObjectNode());  // this client's capabilities come with its initialize
     RpcChannel.Message message;
     while ((message = client.next()) != null) handle(message.node);
-    if (client.stdio()) awaitWork(client);
+    if (client.stdio() || client.shutdownAsked()) awaitWork(client);  // its input ended, or it ends the server: running work first
   }
 
   /* The input ended (--exit-on-eof drain): a build or run_command still running ends before the connection closes */
@@ -385,13 +386,23 @@ public class McpServer {
     if (parser.isSsh()) {
       ObjectNode cleanRemote = mapper.createObjectNode();
       cleanRemote.put("type", "object");
-      cleanRemote.putObject("properties").putObject("confirm").put("type", "boolean").put("description",
+      ObjectNode cleanRemoteProps = cleanRemote.putObject("properties");
+      cleanRemoteProps.putObject("confirm").put("type", "boolean").put("description",
           "false (default): only say what would be deleted. true: delete, after the user agreed");
+      cleanRemoteProps.putObject("since").put("type", "string").put("description", "An inventory's name (inventory "
+          + "save: before the session): first delete what is new since it, as clean since does (objects and members in the "
+          + "current library, files in the inventory's IFS folder, only this user's), while MC still runs there; if that "
+          + "fails nothing else is deleted");
+      ObjectNode cleanRemoteKeep = cleanRemoteProps.putObject("keep");
+      cleanRemoteKeep.put("type", "array");
+      cleanRemoteKeep.putObject("items").put("type", "string");
+      cleanRemoteKeep.put("description", "With since: entries of its preview to leave alone, as it lists them");
       tools.add(tool("clean_remote",
           "Delete MasterCompiler's own files on the IBM i (IFS, not objects): this project's uploaded copy under "
           + "<home>/mc and MC's jar, e.g. at the end of a trial. Only when the user asks. MC there is stopped first; the "
           + "jar stays while another MC server (another project) still runs from it. The next tool that needs the IBM i "
-          + "uploads both again (about 10 MB). Objects in the library stay: clean deletes those. First call without "
+          + "uploads both again (about 10 MB). Objects in the library stay: clean deletes those, or since: an inventory "
+          + "name ends the session in one call (what it added, then MC's files). First call without "
           + "confirm and show the user what would go; call again with confirm: true only if they agree.",
           cleanRemote));
     }
@@ -531,7 +542,9 @@ public class McpServer {
 
     ObjectNode statusSchema = mapper.createObjectNode();
     statusSchema.put("type", "object");
-    statusSchema.putObject("properties");
+    statusSchema.putObject("properties").putObject("wait").put("type", "boolean").put("description",
+        "Over SSH: true waits until MasterCompiler started on the IBM i (5/5 ready) and answers its full status, or "
+        + "the start-up error; false (default) answers at once with the stage it is at");
     tools.add(tool("status",
         "MasterCompiler's version, the IBM i user, current library and library list the tools use (after the spec's "
         + "library settings), the project folder and spec, protectedLibs; over SSH also the host and the start-up stage. "
@@ -639,12 +652,19 @@ public class McpServer {
     downloadSchema.put("type", "object");
     ObjectNode downloadProps = downloadSchema.putObject("properties");
     downloadProps.putObject("path").put("type", "string").put("description", "Absolute path of an IFS stream file (e.g. /home/USER1/probe.bin)");
-    downloadProps.putObject("name").put("type", "string").put("description", "File name in .mc/results/ (default: the same name)");
-    downloadSchema.putArray("required").add("path");
+    downloadProps.putObject("member").put("type", "string").put("description", "Instead of path: a source member, "
+        + "LIB/FILE/MEMBER or LIB/FILE(MEMBER); QTEMP is the job run_command runs in (e.g. QTEMP/QSQLSRC/ART801, what "
+        + "CRTSQLCI left there). Copied as text in CCSID toCcsid (default 1208, UTF-8), lines ending in LF");
+    downloadProps.putObject("toCcsid").put("type", "integer").put("description", "Convert the text to this CCSID "
+        + "first (a member: default 1208; a path: only when given, else byte for byte)");
+    downloadProps.putObject("name").put("type", "string").put("description", "File name in .mc/results/ (default: the same "
+        + "name; a member's: its name in lower case with .txt)");
     tools.add(tool("download_file",
         "Copy an IFS stream file to the project's .mc/results/ on this PC, byte for byte (no CCSID conversion): a binary "
-        + "probe output, a dump, a save file in a stream file. Returns bytes, SHA-256 and the local path. Over SSH it uses "
-        + "the open connection (no new sign-on). Reads only on the IBM i.",
+        + "probe output, a dump, a save file in a stream file. With member (a source member, QTEMP's too) or toCcsid, "
+        + "MC's IBM i job first copies it as text into a stream file in that CCSID (CPYTOSTMF / CPY) and deletes that copy "
+        + "after the download. Returns bytes, SHA-256 and the local path. Over SSH it uses the open connection (no new "
+        + "sign-on). Reads only on the IBM i, besides that copy.",
         downloadSchema));
 
     ObjectNode runSchema = mapper.createObjectNode();
@@ -661,8 +681,9 @@ public class McpServer {
         + "the spec has none, except the display commands that only read (" + String.join(", ",
         new TreeSet<String>(ReadOnlyCommands.COMMANDS.keySet())) + ") written with keywords: their OUTPUT(*PRINT) goes to spool, an OUTFILE(*CURLIB/NAME) or QTEMP; "
         + "nothing else about its effects is checked. First call without confirm and show the user the command; call "
-        + "again with confirm: true only if they agree. Returns success and the job's messages; logged in "
-        + ".mc/commands.log.",
+        + "again with confirm: true only if they agree. Returns success and the job's messages; a failure also error (why, "
+        + "in one line: the escape message, its diagnostics and, for CRTSQLCI and the other SQL precompilers, the messages "
+        + "of the listing they spool, also in listing). Logged in .mc/commands.log.",
         runSchema));
 
     tools.add(tool("import_source",
@@ -2209,18 +2230,35 @@ public class McpServer {
     Timestamp since = executor.getCurrentTime();
     commandRun = progress;  // only now: from here the finally below ends it
     boolean ok = true;
+    String failure = null;  // the failed call's own text, when the joblog has no message that says why
     try {
       executor.executeCommand(command.replace("'", "''"), since);  // inside QCMDEXC('...'): quotes doubled
     } catch (CompilerException e) {
       ok = false;
+      failure = e.getCause() != null && e.getCause().getMessage() != null ? e.getCause().getMessage() : e.getMessage();
       if (progress.cancelRequested) result.put("cancelled", progress.cancelSteps);
     } finally {
       /* a command that ended by itself while a cancel was stopping it succeeded */
       progress.finish(ok ? BuildProgress.SUCCEEDED : progress.cancelRequested ? BuildProgress.CANCELLED : BuildProgress.FAILED, null, null);
     }
     result.put("success", ok);
+    List<BuildReport.JoblogMessage> joblog = executor.getJoblogMessages(since);
+    if (!ok) {
+      /* why, in one line (also the --rpc error's message); an SQL precompiler's errors are in its listing */
+      String listingName = CommandFailure.listingName(command);
+      List<BuildReport.CompileError> listing = listingName == null ? Collections.<BuildReport.CompileError>emptyList()
+          : EventFile.readListing(connection, listingName, ReadOnlyCommands.name(command), since, null);
+      listing = listing.subList(0, Math.min(listing.size(), CommandFailure.MAX_LISTING));
+      result.put("error", CommandFailure.summary(joblog, listing, failure));
+      if (!listing.isEmpty()) {
+        ArrayNode listed = result.putArray("listing");
+        for (BuildReport.CompileError e : listing) {
+          listed.addObject().put("id", e.id).put("severity", e.severity).put("record", e.line).put("text", e.message);
+        }
+      }
+    }
     ArrayNode messages = result.putArray("messages");
-    for (BuildReport.JoblogMessage m : executor.getJoblogMessages(since)) {
+    for (BuildReport.JoblogMessage m : joblog) {
       messages.addObject().put("id", m.id).put("severity", m.severity).put("text", m.text);
     }
     try {
@@ -2249,19 +2287,58 @@ public class McpServer {
     }
   }
 
-  /* Into the project's .mc/results/ (over SSH the proxy downloads with SFTP, before this server sees the call) */
+  /*
+   * Into the project's .mc/results/ (over SSH the proxy downloads with SFTP, before this server sees the call). A
+   * member or toCcsid: this job copies it into a stream file first. On the IBM i that copy is the whole answer (in
+   * the project's .mc/results/ there): the proxy on the PC downloads and deletes it.
+   */
   private ObjectNode downloadFile(JsonNode args) throws Exception {
+    boolean staged = FileDownload.stageKind(args) != null;
     if (IBMiDotEnv.isIBMi()) {
-      return toolResult("download_file brings a file to the PC: MasterCompiler on the PC (over SSH, or with the host servers) "
-          + "runs it", true);
+      if (!staged) {
+        return toolResult("download_file brings a file to the PC: MasterCompiler on the PC (over SSH, or with the host servers) "
+            + "runs it", true);
+      }
+      ObjectNode copy = mapper.createObjectNode();
+      try {
+        copy.put("staged", stageDownload(args, FileDownload.resultsFolder(projectDir()).getPath()));
+      } catch (IllegalArgumentException e) {
+        return toolResult(e.getMessage(), true);
+      }
+      return toolResult(pretty.writeValueAsString(copy), false);
     }
     connect();
     connections.beforeService(HostConnections.Purpose.FILES);
     try {
-      return toolResult(pretty.writeValueAsString(FileDownload.handle(args, projectDir(), FileDownload.over(system))), false);
+      if (!staged) return toolResult(pretty.writeValueAsString(FileDownload.handle(args, projectDir(), FileDownload.over(system))), false);
+      String home = "/home/" + system.getUserId();  // a folder of this user's: the copy is not readable by all meanwhile
+      if (!new IFSFile(system, home).isDirectory()) return toolResult("download_file with 'member' or 'toCcsid' copies into " + home + ", which does not exist", true);
+      String copy = stageDownload(args, home);
+      try {
+        return toolResult(pretty.writeValueAsString(FileDownload.handleStaged(args, copy, projectDir(), FileDownload.over(system))), false);
+      } finally {
+        new IFSFile(system, copy).delete();
+      }
     } catch (IllegalArgumentException e) {
       return toolResult(e.getMessage(), true);
     }
+  }
+
+  /* download_file's copy into a stream file in folder, by this job (it sees its QTEMP); returns the copy's path */
+  private String stageDownload(JsonNode args, String folder) throws Exception {
+    String copy = FileDownload.stagedPath(folder);
+    String command = FileDownload.stageCommand(args, copy);  // wrong arguments: refused before anything runs
+    connectWithLibraryList();
+    try (PreparedStatement ps = connection.prepareStatement("CALL QSYS2.QCMDEXC(?)")) {
+      ps.setString(1, command);
+      ps.execute();
+    } catch (SQLException e) {
+      /* a copy cut off half way (a conversion error, the disk full) is not left there */
+      if (IBMiDotEnv.isIBMi()) java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(copy));
+      else new IFSFile(system, copy).delete();
+      throw new IllegalArgumentException("The copy for the download failed: " + command + ": " + e.getMessage());
+    }
+    return copy;
   }
 
   private ObjectNode findExport(JsonNode args) throws Exception {

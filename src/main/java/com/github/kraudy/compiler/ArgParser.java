@@ -98,10 +98,12 @@ public class ArgParser {
     SCRIPT        (null, "script",       Kind.VALUE, "Run the JSON-RPC requests in this file (- for stdin; NDJSON or pretty-printed JSON) over one connection and exit (implies --batch)"),
     SOCKET        (null, "socket",       Kind.VALUE, "With --mcp: serve on this Unix domain socket instead of stdio, one client after another, keeping the IBM i connection between them (Java 16+). Without --mcp: send --tool / --script / stdin requests to that server and print the answers"),
     READY_FD      (null, "ready-fd",     Kind.VALUE, "With --mcp --socket: also write the ready notification to this file descriptor once the socket listens"),
+    WAIT_READY    (null, "wait-ready",   Kind.FLAG,  "With --socket (a client): first wait until the server's start-up is done (over SSH: 5/5 ready) and print its status; a start-up that failed is a failed call (exit code 1; with --fail-fast nothing else is sent)"),
+    SHUTDOWN      (null, "shutdown",     Kind.FLAG,  "With --socket (a client): after the other requests, end the server: it answers, stops listening and closes its IBM i connection"),
     RPC           (null, "rpc",          Kind.FLAG,  "Plain JSON-RPC for scripts: a tool's result is its JSON itself, a failed call a JSON-RPC error with data.errorKind, and a method may name a tool ({\"id\":1,\"method\":\"status\"})"),
     BATCH         (null, "batch",        Kind.FLAG,  "Non-interactive: no dialog, prompt or SSH_ASKPASS; one request at a time in order; a build that answers 'running' is followed to its end; exit code 1 when a call failed"),
-    FAIL_FAST     (null, "fail-fast",    Kind.FLAG,  "With --batch: send no request after the first that failed"),
-    CONFIRM       (null, "confirm",      Kind.FLAG,  "With --batch: confirm: true for every tool call that does not set confirm (no preview round trip); confirm: false stays"),
+    FAIL_FAST     (null, "fail-fast",    Kind.FLAG,  "With --batch: send no request after the first that failed (on a --socket client call: send none after it)"),
+    CONFIRM       (null, "confirm",      Kind.FLAG,  "With --batch, --tool / --script, a --socket client call, or on a --mcp --socket server as every client's default: confirm: true for every tool call that does not set confirm (no preview round trip); confirm: false stays"),
     EXIT_ON_EOF   (null, "exit-on-eof",  Kind.VALUE, "With --mcp: when the input ends, drain (default: answer every request already read, then exit) or abort (exit at once)"),
     DRAIN_TIMEOUT (null, "drain-timeout", Kind.VALUE, "Seconds a drain waits for the answers (and a build still running over stdio) before it answers them with DRAIN_TIMEOUT (default 900)");
 
@@ -121,6 +123,20 @@ public class ArgParser {
       return kind == Kind.FLAG;
     }
   }
+
+  /*
+   * --socket: what goes on the server's start (--mcp --socket <path>) and what on a client call (--socket <path>);
+   * the --help lists both. The scripting options in SOCKET_EITHER go on both: on the server they are every client's
+   * default, on a client they are that call's.
+   */
+  private static final Set<Option> SOCKET_SERVER_ONLY = EnumSet.of(Option.SSH, Option.READ_ONLY, Option.PROJECT,
+      Option.FILE, Option.REMOTE, Option.SSH_BUILD, Option.SETUP_VSCODE, Option.EXIT_ON_EOF, Option.READY_FD);
+  private static final Set<Option> SOCKET_CLIENT_ONLY = EnumSet.of(Option.TOOL, Option.ARGS_JSON, Option.ARGS_FILE,
+      Option.SCRIPT, Option.WAIT_READY, Option.SHUTDOWN);
+  private static final Set<Option> SOCKET_EITHER = EnumSet.of(Option.RPC, Option.BATCH, Option.FAIL_FAST, Option.CONFIRM,
+      Option.DRAIN_TIMEOUT, Option.VERBOSE);  // --fail-fast on the server only with --batch: it reads a request once the last was answered
+  /* Only a --socket client sends these (--tool / --script also run in this process) */
+  private static final Set<Option> SOCKET_CLIENT_CALL = EnumSet.of(Option.WAIT_READY, Option.SHUTDOWN);
 
   /* Options whose value may be "-": stdin or stdout (Stdio) */
   private static final Set<Option> DASH_VALUES = EnumSet.of(Option.JSON, Option.SQL, Option.CALL_PARAMS,
@@ -203,6 +219,7 @@ public class ArgParser {
   private boolean help;
   private String next;
   private String nextFile;  // --next-file: removed once setup saved the request
+  private final Set<Option> given = EnumSet.noneOf(Option.class);  // every option on the command line
   private final List<String[]> tools = new ArrayList<String[]>();  // --tool name, its --args-json / --args-file (null: none)
   private final List<Boolean> toolArgsFromStdin = new ArrayList<Boolean>();
   private String script;
@@ -212,6 +229,8 @@ public class ArgParser {
   private boolean batch;
   private boolean failFast;
   private boolean confirm;
+  private boolean waitReady;
+  private boolean shutdown;
   private String exitOnEof;
   private int drainTimeout = -1;
 
@@ -308,6 +327,7 @@ public class ArgParser {
   }
 
   private void setFlag(Option opt) {
+    given.add(opt);
     switch (opt) {
       case DEBUG:         debug = true; break;
       case VERBOSE:       verbose = true; break;
@@ -343,12 +363,15 @@ public class ArgParser {
       case BATCH:         batch = true; break;
       case FAIL_FAST:     failFast = true; break;
       case CONFIRM:       confirm = true; break;
+      case WAIT_READY:    waitReady = true; break;
+      case SHUTDOWN:      shutdown = true; break;
       default:
         throw new IllegalStateException("Option is not a flag: " + opt);
     }
   }
 
   private void setValue(Option opt, String value) {
+    given.add(opt);
     switch (opt) {
       case FILE:
         yamlFile = value;
@@ -1132,7 +1155,7 @@ public class ArgParser {
     stdinUsers.put("--call-params -", Stdio.dash(callParams));
     stdinUsers.put("--args-file -", toolArgsFromStdin.contains(true));
     stdinUsers.put("--script -", Stdio.dash(script));
-    stdinUsers.put("the MCP requests", stdinIsProtocol() || socketClient() && !requests);
+    stdinUsers.put("the MCP requests", stdinIsProtocol() || clientReadsStdin());
     stdinUsers.values().removeIf(used -> !used);
     if (stdinUsers.size() > 1 || toolArgsFromStdin.indexOf(true) != toolArgsFromStdin.lastIndexOf(true)) {
       throw new IllegalArgumentException("Only one input can come from stdin: " + String.join(", ", stdinUsers.keySet()));
@@ -1159,23 +1182,51 @@ public class ArgParser {
     if (requests) batch = true;
     if (!tools.isEmpty()) rpc = true;
     if (socketClient()) {
-      if (ssh || readOnly || projectRoot != null || yamlFile != null || remote || setupVscode || exitOnEof != null || readyFd >= 0) {
-        throw new IllegalArgumentException("--socket without --mcp is the client of a running --mcp --socket server: it takes "
-            + "--tool, --args-json, --args-file, --script, --rpc, --batch, --fail-fast, --confirm, --drain-timeout, -v");
+      Set<Option> serverOnly = EnumSet.copyOf(given);
+      serverOnly.retainAll(SOCKET_SERVER_ONLY);
+      if (!serverOnly.isEmpty()) {
+        throw new IllegalArgumentException("--socket without --mcp is the client of a running --mcp --socket server: "
+            + names(serverOnly) + (serverOnly.size() == 1 ? " goes" : " go") + " on the server's start. A client takes " + names(SOCKET_CLIENT_ONLY) + ", "
+            + names(SOCKET_EITHER));
       }
       return true;
+    }
+    Set<Option> clientCall = EnumSet.copyOf(given);
+    clientCall.retainAll(SOCKET_CLIENT_CALL);
+    if (!clientCall.isEmpty()) {
+      throw new IllegalArgumentException(names(clientCall) + (clientCall.size() == 1 ? " goes" : " go") + " on a client call: --socket <path> without --mcp, to a "
+          + "running --mcp --socket server");
     }
     if (readyFd >= 0 && socket == null) throw new IllegalArgumentException("--ready-fd goes with --mcp --socket");
     if ((rpc || batch || exitOnEof != null || drainTimeout >= 0) && !mcp) {
       throw new IllegalArgumentException("--rpc, --batch, --exit-on-eof and --drain-timeout go with --mcp, --tool, --script or --socket");
     }
-    if ((failFast || confirm) && !batch) throw new IllegalArgumentException("--fail-fast and --confirm go with --batch (or --tool / --script)");
+    if (failFast && !batch) {
+      throw new IllegalArgumentException("--fail-fast goes with --batch (or --tool / --script), or on a --socket client "
+          + "call: --socket <path> --fail-fast");
+    }
+    if (confirm && !batch && socket == null) {
+      throw new IllegalArgumentException("--confirm goes with --batch (or --tool / --script), or on a --mcp --socket "
+          + "server as every client's default");
+    }
     return false;
+  }
+
+  /* --long names, comma-separated, in the catalog's order */
+  private static String names(Set<Option> options) {
+    List<String> names = new ArrayList<String>();
+    for (Option opt : options) names.add(opt.longName != null ? "--" + opt.longName : "-" + opt.shortName);
+    return String.join(", ", names);
   }
 
   /* stdin carries the MCP requests: a server on stdio that has no --tool / --script requests of its own */
   private boolean stdinIsProtocol() {
     return mcp && socket == null && tools.isEmpty() && (script == null || Stdio.dash(script));
+  }
+
+  /* A --socket client with no requests of its own to send (--tool, --script, --wait-ready, --shutdown): it sends stdin's */
+  public boolean clientReadsStdin() {
+    return socketClient() && tools.isEmpty() && script == null && !waitReady && !shutdown;
   }
 
   /** {@code --socket} without {@code --mcp}: the client of a running {@code --mcp --socket} server. */
@@ -1216,6 +1267,16 @@ public class ArgParser {
     return confirm;
   }
 
+  /** {@code --wait-ready}: a --socket client first waits for the server's start-up. */
+  public boolean isWaitReady() {
+    return waitReady;
+  }
+
+  /** {@code --shutdown}: a --socket client ends the server after its requests. */
+  public boolean isShutdown() {
+    return shutdown;
+  }
+
   /** {@code --exit-on-eof}: drain, abort, or null for the default. */
   public String getExitOnEof() {
     return exitOnEof;
@@ -1254,9 +1315,10 @@ public class ArgParser {
       }
       sb.append("\t").append(opt.description).append("\n");
     }
-    if (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') {
-      sb.setLength(sb.length() - 1);
-    }
+    sb.append("--socket server (--mcp --socket <path>) takes ").append(names(SOCKET_SERVER_ONLY))
+        .append(" and the connection options (--code4i, --ssh-port, --max-sign-ons, ...)\n");
+    sb.append("--socket client (--socket <path>) takes ").append(names(SOCKET_CLIENT_ONLY)).append("\n");
+    sb.append("Both take ").append(names(SOCKET_EITHER)).append(": on the server, every client's default (--fail-fast there with --batch)");
     return sb.toString();
   }
 }

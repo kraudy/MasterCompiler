@@ -21,6 +21,15 @@ import com.ibm.as400.access.IFSFileInputStream;
 final class DataFetch {
   private DataFetch() {}
 
+  /*
+   * A new, uniquely named file in folder for a download to land in before it is moved over the target, made
+   * exclusively (never an existing file or link). java.io's temp file follows the umask, as any file the user makes
+   * (0644 with umask 022); nio's would always be 0600.
+   */
+  static File partialFile(File folder, String prefix) throws IOException {
+    return File.createTempFile(prefix, ".part", folder);
+  }
+
   /* An absolute path to a file; throws IllegalArgumentException */
   static void check(String path) {
     if (path == null || !path.startsWith("/") || path.endsWith("/") || path.indexOf('\0') >= 0 || path.contains("\n")) {
@@ -100,7 +109,7 @@ final class DataFetch {
     }
     /* Into a new, uniquely named file next to the target (created exclusively, never an existing file or link), then moved over
        it: fetching onto the file itself (MC on the IBM i) cannot empty it first */
-    File partial = java.nio.file.Files.createTempFile(target.getAbsoluteFile().getParentFile().toPath(), ".mc-fetch-", ".part").toFile();
+    File partial = partialFile(target.getAbsoluteFile().getParentFile(), ".mc-fetch-");
     try (InputStream in = new IFSFileInputStream(system, path, IFSFileInputStream.SHARE_ALL);
          OutputStream out = new FileOutputStream(partial)) {
       copied = copy(in, out);

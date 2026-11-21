@@ -1,6 +1,7 @@
 package com.github.kraudy.compiler;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -182,39 +183,71 @@ public final class EventFile {
    */
   public static List<BuildReport.CompileError> readSqlListing(Connection connection, String spoolName,
       Timestamp since, String sourceFile) {
-    List<BuildReport.CompileError> errors = new ArrayList<BuildReport.CompileError>();
-    if (connection == null || spoolName == null || spoolName.isEmpty()) return errors;
+    return readListing(connection, spoolName, "SQL", since, sourceFile);
+  }
+
+  /*
+   * The SQL messages of the user's listings named spoolName with that user data (RUNSQLSTM: SQL; the SQL precompilers:
+   * the command, e.g. CRTSQLCI), spooled since then. They go to the user's QPRTJOB, not the compiling job.
+   */
+  public static List<BuildReport.CompileError> readListing(Connection connection, String spoolName, String userData,
+      Timestamp since, String sourceFile) {
+    if (connection == null || spoolName == null || spoolName.isEmpty()) return new ArrayList<BuildReport.CompileError>();
     String name = spoolName.toUpperCase();
     if (name.length() > 10) name = name.substring(0, 10);
-
-    try (Statement stmt = connection.createStatement();
-         ResultSet rs = stmt.executeQuery(
-           "SELECT D.SPOOLED_DATA " +
-           "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER, STARTING_TIMESTAMP => '" + since + "')) S " +
+    List<String> lines = new ArrayList<String>();
+    try (PreparedStatement stmt = connection.prepareStatement(
+           "SELECT S.SPOOLED_FILE_NUMBER, D.SPOOLED_DATA " +
+           "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER, STARTING_TIMESTAMP => ?)) S " +
            "INNER JOIN TABLE(SYSTOOLS.SPOOLED_FILE_DATA(JOB_NAME => S.QUALIFIED_JOB_NAME, " +
              "SPOOLED_FILE_NAME => S.SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER => S.SPOOLED_FILE_NUMBER)) D ON 1 = 1 " +
-           "WHERE S.SPOOLED_FILE_NAME = '" + name + "' AND S.USER_DATA = 'SQL'")) {
-      while (rs.next()) {
-        Matcher m = SQL_LISTING_MESSAGE.matcher(rs.getString(1) == null ? "" : rs.getString(1).trim());
-        if (!m.matches()) continue;
-        BuildReport.CompileError error = new BuildReport.CompileError();
-        error.file = sourceFile;
-        error.id = m.group(1);
-        error.severity = toInt(m.group(2));
-        error.line = toInt(m.group(3));
-        error.endLine = error.line;
-        error.message = m.group(4).trim();
-        Matcher position = SQL_POSITION.matcher(error.message);
-        if (position.find()) error.column = toInt(position.group(1));
-        errors.add(error);
+           "WHERE S.SPOOLED_FILE_NAME = ? AND S.USER_DATA = ? ORDER BY S.SPOOLED_FILE_NUMBER, D.ORDINAL_POSITION")) {
+      stmt.setTimestamp(1, since);
+      stmt.setString(2, name);
+      stmt.setString(3, userData);
+      try (ResultSet rs = stmt.executeQuery()) {
+        Integer first = null;  // the first listing since then only: never two merged (same name, another library or session)
+        while (rs.next()) {
+          if (first == null) first = rs.getInt(1);
+          if (rs.getInt(1) != first) break;
+          lines.add(rs.getString(2) == null ? "" : rs.getString(2));
+        }
       }
     } catch (SQLException e) {
-      logger.info("Could not read SQL listing {}: {}", name, e.getMessage());
+      logger.info("Could not read listing {}: {}", name, e.getMessage());
+    }
+    return parseListing(lines, sourceFile);
+  }
+
+  /* A listing's message lines (id, severity, record, text) with the text lines indented under them */
+  static List<BuildReport.CompileError> parseListing(List<String> lines, String sourceFile) {
+    List<BuildReport.CompileError> errors = new ArrayList<BuildReport.CompileError>();
+    BuildReport.CompileError last = null;
+    for (String line : lines) {
+      Matcher m = SQL_LISTING_MESSAGE.matcher(line.trim());
+      Matcher more = LISTING_CONTINUED.matcher(line);
+      if (m.matches()) {
+        last = new BuildReport.CompileError();
+        last.file = sourceFile;
+        last.id = m.group(1);
+        last.severity = toInt(m.group(2));
+        last.line = toInt(m.group(3));
+        last.endLine = last.line;
+        last.message = m.group(4).trim();
+        Matcher position = SQL_POSITION.matcher(last.message);
+        if (position.find()) last.column = toInt(position.group(1));
+        errors.add(last);
+      } else if (last != null && more.matches()) {
+        last.message += " " + more.group(1).trim();
+      } else {
+        last = null;
+      }
     }
     return errors;
   }
 
   private static final Pattern SQL_LISTING_MESSAGE = Pattern.compile("^(SQ[A-Z0-9]{5})\\s+(\\d{1,2})\\s+(\\d+)\\s+(.*)$");
+  private static final Pattern LISTING_CONTINUED = Pattern.compile("^ {21}(\\S.*)$");  // the TEXT column (21), under the message; "Message Summary" is at 20
   private static final Pattern SQL_POSITION = Pattern.compile("Position (\\d+)");
 
   /* First record is "TIMESTAMP 0 yyyyMMddHHmmss"; the member must not predate the target build */
