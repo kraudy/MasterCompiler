@@ -2,9 +2,13 @@ package com.github.kraudy.compiler;
 
 import java.io.File;
 import java.sql.Connection;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,11 +77,12 @@ public class SpecGenerator {
 
     SourceScanner scanner = new SourceScanner(system, verbose);
     List<CandidateSource> candidates = scanner.scan(root);
+    String notTargets = notTargetsLine(scanner.notTargets());
 
     if (candidates.isEmpty()) {
       throw new IllegalArgumentException(
           "No recognizable sources found under: " + root
-              + ". Use naming {object}.{objectType}.{sourceType} (e.g. HELLO.pgm.rpgle).");
+              + ". Use naming {object}.{objectType}.{sourceType} (e.g. HELLO.pgm.rpgle)." + (notTargets != null ? " " + notTargets : ""));
     }
 
     BuildSpec spec = new BuildSpec();
@@ -162,7 +167,7 @@ public class SpecGenerator {
     }
 
     if (added == 0) {
-      throw new IllegalArgumentException("No valid targets could be created from: " + root);
+      throw new IllegalArgumentException("No valid targets could be created from: " + root + (notTargets != null ? ". " + notTargets : ""));
     }
 
     /* Relative SRCSTMF resolves against the IBM i job curdir — set it to the scan root */
@@ -177,6 +182,13 @@ public class SpecGenerator {
 
     /* Merge non-inferable params from base overlay (mc-base.yaml / --base) */
     mergeBaseOverlay(spec, root, basePath);
+
+    /* After the overlay, which may make one of them a target (SRCSTMF: helper.c): in the plan / build report once per session */
+    notTargets = notTargetsLine(notCompiled(scanner.notTargets(), spec));
+    if (notTargets != null) {
+      spec.warnings.add(notTargets);
+      if (logged.add(notTargets)) logger.warn(notTargets);
+    }
 
     /* After the overlay: its MODULE lists count as service programs that already take a module */
     if (serviceProgramsFromExports) added += addServicePrograms(spec, library, moduleTexts, boundSymbols);
@@ -205,14 +217,42 @@ public class SpecGenerator {
     return spec;
   }
 
-  /* Objects with two sources already logged by this process: the spec is scanned again on every MCP call */
-  private static final java.util.Set<String> loggedDuplicates = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  /* Lines already logged by this process (objects with two sources, files that are not targets): the spec is scanned
+     again on every MCP call */
+  private static final Set<String> logged = ConcurrentHashMap.newKeySet();
+  static final int NOT_TARGETS_SHOWN = 10;
+
+  /* The files no target of the spec compiles (its SRCSTMF names them: relative to the scan root, or the root's path) */
+  static Map<String, String> notCompiled(Map<String, String> notTargets, BuildSpec spec) {
+    Map<String, String> left = new LinkedHashMap<String, String>(notTargets);
+    for (BuildSpec.TargetSpec target : spec.targets.values()) {
+      String stmf = target.params.get(ParamCmd.SRCSTMF);
+      if (stmf == null) continue;
+      String path = stmf.replace('\\', '/');
+      String root = String.valueOf(spec.getBaseDirectory()).replace('\\', '/') + "/";
+      left.keySet().removeIf(file -> path.equals(file) || path.equals(root + file));
+    }
+    return left;
+  }
+
+  /* One line for the files named as sources that are not targets (path -> why), null when there are none */
+  static String notTargetsLine(Map<String, String> notTargets) {
+    if (notTargets.isEmpty()) return null;
+    List<String> shown = new ArrayList<String>();
+    for (Map.Entry<String, String> e : notTargets.entrySet()) {
+      if (shown.size() == NOT_TARGETS_SHOWN) break;
+      shown.add(e.getKey() + " (" + e.getValue() + ")");
+    }
+    int more = notTargets.size() - shown.size();
+    return notTargets.size() + (notTargets.size() == 1 ? " file is" : " files are") + " named as a source but not a target: "
+        + String.join("; ", shown) + (more > 0 ? "; and " + more + " more" : "");
+  }
 
   /* One line for the objects with several sources not logged yet; the build report names those its build touched */
   static String logDuplicates(BuildSpec spec) {
     java.util.List<String> fresh = new java.util.ArrayList<String>();
     for (java.util.Map.Entry<String, java.util.List<String>> e : spec.duplicateSources.entrySet()) {
-      if (loggedDuplicates.add(e.getKey() + " " + e.getValue())) fresh.add(e.getKey().replace(".", " *") + " (" + String.join(", ", e.getValue()) + ")");
+      if (logged.add(e.getKey() + " " + e.getValue())) fresh.add(e.getKey().replace(".", " *") + " (" + String.join(", ", e.getValue()) + ")");
     }
     if (fresh.isEmpty()) return null;
     String line = fresh.size() + (fresh.size() == 1 ? " object has" : " objects have") + " more than one source, the one built "

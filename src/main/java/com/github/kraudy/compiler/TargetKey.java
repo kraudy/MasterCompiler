@@ -4,8 +4,10 @@ import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 
 import org.slf4j.Logger;
@@ -222,6 +224,9 @@ public class TargetKey {
     return " (source last edit: " + this.lastSourceEdit + ", object last build: " + this.lastBuild + ")";
   }
 
+  /* Parameters the key keeps when its command takes none: SRCSTMF (an OPM command's source, copied to a member) */
+  static final Set<ParamCmd> KEPT_WHEN_REJECTED = EnumSet.of(ParamCmd.SRCSTMF);
+
   public TargetKey putAll(Map<ParamCmd, String> params) {
     if (params == null) return this;
     /* 
@@ -237,7 +242,7 @@ public class TargetKey {
         put(param, value);
       } catch (Exception ignore) {
         /* Invalid params are just ignored. This is useful because this map has not been previously validated */
-        logger.info("Rejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
+        if (!KEPT_WHEN_REJECTED.contains(param)) logger.info("Rejected: Parameter " + param.name() + " not valid for command " + getCompilationCommandName());
       }
     });
 

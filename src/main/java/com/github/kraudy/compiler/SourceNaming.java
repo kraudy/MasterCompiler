@@ -1,7 +1,9 @@
 package com.github.kraudy.compiler;
 
-import java.util.Locale;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -141,6 +143,38 @@ public final class SourceNaming {
 
     // Descriptive middles (parts[1 .. objectNameEnd)) are intentionally ignored
     return Optional.of(new ParsedName(objectName, objectType, sourceType, ownServiceProgram));
+  }
+
+  /*
+   * Why a file named as a source (its extension is a source type) is not a target, and the names that would make it
+   * one (from the object types that source builds); null when it is a target, or no source (another extension, a copy
+   * member)
+   */
+  static String notTarget(String fileName) {
+    if (fileName == null || parseFileName(fileName).isPresent()) return null;
+    String[] parts = fileName.substring(Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\')) + 1).split("\\.");
+    if (parts.length < 2) return null;
+    for (int i = 1; i < parts.length - 1; i++) if ("include".equalsIgnoreCase(parts[i])) return null;
+    String extension = parts[parts.length - 1];
+    ParsedName tobi = TOBI_EXTENSIONS.get(extension.toUpperCase(Locale.ROOT));
+    SourceType sourceType = tobi != null ? tobi.sourceType : named(SourceType.class, extension);
+    if (sourceType == null) return null;
+    String name = parts[0].toUpperCase(Locale.ROOT).split("-", 2)[0];
+    if (!OBJECT_NAME.matcher(name).matches()) return parts[0] + " is not an object name (1 to 10 of A-Z 0-9 $ # @ _)";
+    List<String> names = new ArrayList<String>();
+    for (ObjectType type : ObjectType.values()) {
+      if (isValidCombination(sourceType, type)) names.add(name + "." + type.name().toLowerCase(Locale.ROOT) + "." + extension);
+    }
+    if (tobi != null || names.isEmpty()) return "no object is built from ." + extension + " source";
+    ObjectType typed = parts.length >= 3 ? named(ObjectType.class, parts[parts.length - 2]) : null;
+    return (typed != null ? "a " + typed + " is not built from ." + extension + " source" : "its name lacks the object type")
+        + ": name it " + String.join(" or ", names);
+  }
+
+  /* The constant of that name, any case; null when there is none */
+  private static <E extends Enum<E>> E named(Class<E> type, String name) {
+    for (E e : type.getEnumConstants()) if (e.name().equalsIgnoreCase(name)) return e;
+    return null;
   }
 
   /* Extensions TOBi / Code for IBM i use that imply the object type */

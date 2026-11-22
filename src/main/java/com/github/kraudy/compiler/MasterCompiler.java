@@ -400,6 +400,13 @@ public class MasterCompiler{
         }
 
 
+        /* --no-migrate: a stream file its command does not take is not copied, the command compiles the member */
+        if (noMigrate && key.containsStreamFile() && !key.containsKey(ParamCmd.SRCSTMF)) {
+          logger.warn("{}: {} takes no stream file and --no-migrate does not copy {} to a member: it compiles {}({}) as it is",
+              key.asString(), key.getCompilationCommandName(), key.getStreamFile(), key.containsKey(ParamCmd.SRCFILE) ? key.get(ParamCmd.SRCFILE) : key.getQualifiedSourceFile(),
+              key.getSourceName());
+        }
+
         /* Migrate source file */
         if (!noMigrate) {
           try {

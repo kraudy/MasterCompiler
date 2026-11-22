@@ -3,6 +3,16 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.43
+
+- A scan names the files whose extension is a source type but that are not targets, and why, with the names that
+  would make them targets (`opmprb.c (its name lacks the object type: name it OPMPRB.pgm.c or OPMPRB.module.c)`):
+  one warning in the log and in the `plan` / `build` report, also in the error when no target is left.
+- `SRCSTMF` of an OPM target (`CRTCLPGM`, `CRTRPGPGM`, DDS, ...) is no longer logged as `Rejected`: MC copies the
+  stream file to a member. With `--no-migrate` a warning says which member is compiled instead.
+- A `--tool` / `--script` run with no `--project` (the repository it started in is its project) writes the 5250
+  watch file `.mc/screen.txt` to `~/.mastercompiler/.mc/`, not into that repository.
+
 ## v0.3.42
 
 - `--script` takes a tool's name as the method (`{"id":1,"method":"run_command","params":{...}}`), as `--tool` and

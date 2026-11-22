@@ -251,6 +251,20 @@ class RpcChannelTest {
   }
 
   @Test
+  void aScriptInTheRepositoryItStartedInKeepsTheScreenFileOutOfIt() {
+    ArgParser implicit = new ArgParser(new String[] { "--script", "requests.ndjson" });
+    implicit.validate();
+    assertNotNull(implicit.getProjectRoot(), "the tests run in a git repository: it is the project, as for an MCP client");
+    assertTrue(implicit.isScriptInWorkingFolder());
+    ArgParser named = new ArgParser(new String[] { "--project", implicit.getProjectRoot(), "--script", "requests.ndjson" });
+    named.validate();
+    assertFalse(named.isScriptInWorkingFolder());
+    ArgParser client = new ArgParser(new String[] { "--mcp" });
+    client.validate();
+    assertFalse(client.isScriptInWorkingFolder(), "an MCP client's project keeps .mc/screen.txt");
+  }
+
+  @Test
   void toolsBecomeRequestsOfABatchRpcServer() throws Exception {
     ArgParser parser = new ArgParser(new String[] { "--tool", "status", "--tool", "sql", "--args-json", "{\"statement\":\"VALUES 1\"}" });
     parser.validate();

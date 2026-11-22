@@ -485,7 +485,8 @@ Do not open a 5250 session for those. To check a display file program the way a 
 4. End the program, type `SIGNOFF`, then `screen_close`.
 
 Every key runs as the user: ask them before options or commands that change or delete data. Tell the
-user they can open `.mc/screen.txt` in VS Code to watch the screens as you go.
+user they can open `.mc/screen.txt` in VS Code to watch the screens as you go (a `--tool` / `--script` run with
+no `--project`, in a repository it took as the project, writes it to `~/.mastercompiler/.mc/` instead).
 
 ### Db2 queries and objects
 

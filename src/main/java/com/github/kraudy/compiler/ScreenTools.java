@@ -176,9 +176,10 @@ final class ScreenTools {
       + "command line) until sign-off, in a named one until that group ends (RCLACTGRP, once nothing in it runs). To "
       + "run the new code: screen_send SIGNOFF, screen_close, then screen_open.";
 
-  /* A tool result for one of TOOLS; target is the build connection's sign-on (null: not available here) */
-  static synchronized ObjectNode handle(String tool, JsonNode args, SignOnGuard.Target target, File project) {
-    watchFile = new File(project, ".mc/screen.txt");
+  /* A tool result for one of TOOLS; target is the build connection's sign-on (null: not available here); project takes
+     the recordings, watchFolder the screen.txt a person follows (and its state files) */
+  static synchronized ObjectNode handle(String tool, JsonNode args, SignOnGuard.Target target, File project, File watchFolder) {
+    watchFile = new File(watchFolder, ".mc/screen.txt");
     projectFolder = project;
     try {
       switch (tool) {
@@ -534,7 +535,7 @@ final class ScreenTools {
   static final String CODE_REFUSED = ".mc/screen-code-refused.json";
 
   private static File codeRefusedFile() {
-    return new File(watchFile.getParentFile(), "screen-code-refused.json");
+    return new File(projectFolder, CODE_REFUSED);
   }
 
   private static final Map<String, Long> codeRefusedHere = new java.util.HashMap<String, Long>();  // also when the file fails

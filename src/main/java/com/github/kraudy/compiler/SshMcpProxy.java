@@ -970,7 +970,7 @@ public class SshMcpProxy {
           return null;
         }
         sendResult(request.get("id"), ScreenTools.handle(params.path("name").asText(), params.path("arguments"),
-            buildTarget, McpServer.folderOf(project)));
+            buildTarget, McpServer.folderOf(project), local.watchFolder(project)));
         return null;
       }
       if ("upload_file".equals(params.path("name").asText())) {  // the file is on this PC: SFTP from here

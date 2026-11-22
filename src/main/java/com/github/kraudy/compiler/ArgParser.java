@@ -180,6 +180,7 @@ public class ArgParser {
   private String importSelection;
   private volatile String tobiRoot;
   private volatile String projectRoot;
+  private volatile boolean projectFromWorkingFolder;  // projectRoot is the folder MC started in (--mcp with no project)
   private String specName;
   private boolean code4i;
   private String connection;
@@ -656,6 +657,7 @@ public class ArgParser {
         File here = folder != null ? workingProject(new File(folder), System.getProperty("user.home")) : null;
         if (here == null) continue;
         projectRoot = here.getPath();
+        projectFromWorkingFolder = true;
         break;
       }
     }
@@ -799,15 +801,18 @@ public class ArgParser {
       throw new IllegalArgumentException("Not a folder on this machine: " + folder + ". Clone the repository first, then give its absolute path.");
     }
     String before = projectRoot;
+    boolean beforeImplicit = projectFromWorkingFolder;
     String[] spec = { yamlFile, scanRoot, tobiRoot };
     try {
       projectRoot = dir.getCanonicalPath();
+      projectFromWorkingFolder = false;
       yamlFile = null;
       scanRoot = null;
       tobiRoot = null;
       resolveProject();
     } catch (Exception e) {
       projectRoot = before;
+      projectFromWorkingFolder = beforeImplicit;
       yamlFile = spec[0];
       scanRoot = spec[1];
       tobiRoot = spec[2];
@@ -1044,6 +1049,12 @@ public class ArgParser {
 
   public String getProjectRoot() {
     return projectRoot;
+  }
+
+  /* A --tool / --script run whose project is the folder it started in (no --project, no open_project): what is only
+     for a person watching the project in an editor (.mc/screen.txt) stays out of it */
+  public boolean isScriptInWorkingFolder() {
+    return projectFromWorkingFolder && (!tools.isEmpty() || script != null);
   }
 
   public boolean isCode4i() {

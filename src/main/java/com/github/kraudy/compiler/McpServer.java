@@ -962,7 +962,7 @@ public class McpServer {
     if (!parser.hasProject() && !WITHOUT_PROJECT.contains(name)) return toolResult(NO_PROJECT, true);
     if (ScreenTools.TOOLS.contains(name)) {
       synchronized (screenLock) {
-        return ScreenTools.handle(name, args, screenSignOn(), projectDir());
+        return ScreenTools.handle(name, args, screenSignOn(), projectDir(), watchFolder(projectDir()));
       }
     }
     try {
@@ -2506,6 +2506,11 @@ public class McpServer {
    * Where MC keeps its own files (.mc: rejected sign-ons, 5250 watch file) for a project, or with none open yet, a
    * folder of its own in the home folder
    */
+  /* Where .mc/screen.txt goes: the project, but not one a --tool / --script run took from the folder it started in */
+  File watchFolder(File project) {
+    return folderOf(parser.isScriptInWorkingFolder() ? null : project);
+  }
+
   static File folderOf(File project) {
     return project != null ? project : new File(System.getProperty("user.home"), ".mastercompiler");
   }

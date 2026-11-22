@@ -37,6 +37,30 @@ public class CTargetsAndSelectionTest {
   }
 
   @Test
+  void filesNamedAsSourcesThatAreNotTargetsSayWhy() throws Exception {
+    assertEquals("its name lacks the object type: name it OPMPRB.pgm.c or OPMPRB.module.c", SourceNaming.notTarget("opmprb.c"));
+    assertTrue(SourceNaming.notTarget("thisnameistoolong.pgm.rpgle").startsWith("thisnameistoolong is not an object name"));
+    assertTrue(SourceNaming.notTarget("X.table.c").startsWith("a TABLE is not built from .c source: name it X.pgm.c"));
+    for (String none : new String[] { "HELLO.pgm.rpgle", "opmcl.clp", "helper.h", "README.md", "FOO.include.rpgle", "Makefile" }) {
+      assertNull(SourceNaming.notTarget(none), none);
+    }
+    BuildSpec spec = scan();
+    assertTrue(spec.warnings.contains("1 file is named as a source but not a target: QCSRC/helper.c (its name lacks the "
+        + "object type: name it HELPER.pgm.c or HELPER.module.c)"), spec.warnings.toString());
+    Files.write(tempDir.resolve("mc-base.yaml"), ("targets:\n  CURLIB.HELPER.MODULE.C:\n    params:\n"
+        + "      SRCSTMF: QCSRC/helper.c\n").getBytes(StandardCharsets.UTF_8));
+    Files.write(tempDir.resolve("helper.c"), "int top(void) { return 0; }\n".getBytes(StandardCharsets.UTF_8));
+    List<String> warnings = scan().warnings;
+    assertTrue(warnings.stream().noneMatch(w -> w.contains("QCSRC/helper.c")), "an overlay target compiles it");
+    assertTrue(warnings.stream().anyMatch(w -> w.contains("1 file is named") && w.contains(": helper.c (")), "not the root's: " + warnings);
+    Path only = Files.createDirectories(tempDir.resolve("only"));
+    Files.write(only.resolve("opmspy.c"), "int main(void) { return 0; }\n".getBytes(StandardCharsets.UTF_8));
+    IllegalArgumentException none = assertThrows(IllegalArgumentException.class,
+        () -> new SpecGenerator(null, false, true).generate(only.toString(), "curlib"));
+    assertTrue(none.getMessage().contains("opmspy.c (its name lacks the object type: name it OPMSPY.pgm.c"), none.getMessage());
+  }
+
+  @Test
   void cSourceNamesNeedTheObjectType() {
     ParsedName module = SourceNaming.parseFileName("DUMPSTATIC.module.c").get();
     assertEquals("DUMPSTATIC", module.objectName);

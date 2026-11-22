@@ -8,8 +8,10 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -95,12 +97,9 @@ public class SourceScanner {
 
       for (Path file : files) {
         String fileName = file.getFileName().toString();
-        if (!SourceNaming.parseFileName(fileName).isPresent()) {
-          if (verbose) logger.info("Skipping unrecognized source name: {}", fileName);
-          continue;
-        }
         Path rel = root.relativize(file);
         String relativePath = rel.toString().replace('\\', '/');
+        if (skipped(fileName, relativePath)) continue;
         result.add(new CandidateSource(file.toAbsolutePath().toString(), relativePath, fileName));
       }
     }
@@ -132,14 +131,26 @@ public class SourceScanner {
       if (!child.isFile()) continue;
 
       String fileName = child.getName();
-      if (!SourceNaming.parseFileName(fileName).isPresent()) {
-        if (verbose) logger.info("Skipping unrecognized source name: {}", fileName);
-        continue;
-      }
-
       String relativePath = toRelative(rootPath, path);
+      if (skipped(fileName, relativePath)) continue;
       out.add(new CandidateSource(path, relativePath, fileName));
     }
+  }
+
+  /* Files named as sources that are not targets: relative path -> why, and the names that would be (SourceNaming.notTarget) */
+  private final Map<String, String> notTargets = new LinkedHashMap<String, String>();
+
+  public Map<String, String> notTargets() {
+    return notTargets;
+  }
+
+  /* Not a target: kept in notTargets when it is named as a source */
+  private boolean skipped(String fileName, String relativePath) {
+    if (SourceNaming.parseFileName(fileName).isPresent()) return false;
+    String why = SourceNaming.notTarget(fileName);
+    if (why != null) notTargets.put(relativePath, why);
+    if (verbose) logger.info("Skipping unrecognized source name: {}", fileName);
+    return true;
   }
 
   private static String toRelative(String root, String absolute) {
