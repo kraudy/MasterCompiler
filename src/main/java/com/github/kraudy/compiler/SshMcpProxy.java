@@ -20,6 +20,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -85,6 +87,7 @@ public class SshMcpProxy {
   private final String token = "mcp-" + randomHex(8);  // this server's MC on the IBM i: its pid file and -Dmc.session
   private volatile boolean startedOnce;
   private volatile String remoteJar;  // MC's jar on the IBM i, once a session started
+  static final int STARTUP_WAIT = 600;  // seconds a screen_open waits for MC to start on the IBM i
   private final ExecutorService calls = Executors.newSingleThreadExecutor(r -> {
     Thread t = new Thread(r, "mc-ssh-calls");
     t.setDaemon(true);
@@ -860,6 +863,50 @@ public class SshMcpProxy {
     return screenCcsid;
   }
 
+  /* The 5250 calls that sign on with the build job's library list -> the arguments (and defaults) that must all be true */
+  static final Map<String, Map<String, Boolean>> BUILD_JOB_SIGN_ONS = new LinkedHashMap<String, Map<String, Boolean>>();
+  static {
+    Map<String, Boolean> open = new LinkedHashMap<String, Boolean>();
+    open.put("confirm", false);
+    open.put("libraryList", true);
+    BUILD_JOB_SIGN_ONS.put("screen_open", open);
+  }
+
+  /* Why MC on the IBM i is not there for a sign-on, by what the wait for it ended with (else that failure's message) */
+  static final Map<Class<?>, String> NOT_STARTED = new LinkedHashMap<Class<?>, String>();
+  static {
+    NOT_STARTED.put(TimeoutException.class, "still starting after " + STARTUP_WAIT + " s");
+    NOT_STARTED.put(InterruptedException.class, "this server is closing");
+    NOT_STARTED.put(RejectedExecutionException.class, "this server is closing");
+  }
+
+  /*
+   * A sign-on with the build job's library list (BUILD_JOB_SIGN_ONS) and a project: MC on the IBM i is started first (on
+   * the calls thread, which alone starts a session), so a script's first call can be screen_open, and its CHGLIBL must be
+   * known, or nothing is opened. Null to go on, else why not.
+   */
+  private String startedForScreen(String tool, JsonNode args) {
+    Map<String, Boolean> needs = BUILD_JOB_SIGN_ONS.get(tool);
+    if (needs == null || project == null) return null;
+    for (Map.Entry<String, Boolean> arg : needs.entrySet()) if (!args.path(arg.getKey()).asBoolean(arg.getValue())) return null;
+    Future<Session> started = null;
+    String why = "it did not answer status";
+    try {
+      if (!session.usable()) logger.info("{} waiting for the start-up, now at stage {}", tool, stage);
+      started = calls.submit(this::connected);
+      started.get(STARTUP_WAIT, TimeUnit.SECONDS);
+      if (!remoteStatus().path("libraryListCommand").asText("").isEmpty()) return null;
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+      Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+      why = NOT_STARTED.getOrDefault(e.getClass(), cause.getMessage()) + ", stage " + stage;
+    } finally {
+      if (started != null) started.cancel(false);  // still queued: it never starts a session after this answer
+    }
+    return "The build job's library list is not known (MasterCompiler on the IBM i: " + why + "): no 5250 session was "
+        + "opened. Call " + tool + " again, or with libraryList: false for the user profile's own.";
+  }
+
   /* MC's status on the IBM i, asked of the running session only (never a reason to connect); empty when unknown */
   private JsonNode remoteStatus() {
     return ownCall("status", mapper.createObjectNode(), 30);
@@ -917,6 +964,11 @@ public class SshMcpProxy {
       if (!"tools/call".equals(request.path("method").asText())) return line;
       ObjectNode params = (ObjectNode) request.path("params");
       if (ScreenTools.TOOLS.contains(params.path("name").asText())) {  // a 5250 session from this PC
+        String notStarted = startedForScreen(params.path("name").asText(), params.path("arguments"));
+        if (notStarted != null) {
+          sendToolError(line, notStarted);
+          return null;
+        }
         sendResult(request.get("id"), ScreenTools.handle(params.path("name").asText(), params.path("arguments"),
             buildTarget, McpServer.folderOf(project)));
         return null;

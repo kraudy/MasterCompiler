@@ -61,8 +61,12 @@ final class RpcChannel {
   static final int DEFAULT_DRAIN_SECONDS = 900;
   static final int FOLLOW_WAIT = 120;
 
-  /* MCP's own methods; with --rpc any other method names a tool */
+  /* MCP's own methods; with --rpc or --script any other method without a / names a tool (MCP's others all have one) */
   static final Set<String> PROTOCOL = new HashSet<String>(Arrays.asList("initialize", "ping", "tools/list", "tools/call", "shutdown"));
+
+  static boolean namesTool(String method) {
+    return !PROTOCOL.contains(method) && method.indexOf('/') < 0;
+  }
 
   /* A failed tool call's errorKind, from its message: the first that matches */
   static final Map<String, Pattern> ERROR_KINDS = new LinkedHashMap<String, Pattern>();
@@ -285,6 +289,7 @@ final class RpcChannel {
   /* What the channel does besides plain MCP */
   static final class Options {
     boolean rpc;        // --rpc: results are the tool's JSON, failures JSON-RPC errors; a method may name a tool
+    boolean script;     // --script: a method may name a tool too ({"id":1,"method":"status"}), results stay MCP's
     boolean decorate;   // structuredContent and errorKind (not for MC on the IBM i behind the SSH server: the PC adds them)
     boolean batch;      // one request at a time, in order; running builds followed to their end
     boolean failFast;   // --fail-fast: no request after the first that failed
@@ -299,6 +304,7 @@ final class RpcChannel {
       Options o = new Options();
       boolean inner = System.getProperty("mc.session") != null;  // started by the SSH MCP server on the PC
       o.rpc = parser.isRpc();
+      o.script = parser.getScript() != null;
       o.decorate = !inner;
       o.batch = parser.isBatch();
       o.failFast = parser.isFailFast();
@@ -476,7 +482,7 @@ final class RpcChannel {
       String version = node.path("params").path("protocolVersion").asText(STRUCTURED_SINCE);
       structured = version.compareTo(STRUCTURED_SINCE) >= 0;  // an older client does not know structuredContent
     }
-    if (options.rpc && !PROTOCOL.contains(method) && !method.startsWith("notifications/")) {
+    if ((options.rpc || options.script) && namesTool(method)) {
       JsonNode arguments = node.path("params");
       ObjectNode params = mapper.createObjectNode();
       params.put("name", method);

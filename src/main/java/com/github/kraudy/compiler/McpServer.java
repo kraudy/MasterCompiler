@@ -229,12 +229,23 @@ public class McpServer {
         case "ping":         sendResult(id, mapper.createObjectNode()); break;
         case "tools/list":   sendResult(id, toolsList()); break;
         case "tools/call":   sendResult(id, callTool(params)); break;
-        default:             sendError(id, -32601, "Method not found: " + method);
+        default:             sendError(id, -32601, "Method not found: " + method + toolHint(method));
       }
     } catch (Exception e) {
       logger.error("Request failed: " + method, e);
       sendError(id, -32603, e.toString());
     }
+  }
+
+  /* A method that is one of the tools' names: how to call it (here a method names a tool only with --rpc / --script) */
+  private String toolHint(String method) {
+    for (JsonNode tool : toolsList().path("tools")) {
+      if (tool.path("name").asText().equals(method)) {
+        return " (" + method + " is a tool: call it with tools/call {\"name\":\"" + method + "\"}, or pass --rpc, with which "
+            + "(as in a --script) a method may name a tool)";
+      }
+    }
+    return "";
   }
 
   /* Answers that need no IBM i (the SSH proxy gives them while it is still connecting); null for the rest */
@@ -716,7 +727,9 @@ public class McpServer {
     openProps.putObject("waitSeconds").put("type", "integer").put("description", "How long to wait for a screen (default 30)");
     openProps.putObject("libraryList").put("type", "boolean").put("description", "true (default): after the sign-on, run "
         + "CHGLIBL with the build job's library list (the spec's: --libl / --curlib, Code for IBM i, the spec's library "
-        + "hooks) on the first command line, so programs find what the build used. false: the user profile's own");
+        + "hooks) on the first command line, so programs find what the build used (over SSH it first waits for MC to "
+        + "start on the IBM i; when the list is not known, nothing is opened). false: the user profile's own (MC there is not "
+        + "waited for)");
     rawProperties(openProps);
     tools.add(tool("screen_open",
         "Open an interactive 5250 session (a green screen) on the build system and sign on as the build connection's "

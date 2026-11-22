@@ -3,6 +3,15 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.42
+
+- `--script` takes a tool's name as the method (`{"id":1,"method":"run_command","params":{...}}`), as `--tool` and
+  `--rpc` do; its answers stay MCP results unless `--rpc` is given. Elsewhere such a method gets `Method not found`
+  with how to call that tool.
+- Over SSH, `screen_open` with `confirm` waits for MC to start on the IBM i (a script's first call can be
+  `screen_open`), so the session gets the build job's library list and CCSID; when that library list is not known it
+  opens nothing and says why (`libraryList: false` neither waits nor starts MC: the user profile's own).
+
 ## v0.3.41
 
 - `--socket <path> --wait-ready` waits for the server's start-up (over SSH `5/5 ready`) instead of polling `status`

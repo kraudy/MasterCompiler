@@ -230,6 +230,27 @@ class RpcChannelTest {
   }
 
   @Test
+  void aScriptNamesToolsAsMethodsAndKeepsMcpResults() throws Exception {
+    ArgParser parser = new ArgParser(new String[] { "--script", "requests.ndjson" });
+    parser.validate();
+    assertFalse(parser.isRpc());
+    RpcChannel.Options options = RpcChannel.Options.of(parser);
+    options.drainSeconds = 0;
+    RpcChannel channel = channel("{\"id\":1,\"method\":\"run_command\",\"params\":{\"command\":\"DSPLIBL\"}}\n"
+        + "{\"id\":2,\"method\":\"resources/list\"}\n", options);
+    RpcChannel.Message call = channel.next();
+    assertEquals("tools/call", call.method());
+    assertEquals("run_command", call.node.path("params").path("name").asText());
+    assertEquals("DSPLIBL", call.node.path("params").path("arguments").path("command").asText());
+    channel.write(toolResult(call.node.get("id"), "{\"success\":true}", false));  // --batch: the next once this one is answered
+    assertEquals("resources/list", channel.next().method(), "a method with a / is MCP's: never a tool");
+    JsonNode result = written().get(0).path("result");
+    assertTrue(result.has("content") && result.path("structuredContent").path("success").asBoolean(), "an MCP result, not --rpc's");
+    assertFalse(RpcChannel.namesTool("tools/call") || RpcChannel.namesTool("notifications/initialized") || RpcChannel.namesTool("ping"));
+    assertFalse(RpcChannel.Options.of(new ArgParser(new String[] { "--mcp" })).script);
+  }
+
+  @Test
   void toolsBecomeRequestsOfABatchRpcServer() throws Exception {
     ArgParser parser = new ArgParser(new String[] { "--tool", "status", "--tool", "sql", "--args-json", "{\"statement\":\"VALUES 1\"}" });
     parser.validate();

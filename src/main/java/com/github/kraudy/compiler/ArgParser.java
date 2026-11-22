@@ -95,7 +95,7 @@ public class ArgParser {
     TOOL          (null, "tool",         Kind.VALUE, "Call this MCP tool (status, sql, plan, build, spool, run_command, screen_open, ...) and print its result as one JSON line; repeat for several calls over one IBM i connection (implies --batch --rpc; with --ssh over SSH)"),
     ARGS_JSON     (null, "args-json",    Kind.VALUE, "With --tool: the arguments of the --tool before it, a JSON object, e.g. '{\"statement\":\"VALUES 1\"}'"),
     ARGS_FILE     (null, "args-file",    Kind.VALUE, "With --tool: the arguments of the --tool before it, read from this JSON file (- for stdin)"),
-    SCRIPT        (null, "script",       Kind.VALUE, "Run the JSON-RPC requests in this file (- for stdin; NDJSON or pretty-printed JSON) over one connection and exit (implies --batch)"),
+    SCRIPT        (null, "script",       Kind.VALUE, "Run the JSON-RPC requests in this file (- for stdin; NDJSON or pretty-printed JSON) over one connection and exit (implies --batch; a method may name a tool, as with --tool)"),
     SOCKET        (null, "socket",       Kind.VALUE, "With --mcp: serve on this Unix domain socket instead of stdio, one client after another, keeping the IBM i connection between them (Java 16+). Without --mcp: send --tool / --script / stdin requests to that server and print the answers"),
     READY_FD      (null, "ready-fd",     Kind.VALUE, "With --mcp --socket: also write the ready notification to this file descriptor once the socket listens"),
     WAIT_READY    (null, "wait-ready",   Kind.FLAG,  "With --socket (a client): first wait until the server's start-up is done (over SSH: 5/5 ready) and print its status; a start-up that failed is a failed call (exit code 1; with --fail-fast nothing else is sent)"),

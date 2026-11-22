@@ -69,7 +69,10 @@ holds one IBM i job (and over `--ssh` one SSH session) for all of a script's cal
   {"jsonrpc":"2.0","id":1,"result":{"curlib":"MYLIB", ...}}
   {"jsonrpc":"2.0","id":2,"result":{"columns":["00001"],"rows":[["ME"]],"rowCount":1}}
   ```
-* `--script <file|->`: the same over a file of JSON-RPC requests (NDJSON, or pretty-printed as `jq` writes it).
+* `--script <file|->`: the same over a file of JSON-RPC requests (NDJSON, or pretty-printed as `jq` writes it). A
+  method may name a tool, as with `--tool`: `{"id":1,"method":"run_command","params":{"command":"DSPLIBL"}}`; the
+  answers stay MCP results (`content`, `structuredContent`) unless `--rpc` is given too. Elsewhere such a method gets
+  `-32601 Method not found` with how to call that tool.
 * `--mcp --socket <path>`: a server that stays up on a Unix domain socket (Java 16+), one client after another, keeping
   its IBM i connection between them. It prints `{"method":"notifications/ready",...}` on stdout (and on `--ready-fd N`)
   once it listens. The socket is rw for its owner only; a socket file left by a server that ended is replaced, a live one
@@ -108,7 +111,8 @@ What the server does for scripts:
 * `--rpc`: a tool's result is its JSON itself (`{"text": ...}` when it answered text), a failed call a JSON-RPC error
   `-32000` with `data.errorKind` (and `data.result`); its `message` is the errorKind and, when the result says why
   (`error`, e.g. a failed `run_command`'s escape message and diagnostics), that line: `TOOL_FAILED: CPF3C50 Program X
-  not created. Diagnostics: CPD5D02 ...`. A method may name a tool: `{"id":1,"method":"status"}`.
+  not created. Diagnostics: CPD5D02 ...`. A method may name a tool: `{"id":1,"method":"status"}` (a method with a `/`
+  is MCP's, never a tool).
   `initialize` is optional.
 * When the input ends (`printf ... | mc --mcp`), `--exit-on-eof drain` (the default) answers every request already read,
   and over stdio waits for a build or `run_command` still running, before it closes the IBM i connection; for at most
