@@ -3,6 +3,22 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.44
+
+- A build no longer runs `CRTSRCPF` (and logs `Command failed` / `failed: CRTSRCPF`) for a source file that exists
+  without members, e.g. `QDSPFSRC` after `clean` removed its members: MC looks for it in `QSYS2.SYSTABLES`, where
+  `*CURLIB` and `*LIBL` resolve as on IBM i. A `CRTSRCPF` that fails for another reason now stops the target.
+- `--scan --generate-only` keeps what `mc-base.yaml` declares: `protectedLibs`, `uploadFolders`, `uploadSources`,
+  `hookTimeout`, `inquiryReply`, `connections`, hooks' `Cmd:` / `ignore` / `timeout`, a target's `recreate` and the
+  libraries in `MODULE` / `OBJ` lists (they were left out of the written `build.yaml`).
+- The build summary calls a built target's compile messages diagnostics: `built (1 diagnostic, max severity 30)`
+  (e.g. `CPF5D04` from `CRTSRVPGM` on PUB400), not `built (1 errors)`; `status`, `success` and `errors` are unchanged.
+- Over SSH, the source sync does not walk MC's own `.mc/` folder on the IBM i (fewer round trips per call).
+- `clean_remote` and a project change end MC on the IBM i with an INFO line, not `ERROR Lost MasterCompiler`.
+- `clean_remote` / `--clean-remote` keep the copy and the jar when the IBM i's processes cannot be listed (before,
+  that counted as "no MC runs from it"). A new version's start-up removes an older jar only when no MC runs from it
+  and no start-up took it in the last day, and a `.part` only when it is an hour old (a running upload keeps it).
+
 ## v0.3.43
 
 - A scan names the files whose extension is a source type but that are not targets, and why, with the names that

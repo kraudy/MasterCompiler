@@ -279,7 +279,8 @@ which library an object resolves to.
    `mcp.json` change the changelog mentions, edit the entry (or remove it, with the user's agreement,
    and run setup again).
 5. Start the server again. Nothing to copy to the IBM i: on its first start over SSH the new
-   version uploads itself to `<home>/mc/.mc/` and the older jars there are removed.
+   version uploads itself to `<home>/mc/.mc/`; an older jar there is removed once no MC runs from it and
+   no start-up took it for a day.
 
 ### Reinstall MC
 

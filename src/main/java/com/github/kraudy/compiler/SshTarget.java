@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -228,6 +229,11 @@ public final class SshTarget implements AutoCloseable {
     }
   }
 
+  /* A file this server uses from now: only the owner reads it, and its time says it is in use (one round trip) */
+  public void claim(String remotePath) throws Exception {
+    exec("chmod 600 " + quote(remotePath) + " && touch " + quote(remotePath));
+  }
+
   /* A long-running remote process whose stdin/stdout the caller drives (the remote MCP server) */
   public ChannelExec start(String command) throws Exception {
     ChannelExec channel = (ChannelExec) session.openChannel("exec");
@@ -399,20 +405,26 @@ public final class SshTarget implements AutoCloseable {
    * instead of one round trip per file (that matters at 150+ ms per round trip). Empty when it does not exist.
    */
   public synchronized Map<String, long[]> listTree(String dir) throws Exception {
+    return listTree(dir, Collections.<String>emptySet());
+  }
+
+  /* notWalked: folders directly under dir left out, with all they hold */
+  public synchronized Map<String, long[]> listTree(String dir, Set<String> notWalked) throws Exception {
     Map<String, long[]> files = new HashMap<String, long[]>();
     if (stat(dir) == null) return files;
-    listInto(dir, "", files);
+    listInto(dir, "", files, notWalked);
     return files;
   }
 
   @SuppressWarnings("unchecked")
-  private void listInto(String dir, String prefix, Map<String, long[]> files) throws Exception {
+  private void listInto(String dir, String prefix, Map<String, long[]> files, Set<String> notWalked) throws Exception {
     knownDirs.add(dir);
     for (ChannelSftp.LsEntry entry : (Vector<ChannelSftp.LsEntry>) sftp().ls(dir)) {
       String name = entry.getFilename();
       if (name.equals(".") || name.equals("..")) continue;
       SftpATTRS attrs = entry.getAttrs();
-      if (attrs.isDir()) listInto(dir + "/" + name, prefix + name + "/", files);
+      if (attrs.isDir() && prefix.isEmpty() && notWalked.contains(name)) continue;
+      if (attrs.isDir()) listInto(dir + "/" + name, prefix + name + "/", files, Collections.<String>emptySet());
       else files.put(prefix + name, new long[] { attrs.getSize(), attrs.getMTime() });
     }
   }

@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,6 +26,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -353,7 +355,7 @@ public class SshMcpProxy {
         File next = new File(parser.getProjectRoot()).getCanonicalFile();
         boolean same = next.equals(project);
         if (!same) {
-          if (project != null && setupStarted && s.ready.isDone()) lost(s, "the project changed to " + next);
+          if (project != null && setupStarted && s.ready.isDone()) lost(s, "the project changed to " + next, true);
           project = next;
           syncPending = !arguments.path("sync").asBoolean(!parser.isNoInitialSync());
           SignOnGuard.project(next);
@@ -590,12 +592,12 @@ public class SshMcpProxy {
       String mc = ssh.realPath(remoteHome + "/mc");
       String real = ssh.realPath(remoteDir);
       String marker = ssh.execQuiet("cat " + SshTarget.quote(remoteDir + "/.mc/local-project"));
+      Use copyUse = runsFrom(ssh, remoteDir);
       if (parser.getPush() != null || mc == null || real == null || !real.startsWith(mc + "/") || real.length() <= mc.length() + 1
           || marker == null || !marker.trim().equals(ownerId)) {
         done.add(remoteDir + " is not an MC copy of this project (inside " + remoteHome + "/mc, with its marker), so it stays");
-      } else if (runsFrom(remoteDir)) {
-        done.add(remoteDir + " stays: an MC server still runs in it (an MCP server with --mcp --ssh for this project: "
-            + "use its clean_remote tool, or close that client first)");
+      } else if (copyUse != Use.FREE) {
+        done.add(remoteDir + " stays: " + copyUse.why);
       } else {
         ssh.exec("rm -rf " + SshTarget.quote(real));
         SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
@@ -603,9 +605,9 @@ public class SshMcpProxy {
         manifest.save();
         done.add(remoteDir + " deleted from the IBM i");
       }
-      if (runsFrom(jar)) {
-        done.add("MC's jar stays: an MC server still runs from it (an MCP server, --mcp --ssh); deleting it would break "
-            + "that server until it is restarted");
+      Use jarUse = runsFrom(ssh, jar);
+      if (jarUse != Use.FREE) {
+        done.add("MC's jar stays: " + jarUse.why);
       } else {
         ssh.exec("rm -f " + SshTarget.quote(jar));
         ssh.execQuiet("rmdir " + SshTarget.quote(remoteHome + "/mc/.mc") + " " + SshTarget.quote(remoteHome + "/mc"));  // only when empty
@@ -618,10 +620,42 @@ public class SshMcpProxy {
     return String.join("; ", done);
   }
 
-  /* An MC process on the IBM i whose command line names this path (the jar, or the copy as its --project) */
-  private boolean runsFrom(String path) {
-    String out = ssh.execQuiet("ps -e -o args= | grep -F -e " + SshTarget.quote(path) + " | grep -v grep");
-    return out != null && out.contains("-jar");
+  /* Whether an MC process on the IBM i runs from a path, and why the path then stays: not knowing keeps it too */
+  enum Use {
+    FREE(null),
+    RUNNING("an MC server still runs from it (an MCP server with --mcp --ssh for this project: use its clean_remote tool, "
+        + "or close that client first); deleting it would break that server until it is restarted"),
+    UNKNOWN("the processes on the IBM i could not be listed (ps), so whether an MC server runs from it is not known");
+
+    final String why;
+
+    Use(String why) {
+      this.why = why;
+    }
+  }
+
+  /* An MC process (java -jar) whose command line names this path: the jar, or the copy as its --project */
+  static Use runsFrom(SshTarget ssh, String path) {
+    return use(processes(ssh), path);
+  }
+
+  /* ps's command lines on the IBM i; null when they could not be listed */
+  static String processes(SshTarget ssh) {
+    try {
+      return ssh.exec("ps -e -o args=");
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /* From ps's command lines (null: not listed): a java -jar whose line names the path (itself, or a file below it) */
+  static Use use(String processes, String path) {
+    if (processes == null) return Use.UNKNOWN;
+    Pattern named = Pattern.compile(Pattern.quote(path) + "(?:/|\\s|$)");
+    for (String line : processes.split("\\R")) {
+      if (line.contains("-jar") && named.matcher(line).find()) return Use.RUNNING;
+    }
+    return Use.FREE;
   }
 
   /* Start-up stage, logged and kept for tool calls that wait or fail */
@@ -734,12 +768,18 @@ public class SshMcpProxy {
    * nothing is sent again), MC's own questions to it fail, and its connection is closed. The next call starts a new one.
    */
   private void lost(Session s, String why) {
+    lost(s, why, false);
+  }
+
+  /* intended: this server ended it (clean_remote, another project): said at INFO, not as an error */
+  private void lost(Session s, String why, boolean intended) {
     synchronized (s) {
       if (s.ending != null) return;
       s.ending = why;
     }
     stage("disconnected: " + why);
-    logger.error("Lost MasterCompiler on the IBM i: {}. The next call that needs the IBM i connects again.", why);
+    if (intended) logger.info("MasterCompiler on the IBM i ended: {}. The next call that needs the IBM i connects again.", why);
+    else logger.error("Lost MasterCompiler on the IBM i: {}. The next call that needs the IBM i connects again.", why);
     for (String id : new ArrayList<String>(s.inFlight.keySet())) {
       String line = s.inFlight.remove(id);
       if (line == null) continue;  // answered meanwhile
@@ -1046,7 +1086,7 @@ public class SshMcpProxy {
         /* The session's own SSH connection stops MC and deletes the files: no new sign-on while it is up */
         SshTarget kept = s.ssh;
         s.ssh = null;  // lost() ends MC's channel only
-        lost(s, "clean_remote deleted MasterCompiler's files on the IBM i");
+        lost(s, "clean_remote deleted MasterCompiler's files on the IBM i", true);
         ssh = kept != null && kept.isConnected() ? kept : signOnSsh();
         if (kept != null && kept != ssh) kept.close();
         try {
@@ -1234,7 +1274,7 @@ public class SshMcpProxy {
         }
       }
     } catch (Exception e) {
-      logger.error("Lost the remote MasterCompiler", e);
+      if (!closing && s.ending == null) logger.error("Lost the remote MasterCompiler", e);  // else ended on purpose
     }
     if (closing || s.ending != null) return;
     ChannelExec remote = s.remote;
@@ -1500,6 +1540,10 @@ public class SshMcpProxy {
     return uploaded;
   }
 
+  /* Top-level folders of the IBM i copy that are MC's own working files there, never synced (nor walked: on a slow link
+     each folder is a round trip) */
+  static final Set<String> NOT_SYNCED = Collections.singleton(".mc");
+
   /* What a sync would change on the IBM i, worked out before anything is written there */
   static final class SyncPlan {
     final Map<String, File> upload = new LinkedHashMap<String, File>();  // relative path -> the local file
@@ -1514,7 +1558,7 @@ public class SshMcpProxy {
     for (String path : localFiles) {
       File local = new File(path);
       String rel = relative(local);
-      if (rel == null) continue;  // outside the project
+      if (rel == null || NOT_SYNCED.contains(rel.split("/")[0])) continue;  // outside the project, or MC's own folder
       localRel.add(rel);
       long[] attrs = remoteFiles.get(rel);
       if (!local.isFile()) {
@@ -1543,7 +1587,7 @@ public class SshMcpProxy {
     ObjectNode preview = mapper.createObjectNode();
     preview.put("pending", true);
     try {
-      SyncPlan plan = plan(withoutSecrets(projectFiles(project)), true, ssh.listTree(remoteDir), SyncManifest.load(project, host + ":" + remoteDir));
+      SyncPlan plan = plan(withoutSecrets(projectFiles(project)), true, ssh.listTree(remoteDir, NOT_SYNCED), SyncManifest.load(project, host + ":" + remoteDir));
       preview.put("wouldUpload", plan.upload.size());
       preview.put("wouldRemove", plan.remove.size());
       plan.notOurs.forEach(preview.putArray("notOurs")::add);
@@ -1579,7 +1623,7 @@ public class SshMcpProxy {
   private int upload(Set<String> localFiles, boolean mirror) throws Exception {
     localFiles = withoutSecrets(localFiles);
     logger.info("Comparing {} local files with the copy on the IBM i", localFiles.size());
-    Map<String, long[]> remoteFiles = ssh.listTree(remoteDir);  // a few round trips for the whole copy
+    Map<String, long[]> remoteFiles = ssh.listTree(remoteDir, NOT_SYNCED);  // a round trip per folder: MC's .mc/ not walked
     SyncManifest manifest = SyncManifest.load(project, host + ":" + remoteDir);
     SyncPlan plan = plan(localFiles, mirror, remoteFiles, manifest);
     if (parser.isNoOverwrite() && !plan.notOurs.isEmpty()) {
@@ -1718,7 +1762,7 @@ public class SshMcpProxy {
       String actual = remoteSha256(ssh, remote);  // null: the IBM i has no checksum tool, the size has to do
       if (actual == null || actual.equals(hash)) {
         logger.info("MasterCompiler {} already on the IBM i: {}", MasterCompiler.version(), remote);
-        ssh.restrict(java.util.Collections.singletonList(remote));
+        ssh.claim(remote);  // in use from now: another version's start-up does not prune it (PRUNED)
         checkRemoteJava(ssh);
         return remote;
       }
@@ -1736,13 +1780,62 @@ public class SshMcpProxy {
       throw new IllegalStateException("The MasterCompiler jar arrived damaged on the IBM i (SHA-256 " + actual
           + " instead of " + hash + "): start again to upload it once more");
     }
-    ssh.restrict(java.util.Collections.singletonList(remote));
-    /* keep only the version in use; remove pieces of cut uploads */
-    String dir = remote.substring(0, remote.lastIndexOf('/'));
-    ssh.exec("for f in " + SshTarget.quote(dir) + "/MasterCompiler-*.jar " + SshTarget.quote(dir) + "/*.part; do [ \"$f\" = "
-        + SshTarget.quote(remote) + " ] || rm -f \"$f\"; done");
+    ssh.claim(remote);  // the upload kept the local file's time: now it says this jar is in use
+    prune(ssh, remote);
     checkRemoteJava(ssh);
     return remote;
+  }
+
+  /* Beside the jar in use, start-up removes from its folder: name -> when (path, {size, mtime}, ps's lines or null) */
+  interface PruneWhen {
+    boolean test(String path, long[] attrs, String processes);
+  }
+
+  /* One rule: when a file goes, and the command that removes it (%s: the quoted path) */
+  static final class Prune {
+    final PruneWhen when;
+    final String remove;
+
+    Prune(PruneWhen when, String remove) {
+      this.when = when;
+      this.remove = remove;
+    }
+  }
+
+  static final long STALE_PART_SECONDS = 3600;   // a .part this old is a cut upload; a running upload's is younger
+  static final long UNUSED_JAR_SECONDS = 86400;  // a jar is touched when a start-up takes it (claim): one not taken for a day
+  static final Map<Pattern, Prune> PRUNED = new LinkedHashMap<Pattern, Prune>();
+  static {
+    /* the age is checked again by find as it removes: a claim since the listing keeps the jar */
+    PRUNED.put(Pattern.compile("MasterCompiler-[0-9a-f]+\\.jar"), new Prune(
+        (path, attrs, processes) -> age(attrs) > UNUSED_JAR_SECONDS && use(processes, path) == Use.FREE,
+        "find %s -mtime +0 -exec rm -f {} \\;"));
+    PRUNED.put(Pattern.compile(".+\\.part"), new Prune((path, attrs, processes) -> age(attrs) > STALE_PART_SECONDS, "rm -f %s"));
+  }
+
+  static long age(long[] attrs) {
+    return System.currentTimeMillis() / 1000 - attrs[1];
+  }
+
+  /* Other versions' jars no MC uses, and pieces of cut uploads: ps is listed once, and only when something may go */
+  static void prune(SshTarget ssh, String inUse) throws Exception {
+    String dir = inUse.substring(0, inUse.lastIndexOf('/'));
+    Map<String, long[]> files = ssh.listTree(dir);
+    Map<String, Prune> candidates = new LinkedHashMap<String, Prune>();
+    for (Map.Entry<String, long[]> file : files.entrySet()) {
+      String path = dir + "/" + file.getKey();
+      if (path.equals(inUse)) continue;
+      for (Map.Entry<Pattern, Prune> rule : PRUNED.entrySet()) {
+        if (rule.getKey().matcher(file.getKey()).matches()) candidates.put(file.getKey(), rule.getValue());
+      }
+    }
+    if (candidates.isEmpty()) return;
+    String processes = processes(ssh);
+    for (Map.Entry<String, Prune> file : candidates.entrySet()) {
+      String path = dir + "/" + file.getKey();
+      Prune rule = file.getValue();
+      if (rule.when.test(path, files.get(file.getKey()), processes)) ssh.execQuiet(String.format(rule.remove, SshTarget.quote(path)));
+    }
   }
 
   /* SHA-256 of a file on the IBM i (sha256sum, else PASE's csum); null when neither can run */

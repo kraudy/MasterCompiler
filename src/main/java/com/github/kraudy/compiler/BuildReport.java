@@ -1,7 +1,9 @@
 package com.github.kraudy.compiler;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -178,6 +180,22 @@ public class BuildReport {
     return text == null ? "" : text.trim().replaceAll("\\s+", " ").replaceAll("\\.$", "").toLowerCase(java.util.Locale.ROOT);
   }
 
+  /* What a target's compile messages are called in the summary, by its status: a built target's did not stop it
+     (e.g. CPF5D04 from CRTSRVPGM), so they are not called errors there */
+  static final Map<String, String[]> MESSAGE_WORDS = new HashMap<String, String[]>();
+  static {
+    MESSAGE_WORDS.put(BUILT, new String[] { "diagnostic", "diagnostics" });
+  }
+  static final String[] ERROR_WORDS = { "error", "errors" };
+
+  /* "1 diagnostic, max severity 30", "3 errors, max severity 40" */
+  static String messageCount(TargetResult t) {
+    String[] words = MESSAGE_WORDS.getOrDefault(t.status, ERROR_WORDS);
+    int max = 0;
+    for (CompileError e : t.errors) max = Math.max(max, e.severity);
+    return t.errors.size() + " " + words[t.errors.size() == 1 ? 0 : 1] + ", max severity " + max;
+  }
+
   /* showSkipped false: unchanged targets are only counted (skipped), not listed: small builds stay small */
   public void compact(int minSeverity, boolean showSkipped) {
     if (!showSkipped && skipped > 0) {
@@ -257,7 +275,7 @@ public class BuildReport {
       }
       StringBuilder line = new StringBuilder(t.target + " " + t.status);
       if (t.failedAt != null && FAILED.equals(t.status)) line.append(" at ").append(t.failedAt);
-      if (t.errors != null) line.append(" (").append(t.errors.size()).append(" errors)");
+      if (t.errors != null) line.append(" (").append(messageCount(t)).append(")");
       if (tests != null) {
         for (TestRun run : tests) {
           if (!t.target.equals(run.target)) continue;

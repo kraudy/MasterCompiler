@@ -5,10 +5,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 
 /**
@@ -19,6 +28,23 @@ import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 public final class SpecWriter {
 
   private SpecWriter() {}
+
+  /* The spec's top-level settings, written as declared (mc-base.yaml merged by --scan): name -> its value. Not here:
+     defaults (already in each target's params), curlib / libl (already the CHGLIBL / CHGCURLIB before hook) */
+  static final Map<String, Function<BuildSpec, Object>> SETTINGS = new LinkedHashMap<String, Function<BuildSpec, Object>>();
+  static {
+    SETTINGS.put("protectedLibs", s -> s.protectedLibs);
+    SETTINGS.put("uploadFolders", s -> s.uploadFolders);
+    SETTINGS.put("uploadSources", s -> s.uploadSources);
+    SETTINGS.put("hookTimeout", s -> s.hookTimeout);
+    SETTINGS.put("inquiryReply", s -> s.inquiryReply);
+    SETTINGS.put("connections", s -> s.connections);
+  }
+
+  private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory()
+      .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
+      .enable(YAMLGenerator.Feature.MINIMIZE_QUOTES));
+  private static final ObjectMapper JSON = new ObjectMapper();  // a JSON string or list is a YAML flow scalar / sequence
 
   public static String toYaml(BuildSpec spec) {
     return toYaml(spec, null);
@@ -35,6 +61,7 @@ public final class SpecWriter {
     }
     sb.append("\n");
 
+    writeSettings(sb, spec);
     writeHookSection(sb, "before", spec.before, "");
     writeHookSection(sb, "after", spec.after, "");
     writeHookSection(sb, "success", spec.success, "");
@@ -53,6 +80,7 @@ public final class SpecWriter {
       }
 
       sb.append("  \"").append(escapeYamlDouble(key.asString())).append("\":\n");
+      if (targetSpec.recreate != null) sb.append("    recreate: ").append(targetSpec.recreate).append("\n");
 
       boolean hasParams = targetSpec.params != null && !targetSpec.params.isEmpty();
       boolean hasBefore = targetSpec.before != null && !targetSpec.before.isEmpty();
@@ -103,6 +131,12 @@ public final class SpecWriter {
 
     for (CommandObject cmd : hooks) {
       if (cmd == null) continue;
+      if (cmd.isRaw()) {
+        /* as written in the spec: CommandObject.raw doubled its quotes for QCMDEXC */
+        sb.append(itemIndent).append("- Cmd: ").append(json(cmd.getCommandString().replace("''", "'"))).append("\n");
+        writeHookOptions(sb, cmd, cmdIndent);
+        continue;
+      }
       sb.append(itemIndent).append("- ").append(cmd.getSystemCommandName()).append(":\n");
       List<ParamCmd> pattern = CompilationPattern.getCommandPattern(cmd.getSystemCommand());
       boolean wroteAny = false;
@@ -115,8 +149,8 @@ public final class SpecWriter {
           sb.append(paramIndent).append(param.name()).append(":\n");
           for (String part : value.trim().split("\\s+")) {
             if (part.isEmpty()) continue;
-            String name = part.replaceAll("^.*[\\\\/]", "");
-            sb.append(paramIndent).append("  - ").append(name).append("\n");
+            String name = withoutLibl(part);
+            sb.append(paramIndent).append("  - ").append(scalar(name)).append("\n");
           }
           wroteAny = true;
           continue;
@@ -134,6 +168,7 @@ public final class SpecWriter {
       if (!wroteAny) {
         sb.append(paramIndent).append("{}\n");
       }
+      writeHookOptions(sb, cmd, cmdIndent);
     }
     if (indent.isEmpty()) {
       sb.append("\n");
@@ -184,8 +219,8 @@ public final class SpecWriter {
         sb.append("      ").append(param.name()).append(":\n");
         for (String mod : modules) {
           if (mod.isEmpty()) continue;
-          String name = mod.replaceAll("^.*[\\\\/]", "");
-          sb.append("        - ").append(name).append("\n");
+          String name = withoutLibl(mod);
+          sb.append("        - ").append(scalar(name)).append("\n");
         }
         return;
       }
@@ -198,6 +233,48 @@ public final class SpecWriter {
       sb.append(value);
     }
     sb.append("\n");
+  }
+
+  /* The settings MC knows, as a YAML block; null, empty lists and empty maps left out */
+  private static void writeSettings(StringBuilder sb, BuildSpec spec) {
+    ObjectNode settings = YAML.createObjectNode();
+    for (Map.Entry<String, Function<BuildSpec, Object>> setting : SETTINGS.entrySet()) {
+      Object value = setting.getValue().apply(spec);
+      if (value == null) continue;
+      JsonNode node = YAML.valueToTree(value);
+      if (node == null || node.isNull() || (node.isContainerNode() && node.size() == 0)) continue;
+      settings.set(setting.getKey(), node);
+    }
+    if (settings.size() == 0) return;
+    try {
+      sb.append(YAML.writeValueAsString(settings)).append("\n");
+    } catch (JsonProcessingException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /* ignore and timeout: keys of the hook's own list element, next to its command */
+  private static void writeHookOptions(StringBuilder sb, CommandObject cmd, String indent) {
+    if (!cmd.getIgnore().isEmpty()) sb.append(indent).append("ignore: ").append(json(cmd.getIgnore())).append("\n");
+    if (cmd.getTimeoutSeconds() > 0) sb.append(indent).append("timeout: ").append(cmd.getTimeoutSeconds()).append("\n");
+  }
+
+  private static String json(Object value) {
+    try {
+      return JSON.writeValueAsString(value);
+    } catch (JsonProcessingException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /* A plain YAML scalar, double-quoted when it would read as something else (*CURLIB/X: an alias) */
+  private static String scalar(String value) {
+    return needsQuoting(value) ? "\"" + escapeYamlDouble(value) + "\"" : value;
+  }
+
+  /* *LIBL/NAME is what NAME means: the library is written only when the spec names one */
+  private static String withoutLibl(String name) {
+    return name.replaceFirst("(?i)^\\*LIBL/", "");
   }
 
   /** Peel validateParamValue IBM i quotes so YAML stays logical (re-applied on load). */

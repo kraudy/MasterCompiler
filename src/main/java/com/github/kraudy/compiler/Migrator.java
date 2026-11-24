@@ -7,6 +7,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -136,20 +137,15 @@ public class Migrator {
   }
 
   public void createSourcePf(TargetKey key) throws Exception {
-    /* 
-     * If this creation returns an error because the source pf already exits
-     * that means that it has no data and can be ommited
-     * SYSPARTITIONSTAT does not catch empty source pf.
-     */
     try {
       CommandObject cmd = new CommandObject(SysCmd.CRTSRCPF)
         .put(ParamCmd.FILE, key.getQualifiedSourceFile());
-      
+
       commandExec.executeCommand(cmd);
-    } catch (Exception ignore) {
-      if(verbose) logger.info("Omitting source pf creation: " + key.getQualifiedSourceFile() + " .Already exists");
+    } catch (Exception e) {
+      /* there meanwhile (another build created it): go on; any other failure stops the target */
+      if (!sourcePfExists(key)) throw e;
     }
-    
   }
 
   public void createSourceMember(TargetKey key) throws Exception {
@@ -199,18 +195,15 @@ public class Migrator {
   }
 
   /* Validate if Source PF exists */
+  /* SYSTABLES has a row for a source file without members too (SYSPARTITIONSTAT has none: after clean removed the
+     members, CRTSRCPF ran again and failed with CPF5813) */
   public boolean sourcePfExists(TargetKey key) throws SQLException{
     try (Statement validateStmt = connection.createStatement();
         ResultSet validateRs = validateStmt.executeQuery(
-            "With " +
-            Utilities.CteLibraryList +
-            "SELECT 1 AS Exist " +
-            "FROM QSYS2. SYSPARTITIONSTAT " +
-            "INNER JOIN Libs " +
-            "ON (SYSTEM_TABLE_SCHEMA = Libs.Libraries) " +
+            "SELECT 1 AS Exist FROM QSYS2.SYSTABLES " +
                 "WHERE SYSTEM_TABLE_NAME = '" + key.getSourceFile() + "' " +
-                sourceLibraryFilter(key) +
-                "AND TRIM(SOURCE_TYPE) <> '' LIMIT 1")) {
+                "AND SYSTEM_TABLE_SCHEMA = " + sourceFileSchema(key) + " " +
+                "AND FILE_TYPE = 'S' LIMIT 1")) {
       if (validateRs.next()) {
         if (verbose) logger.info("Source PF " + key.getSourceFile() + " already exist in library " + key.getLibrary());
         return true;
@@ -232,6 +225,25 @@ public class Migrator {
     String library = qualified.substring(0, slash).trim().toUpperCase();
     if (library.startsWith("*")) return "";
     return "AND SYSTEM_TABLE_SCHEMA = '" + library.replace("'", "''") + "' ";
+  }
+
+  /* The library the source file resolves to, as SQL: *CURLIB the current library, *LIBL (or none) the first library
+     on the list that has a file of that name, as IBM i resolves it; else the library named */
+  static final Map<String, String> SOURCE_FILE_SCHEMA = new HashMap<String, String>();
+  static {
+    SOURCE_FILE_SCHEMA.put("*CURLIB", "(SELECT SYSTEM_SCHEMA_NAME FROM QSYS2.LIBRARY_LIST_INFO WHERE TYPE = 'CURRENT')");
+    SOURCE_FILE_SCHEMA.put("CURLIB", SOURCE_FILE_SCHEMA.get("*CURLIB"));  // a key's curlib, as TargetKey.isCurLib reads it
+    SOURCE_FILE_SCHEMA.put("*LIBL", "(SELECT L.SYSTEM_SCHEMA_NAME FROM QSYS2.LIBRARY_LIST_INFO L INNER JOIN QSYS2.SYSTABLES T "
+        + "ON T.SYSTEM_TABLE_SCHEMA = L.SYSTEM_SCHEMA_NAME AND T.SYSTEM_TABLE_NAME = '%s' "
+        + "ORDER BY L.ORDINAL_POSITION FETCH FIRST 1 ROW ONLY)");
+  }
+
+  static String sourceFileSchema(TargetKey key) {
+    String qualified = key.getQualifiedSourceFile();
+    int slash = qualified == null ? -1 : qualified.indexOf('/');
+    String library = slash <= 0 ? "*LIBL" : qualified.substring(0, slash).trim().toUpperCase();
+    String schema = SOURCE_FILE_SCHEMA.get(library);
+    return schema != null ? String.format(schema, key.getSourceFile()) : "'" + library.replace("'", "''") + "'";
   }
 
   /* The source member this build replaced (or would replace) although MC did not create it; null when none */

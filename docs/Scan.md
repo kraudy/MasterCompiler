@@ -82,7 +82,7 @@ Merge rules:
 - Global `defaults` / extra `before` from base are applied (scan still injects `CHGCURDIR` first).  
 - Override path with `--base /path/to/overlay.yaml`.  
 
-Generated `build.yaml` contains the **merged** result (ready to re-run with `-f`).
+Generated `build.yaml` contains the **merged** result (ready to re-run with `-f`): the base's settings too (`protectedLibs`, `uploadFolders`, `uploadSources`, `hookTimeout`, `inquiryReply`, `connections`; `curlib` / `libl` as the `CHGLIBL` before hook), hooks with their `Cmd:`, `ignore` and `timeout`, a target's `recreate`, and the libraries a `MODULE` / `OBJ` list names (`*LIBL/` left out: it is what an unqualified name means).
 
 After merge, **MC** dry-resolves each target the same way compile does (MC defaults → object inspection when IBM i is connected → spec `defaults:` → target `params:` → conflict resolution) and writes the **filtered** param map. Identity values that only restate the target key (`PGM(*CURLIB/HELLO)`) and `SRCFILE`/`SRCMBR` when `SRCSTMF` is present are omitted. MC defaults that are not identity (`DBGVIEW`, `OPTION`, `REPLACE`, …) **are** written so the spec is a recipe.
 
