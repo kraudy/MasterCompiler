@@ -681,15 +681,19 @@ public class McpServer {
     ObjectNode objectSchema = mapper.createObjectNode();
     objectSchema.put("type", "object");
     ObjectNode objectProps = objectSchema.putObject("properties");
-    objectProps.putObject("object").put("type", "string").put("description", "LIB/OBJ, e.g. MYLIB/CUSTMAST");
+    objectProps.putObject("object").put("type", "string").put("description", "LIB/OBJ, e.g. MYLIB/CUSTMAST; a generic "
+        + "name (MYLIB/ORD*) or MYLIB/*ALL saves every object of the types that matches");
+    objectProps.putObject("objects").put("type", "array").put("description", "Instead of object: several objects of one "
+        + "library into one save file, e.g. [\"MYLIB/ORD100\", \"MYLIB/ORDSRV\"] (up to " + ObjectDownload.MAX_OBJECTS + ")")
+        .putObject("items").put("type", "string");
     objectProps.putObject("type").put("type", "string").put("description", "Object types to save, e.g. *FILE, *DTAARA, "
         + "or several: \"*FILE *DTAARA\"; *ALL for every object of that name (default " + ObjectDownload.DEFAULT_TYPES + ")");
     objectProps.putObject("name").put("type", "string").put("description", "File name in .mc/results/ (default "
-        + "LIB_OBJ.savf; with types LIB_OBJ.FILE.savf)");
-    objectSchema.putArray("required").add("object");
+        + "LIB_OBJ.savf; LIB_A+B.savf for objects, LIB_-ALL.savf for *ALL; with types LIB_OBJ.FILE.savf)");
     tools.add(tool("download_object",
-        "Save an object (a program, a file with its data, a data area, ...) into a save file and copy that to the "
-        + "project's .mc/results/ on this PC: the raw object as the IBM i stores it, restored with RSTOBJ. MC's job saves "
+        "Save an object (a program, a file with its data, a data area, ...), several objects of one library, or a "
+        + "library's *ALL into one save file and copy that to the project's .mc/results/ on this PC: the raw objects as "
+        + "the IBM i stores them, restored with RSTOBJ. MC's job saves "
         + "it (SAVOBJ ... UPDHST(*NO): its save history stays as it was) into a save file in QTEMP, copies that into a "
         + "stream file and deletes both after the download. Needs the authority SAVOBJ needs (owner or *OBJEXIST); a "
         + "*FILE in use by another job may be refused, and it cannot be updated while it is saved. Up to 512 MB. Over SSH "

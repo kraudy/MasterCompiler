@@ -142,7 +142,7 @@ public final class SpecWriter {
       boolean wroteAny = false;
       for (ParamCmd param : pattern) {
         if (!cmd.containsKey(param)) continue;
-        String value = stripIbmQuotes(cmd.get(param));
+        String value = asWritten(param, cmd.get(param));
         if (value == null || value.isEmpty()) continue;
 
         if ((param == ParamCmd.OBJ || param == ParamCmd.MODULE) && value.contains(" ")) {
@@ -212,7 +212,7 @@ public final class SpecWriter {
   }
 
   private static void writeParam(StringBuilder sb, ParamCmd param, String value) {
-    value = stripIbmQuotes(value);
+    value = asWritten(param, value);
     if (param == ParamCmd.MODULE) {
       String[] modules = value.trim().split("\\s+");
       if (modules.length > 1 || (modules.length == 1 && !modules[0].isEmpty())) {
@@ -275,6 +275,12 @@ public final class SpecWriter {
   /* *LIBL/NAME is what NAME means: the library is written only when the spec names one */
   private static String withoutLibl(String name) {
     return name.replaceFirst("(?i)^\\*LIBL/", "");
+  }
+
+  /* A stored value as the spec writes it: quoted text as its text, other values without their quotes (MC adds them again) */
+  private static String asWritten(ParamCmd param, String value) {
+    if (value == null) return null;
+    return Utilities.QUOTED_TEXT.contains(param) ? Utilities.unquotedText(value) : stripIbmQuotes(value);
   }
 
   /** Peel validateParamValue IBM i quotes so YAML stays logical (re-applied on load). */

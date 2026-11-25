@@ -513,7 +513,7 @@ public class MasterCompiler{
   /* COMPILEOPT for CRTSQLRPGI with BNDDIR(...) added (unless it has one); unqualified directories are *LIBL.
      The stored value is quoted for QCMDEXC (''TGTCCSID(*JOB)''): the quotes are taken off first. */
   static String compileOptWithBndDir(String compileOpt, String bndDir) {
-    String opt = compileOpt == null ? "" : compileOpt.trim().replaceAll("^'+|'+$", "");
+    String opt = compileOpt == null ? "" : Utilities.unquotedText(compileOpt);
     if (opt.toUpperCase().contains("BNDDIR(")) return opt;
     StringBuilder dirs = new StringBuilder();
     for (String dir : bndDir.trim().split("\\s+")) {
@@ -831,12 +831,16 @@ public class MasterCompiler{
     }
   }
 
-  /* "A *LIBL/B LIB/C" -> project names get their library, others are left as they are */
+  /* "A *LIBL/B LIB/C (*LIBL/D *SRVPGM)" -> project names get their library, others are left as they are */
   static String qualifyNames(String value, Map<String, String> libs) {
     StringBuilder out = new StringBuilder();
     for (String token : value.trim().split("\\s+")) {
-      String name = token.startsWith(ValCmd.LIBL.toString() + "/") ? token.substring(token.indexOf('/') + 1) : token;
-      if (!name.contains("/") && libs.containsKey(name.toUpperCase())) token = libs.get(name.toUpperCase()) + "/" + name;
+      /* a binding entry's name: (NAME *SRVPGM ...) -> NAME, its parentheses put back around it */
+      String open = token.startsWith("(") ? "(" : "";
+      String close = token.endsWith(")") ? ")" : "";
+      String core = token.substring(open.length(), Math.max(open.length(), token.length() - close.length()));
+      String name = core.startsWith(ValCmd.LIBL.toString() + "/") ? core.substring(core.indexOf('/') + 1) : core;
+      if (!name.contains("/") && libs.containsKey(name.toUpperCase())) token = open + libs.get(name.toUpperCase()) + "/" + name + close;
       if (out.length() > 0) out.append(' ');
       out.append(token);
     }
@@ -896,7 +900,7 @@ public class MasterCompiler{
     for (List<CommandObject> hooks : lists) {
       for (CommandObject hook : hooks) {
         if (hook.getSystemCommand() != SysCmd.CHGCURDIR || hook.get(ParamCmd.DIR) == null) continue;
-        List<String> dir = segments(hook.get(ParamCmd.DIR).replace("'", "").trim());
+        List<String> dir = segments(Utilities.textOf(hook.get(ParamCmd.DIR)));
         if (dir.size() < root.size()) continue;
         boolean inside = true;
         for (int i = 0; i < root.size() && inside; i++) inside = windows ? root.get(i).equalsIgnoreCase(dir.get(i)) : root.get(i).equals(dir.get(i));

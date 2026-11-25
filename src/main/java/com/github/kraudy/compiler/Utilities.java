@@ -6,8 +6,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -386,17 +389,8 @@ public class Utilities {
    * Called from ParamMap since it is a common point between TargetKey and CommandObject classes
    */
   public static String validateParamValue(ParamCmd param, String value) {
+    if (QUOTED_TEXT.contains(param)) return quotedText(value);
     switch (param) {
-      case TEXT:
-      case SRCSTMF:
-      case FROMSTMF:
-      case TOMBR:
-      case FROMMBR:
-      case TOSTMF:
-      case DIR:
-      case MSG:
-      case COMPILEOPT:
-        return "''" + value + "''";
 
       /* List of IFS directories: quote each one (special values such as *NONE stay as they are) */
       case INCDIR:
@@ -410,22 +404,13 @@ public class Utilities {
       case MODULE:
       case OBJ:
       case TOFILE:
-        String[] list = value.split(" ");
-        if(list.length <= 1) {
-          if (value.contains("/")) return value;
-          return ValCmd.LIBL.toString() + "/" + value;
+        /* An unqualified object name is *LIBL/NAME; a special value (*ALL, *SRVPGM, *IMMED) or a piece of an entry in
+           parentheses ((LIB/X *SRVPGM *IMMED)) stays as written */
+        List<String> items = new ArrayList<>();
+        for (String item : value.trim().split("\\s+")) {
+          items.add(UNQUALIFIED_NAME.matcher(item).matches() ? ValCmd.LIBL.toString() + "/" + item : item);
         }
-
-        value = "";
-        for(String item : list){
-          if(item.contains("/")) {
-            value += item; // If already qualified, just append
-          } else {
-            value += ValCmd.LIBL.toString() + "/" + item; // If not qualifed, append LIBL
-          }
-          value += " "; // Add separator.
-        }
-        return value.trim();
+        return String.join(" ", items);
 
       case SRCFILE:
         /* If not qualified, set to LIBL */
@@ -574,6 +559,58 @@ public class Utilities {
     }
   }
 
+  /*
+   * Parameters whose value is text in CL quotes, written as the command gets it. A quote in it may be written ' or ''
+   * (as typed inside a CL string): either way it is doubled for CL and again for the QCMDEXC('...') literal.
+   */
+  static final Set<ParamCmd> QUOTED_TEXT = EnumSet.of(ParamCmd.TEXT, ParamCmd.SRCSTMF, ParamCmd.FROMSTMF, ParamCmd.TOMBR,
+      ParamCmd.FROMMBR, ParamCmd.TOSTMF, ParamCmd.DIR, ParamCmd.MSG, ParamCmd.COMPILEOPT);
+  /* One quote of a text value: ' or '' (CL), or four (doubled for CL and for SQL: how MC stores it) */
+  private static final Pattern QUOTE = Pattern.compile("'{1,4}");
+  /* An object name without a library: a special value (*ALL) or a piece of a list entry in parentheses is not one */
+  private static final Pattern UNQUALIFIED_NAME = Pattern.compile("[^/*()]+");
+
+  /* A QUOTED_TEXT value as it goes into QCMDEXC('...'): in doubled quotes, each quote in it as four */
+  static String quotedText(String value) {
+    return "''" + QUOTE.matcher(value).replaceAll("''''") + "''";
+  }
+
+  /*
+   * A quotedText value written back as a value (spec, re-put): the outer quotes taken off, a lone quote back to one;
+   * quotes in a row stay four each, so quotedText gives the same value again
+   */
+  static String unquotedText(String stored) {
+    String s = stored.trim();
+    if (s.length() >= 4 && s.startsWith("''") && s.endsWith("''")) s = s.substring(2, s.length() - 2);
+    return LONE_QUOTE.matcher(s).replaceAll("'");
+  }
+  private static final Pattern LONE_QUOTE = Pattern.compile("(?<!')''''(?!')");
+
+  /* The text a quoted value holds, however it is held: MC's stored form, CL's ('it''s') or plain (a path, read as is) */
+  static String textOf(String value) {
+    String s = value.trim();
+    if (s.length() >= 4 && s.startsWith("''") && s.endsWith("''")) return s.substring(2, s.length() - 2).replace("''''", "'");
+    if (s.length() >= 2 && s.startsWith("'") && s.endsWith("'")) return s.substring(1, s.length() - 1).replace("''", "'");
+    return s;
+  }
+
+  /*
+   * ADDBNDDIRE's OBJ is a list of entries (object type activation): a *SRVPGM / *MODULE / *IMMED / *DEFER written
+   * after a name belongs to that name's entry. "*LIBL/A *SRVPGM *IMMED B" -> "(*LIBL/A *SRVPGM *IMMED) B"; a value
+   * with its parentheses already, or with only names, is returned as it is.
+   */
+  static String bindingEntries(String value) {
+    if (value.contains("(")) return value;
+    List<List<String>> entries = new ArrayList<>();
+    for (String token : value.trim().split("\\s+")) {
+      if (token.startsWith("*") && !token.contains("/") && !entries.isEmpty()) entries.get(entries.size() - 1).add(token);
+      else entries.add(new ArrayList<>(Arrays.asList(token)));
+    }
+    List<String> out = new ArrayList<>();
+    for (List<String> entry : entries) out.add(entry.size() == 1 ? entry.get(0) : "(" + String.join(" ", entry) + ")");
+    return String.join(" ", out);
+  }
+
   public static void ResolveConflicts(CommandObject commandObject){
     switch (commandObject.getSystemCommand()){
       /* Scape command */
@@ -582,6 +619,14 @@ public class Utilities {
           String cmd = commandObject.get(ParamCmd.CMD);
           cmd = "''" + cmd + "''";
           commandObject.put(ParamCmd.CMD, cmd);
+        }
+        break;
+
+      case ADDBNDDIRE:
+        if (commandObject.containsKey(ParamCmd.OBJ)) {
+          String entries = commandObject.get(ParamCmd.OBJ);
+          String grouped = bindingEntries(entries);
+          if (!grouped.equals(entries)) commandObject.put(ParamCmd.OBJ, grouped);
         }
         break;
 

@@ -95,7 +95,7 @@ final class FileDownload {
 
   /* The STAGES key when args ask for a copy first (an object, a member, or toCcsid), null when the file comes as it is */
   static String stageKind(JsonNode args) {
-    return args.hasNonNull("object") ? "object" : args.hasNonNull("member") ? "member" : args.hasNonNull("toCcsid") ? "path" : null;
+    return args.hasNonNull("object") || args.hasNonNull("objects") ? "object" : args.hasNonNull("member") ? "member" : args.hasNonNull("toCcsid") ? "path" : null;
   }
 
   /* How what args name is copied into the stream file 'into'; IllegalArgumentException when args are wrong */

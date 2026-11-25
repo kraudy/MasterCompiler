@@ -3,6 +3,20 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.46
+
+- A quote inside a quoted parameter (`COMPILEOPT`, `TEXT`, `SRCSTMF`, ...) reaches the command doubled, as CL needs it:
+  `COMPILEOPT: "INCDIR('src/rpglesrc') TGTCCSID(*JOB)"` (or with `''` as typed in CL) runs
+  `COMPILEOPT('INCDIR(''src/rpglesrc'') TGTCCSID(*JOB)')`, not `...INCDIR('src/rpglesrc')...` (`CPD0020`). A `TEXT`
+  with an apostrophe (`Customer's file`, also read from an existing object) no longer breaks the command. A value
+  already written with four quotes per quote runs as before. Paths with an apostrophe keep it when MC reads them back.
+- `OBJ`, `MODULE` and `TOFILE` put `*LIBL/` only before object names, not before special values (`*ALL`, `*SRVPGM`,
+  `*IMMED`) or parts of an entry in parentheses. An `AddBndDirE` `Obj: "LIB/SRV *SRVPGM *IMMED"` runs as
+  `OBJ((LIB/SRV *SRVPGM *IMMED))` (type and activation belong to the entry); `Obj: A B` stays two entries.
+- `download_object` and `--download` save several objects into one save file: `objects: ["MYLIB/A", "MYLIB/B"]` (one
+  library) or `--download MYLIB/A+B`, a generic name `MYLIB/ORD*`, or `MYLIB/*ALL`, with the types as before
+  (`MYLIB_A+B.savf`, `MYLIB_ORD-.savf`, `MYLIB_-ALL.PGM.savf`).
+
 ## v0.3.45
 
 - `--download` takes object types after `LIB/OBJ`: `MYLIB/CUST:FILE:DTAARA` (the `*` is optional, `ALL` for every

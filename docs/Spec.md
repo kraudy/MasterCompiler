@@ -48,6 +48,12 @@ targets:      # Required | Ordered sequence of compilation targets. At least one
 
 ```
 
+Values that the command takes in quotes (`TEXT`, `SRCSTMF`, `COMPILEOPT`, `DIR`, ...) are written without those quotes,
+as the command gets them; MC adds the quotes. A quote inside such a value is written `'` or `''` (as typed in CL), and MC
+doubles it for the command: `COMPILEOPT: "INCDIR('src/rpglesrc') TGTCCSID(*JOB)"` runs
+`COMPILEOPT('INCDIR(''src/rpglesrc'') TGTCCSID(*JOB)')`. Two quotes in a row in the value (rare: `it''s` inside a
+quoted string of `COMPILEOPT`) are written four each (`''''''''`).
+
 Examples 
 - [Simplest spec](#simplest-spec)
 - [ILE spec](#ile-spec)
@@ -174,7 +180,7 @@ targets:
     before:
       AddBndDirE:
         BndDir: BNDHELLO
-        Obj: SRVHELLO
+        Obj: SRVHELLO           # or "SRVHELLO *SRVPGM *IMMED": runs as OBJ((*LIBL/SRVHELLO *SRVPGM *IMMED))
 
     after: 
       DltObj: 

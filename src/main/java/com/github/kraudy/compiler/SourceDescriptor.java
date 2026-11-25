@@ -207,7 +207,7 @@ public class SourceDescriptor {
 
   static String resolveFullPath(String baseDir, String streamFile) {
     if (streamFile == null) return baseDir;
-    String rel = streamFile.replace("'", "").trim();
+    String rel = Utilities.textOf(streamFile);
     if (rel.startsWith("/") || (rel.length() > 2 && rel.charAt(1) == ':')) {
       return rel;
     }

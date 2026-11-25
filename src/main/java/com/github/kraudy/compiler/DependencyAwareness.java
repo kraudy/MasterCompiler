@@ -561,7 +561,7 @@ public class DependencyAwareness {
 
       for (String token : objs.trim().split("\\s+")) {
         if (token.isEmpty()) continue;
-        String objName = stripLibQualifier(token);
+        String objName = stripLibQualifier(token.replaceAll("[()]", ""));  // (LIB/SRV *SRVPGM *IMMED): the entry's name
         if (objName == null || objName.isEmpty()) continue;
         if (!objName.matches("[A-Z0-9$#@_]{1,10}")) continue;
 
@@ -1032,7 +1032,7 @@ public class DependencyAwareness {
 
   private static String resolveFullPath(String baseDir, String streamFile) {
     if (streamFile == null) return baseDir;
-    String rel = streamFile.replace("'", "").trim();
+    String rel = Utilities.textOf(streamFile);
     if (rel.startsWith("/") || (rel.length() > 2 && rel.charAt(1) == ':')) {
       return rel;
     }

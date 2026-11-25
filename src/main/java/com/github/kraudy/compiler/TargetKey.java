@@ -354,7 +354,7 @@ public class TargetKey {
   public String getStreamFile() {
     String sourceStreamFile = get(ParamCmd.SRCSTMF);
     if (sourceStreamFile.isEmpty()) return this.sourceStmf;
-    this.sourceStmf = sourceStreamFile.replace("'", "").trim(); // Remove scaping
+    this.sourceStmf = Utilities.textOf(sourceStreamFile);  // a path with an apostrophe keeps it
     return this.sourceStmf;
   }
 
