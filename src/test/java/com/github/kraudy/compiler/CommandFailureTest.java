@@ -72,11 +72,14 @@ class CommandFailureTest {
     ObjectNode member = mapper.createObjectNode().put("member", "qtemp/qsqltemp(mclgood)");
     assertEquals("member", FileDownload.stageKind(member));
     assertEquals("CPYTOSTMF FROMMBR('/QSYS.LIB/QTEMP.LIB/QSQLTEMP.FILE/MCLGOOD.MBR') TOSTMF('/h/.mc-stage-1.txt') "
-        + "STMFOPT(*REPLACE) STMFCCSID(1208) ENDLINFMT(*LF)", FileDownload.stageCommand(member, "/h/.mc-stage-1.txt"));
+        + "STMFOPT(*REPLACE) STMFCCSID(1208) ENDLINFMT(*LF)", FileDownload.staging(member, "/h/.mc-stage-1.txt").commands.get(0));
+    assertEquals("mclgood.txt", FileDownload.staging(member, "/h/c").name);
     assertEquals("/QSYS.LIB/LIB1.LIB/QSQDSRC.FILE/M1.MBR", FileDownload.source(mapper.createObjectNode().put("member", "LIB1/QSQDSRC/M1")));
     ObjectNode path = mapper.createObjectNode().put("path", "/home/U/it's.txt").put("toCcsid", 819);
     assertEquals("CPY OBJ('/home/U/it''s.txt') TOOBJ('/h/c') TOCCSID(819) DTAFMT(*TEXT) REPLACE(*YES)",
-        FileDownload.stageCommand(path, "/h/c"));
+        FileDownload.staging(path, "/h/c").commands.get(0));
+    assertEquals("it's.txt", FileDownload.staging(path, "/h/c").name);
+    assertNull(FileDownload.staging(path, "/h/c").cleanup);
     assertNull(FileDownload.stageKind(mapper.createObjectNode().put("path", "/a")));
     for (String wrong : new String[] { "LIB/FILE", "LIB/FILE/M') X(", "A.B/F/M", "LIB/FILE/MEMBERTOOLONG" }) {
       assertThrows(IllegalArgumentException.class, () -> FileDownload.source(mapper.createObjectNode().put("member", wrong)), wrong);
@@ -84,6 +87,45 @@ class CommandFailureTest {
     assertThrows(IllegalArgumentException.class, () -> FileDownload.ccsid(mapper.createObjectNode().put("toCcsid", "utf8")));
     assertThrows(IllegalArgumentException.class,
         () -> FileDownload.source(mapper.createObjectNode().put("member", "L/F/M").put("path", "/a")));
+  }
+
+  /* download_object: a save file in QTEMP made, filled, copied into the stream file; removed only once it was made */
+  @Test
+  void objectSavedThroughQtemp() {
+    ObjectNode args = mapper.createObjectNode().put("object", "mylib/cust").put("type", "*file, dtaara");
+    assertEquals("object", FileDownload.stageKind(args));
+    FileDownload.Staging how = FileDownload.staging(args, "/h/.mc-stage-1.txt");
+    String saveFile = how.commands.get(0).replaceAll("CRTSAVF FILE\\(QTEMP/(MC[0-9A-F]{8})\\) MAXRCDS\\(1016800\\)", "$1");
+    assertTrue(saveFile.matches("MC[0-9A-F]{8}"), how.commands.get(0));
+    assertEquals("SAVOBJ OBJ(CUST) LIB(MYLIB) DEV(*SAVF) SAVF(QTEMP/" + saveFile + ") OBJTYPE(*DTAARA *FILE) UPDHST(*NO) CLEAR(*ALL)",
+        how.commands.get(1));
+    assertEquals("CPYTOSTMF FROMMBR('/QSYS.LIB/QTEMP.LIB/" + saveFile + ".FILE') TOSTMF('/h/.mc-stage-1.txt') STMFOPT(*REPLACE)",
+        how.commands.get(2));
+    assertEquals("DLTF FILE(QTEMP/" + saveFile + ")", how.cleanup);
+    assertEquals("MYLIB_CUST.DTAARA.FILE.savf", how.name);
+    assertEquals("MYLIB/CUST *DTAARA *FILE", how.from);
+    assertEquals("object", how.fromKey);
+    assertEquals("MYLIB_PGM1.savf", FileDownload.staging(mapper.createObjectNode().put("object", "MYLIB/PGM1"), "/h/c").name);
+    assertTrue(FileDownload.staging(mapper.createObjectNode().put("object", "MYLIB/PGM1"), "/h/c").commands.get(1)
+        .contains("OBJTYPE(*MODULE *PGM *SRVPGM)"));
+    for (String wrong : new String[] { "MYLIB", "MYLIB/CUST) X(", "MYLIB/CUST:F", "A/B/C", "MYLIB/CUST:FILE') X(" }) {
+      assertThrows(IllegalArgumentException.class, () -> ObjectDownload.item(wrong, "'object'"), wrong);
+    }
+    assertThrows(IllegalArgumentException.class,
+        () -> FileDownload.staging(mapper.createObjectNode().put("object", "MYLIB/CUST").put("type", "FILE)"), "/h/c"));
+    assertThrows(IllegalArgumentException.class, () -> FileDownload.staging(mapper.createObjectNode().put("object", "MYLIB/CUST")
+        .put("name", "../x.savf"), "/h/c"), "a wrong name is refused before anything is saved");
+  }
+
+  /* --download: types after LIB/OBJ; without them the compiled objects under the name it always had */
+  @Test
+  void downloadItemsWithTypes() {
+    List<ObjectDownload.Item> items = ObjectDownload.parse("lib1/obj1, LIB1/OBJ1:*FILE:dtaara ,LIB2/X:ALL");
+    assertEquals(ObjectDownload.DEFAULT_TYPES, items.get(0).objectTypes());
+    assertEquals("LIB1_OBJ1.savf", items.get(0).fileName());
+    assertEquals("*DTAARA *FILE", items.get(1).objectTypes());
+    assertEquals("LIB1_OBJ1.DTAARA.FILE.savf", items.get(1).fileName());
+    assertEquals("SAVOBJ OBJ(X) LIB(LIB2) DEV(*SAVF) SAVF(W/S) OBJTYPE(*ALL) UPDHST(*NO) CLEAR(*ALL)", items.get(2).saveCommand("W/S"));
   }
 
   @Test

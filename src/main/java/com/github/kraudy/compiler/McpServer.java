@@ -678,6 +678,24 @@ public class McpServer {
         + "sign-on). Reads only on the IBM i, besides that copy.",
         downloadSchema));
 
+    ObjectNode objectSchema = mapper.createObjectNode();
+    objectSchema.put("type", "object");
+    ObjectNode objectProps = objectSchema.putObject("properties");
+    objectProps.putObject("object").put("type", "string").put("description", "LIB/OBJ, e.g. MYLIB/CUSTMAST");
+    objectProps.putObject("type").put("type", "string").put("description", "Object types to save, e.g. *FILE, *DTAARA, "
+        + "or several: \"*FILE *DTAARA\"; *ALL for every object of that name (default " + ObjectDownload.DEFAULT_TYPES + ")");
+    objectProps.putObject("name").put("type", "string").put("description", "File name in .mc/results/ (default "
+        + "LIB_OBJ.savf; with types LIB_OBJ.FILE.savf)");
+    objectSchema.putArray("required").add("object");
+    tools.add(tool("download_object",
+        "Save an object (a program, a file with its data, a data area, ...) into a save file and copy that to the "
+        + "project's .mc/results/ on this PC: the raw object as the IBM i stores it, restored with RSTOBJ. MC's job saves "
+        + "it (SAVOBJ ... UPDHST(*NO): its save history stays as it was) into a save file in QTEMP, copies that into a "
+        + "stream file and deletes both after the download. Needs the authority SAVOBJ needs (owner or *OBJEXIST); a "
+        + "*FILE in use by another job may be refused, and it cannot be updated while it is saved. Up to 512 MB. Over SSH "
+        + "it uses the open connection (no new sign-on). Returns bytes, SHA-256 and the local path.",
+        objectSchema));
+
     ObjectNode runSchema = mapper.createObjectNode();
     runSchema.put("type", "object");
     ObjectNode runProps = runSchema.putObject("properties");
@@ -947,7 +965,8 @@ public class McpServer {
     boolean destructive = name.equals("build") || name.equals("clean") || name.equals("clean_remote") || name.equals("call_program") || name.equals("copy_rows")
         || name.equals("upload_file") || name.equals("cancel") || name.equals("run_command") || name.equals("debug_program")
         || name.equals("screen_open") || name.equals("screen_send");
-    boolean writes = destructive || name.equals("import_source") || name.equals("download_file");  // they only add files to the project
+    boolean writes = destructive || name.equals("import_source") || name.equals("download_file")
+        || name.equals("download_object");  // they only add files to the project
     ObjectNode annotations = tool.putObject("annotations");
     annotations.put("readOnlyHint", !writes);
     annotations.put("destructiveHint", destructive);
@@ -1062,6 +1081,7 @@ public class McpServer {
         case "spool":         return spool(args);
         case "upload_file":   return uploadFile(args);
         case "download_file": return downloadFile(args);
+        case "download_object": return downloadFile(args);
         case "run_command":   return runCommand(args);
         default:       return toolResult("Unknown tool: " + name, true);
       }
@@ -2314,7 +2334,9 @@ public class McpServer {
       }
       ObjectNode copy = mapper.createObjectNode();
       try {
-        copy.put("staged", stageDownload(args, FileDownload.resultsFolder(projectDir()).getPath()));
+        File results = FileDownload.resultsFolder(projectDir());
+        FileDownload.deleteStale(results);
+        copy.put("staged", stageDownload(args, results.getPath()));
       } catch (IllegalArgumentException e) {
         return toolResult(e.getMessage(), true);
       }
@@ -2325,7 +2347,7 @@ public class McpServer {
     try {
       if (!staged) return toolResult(pretty.writeValueAsString(FileDownload.handle(args, projectDir(), FileDownload.over(system))), false);
       String home = "/home/" + system.getUserId();  // a folder of this user's: the copy is not readable by all meanwhile
-      if (!new IFSFile(system, home).isDirectory()) return toolResult("download_file with 'member' or 'toCcsid' copies into " + home + ", which does not exist", true);
+      if (!new IFSFile(system, home).isDirectory()) return toolResult("A download with 'object', 'member' or 'toCcsid' copies into " + home + ", which does not exist", true);
       String copy = stageDownload(args, home);
       try {
         return toolResult(pretty.writeValueAsString(FileDownload.handleStaged(args, copy, projectDir(), FileDownload.over(system))), false);
@@ -2337,19 +2359,34 @@ public class McpServer {
     }
   }
 
-  /* download_file's copy into a stream file in folder, by this job (it sees its QTEMP); returns the copy's path */
+  /* A download's copy into a stream file in folder, by this job (it sees its QTEMP); returns the copy's path */
   private String stageDownload(JsonNode args, String folder) throws Exception {
     String copy = FileDownload.stagedPath(folder);
-    String command = FileDownload.stageCommand(args, copy);  // wrong arguments: refused before anything runs
+    FileDownload.Staging how = FileDownload.staging(args, copy);  // wrong arguments: refused before anything runs
     connectWithLibraryList();
+    int done = 0;
     try (PreparedStatement ps = connection.prepareStatement("CALL QSYS2.QCMDEXC(?)")) {
-      ps.setString(1, command);
-      ps.execute();
-    } catch (SQLException e) {
-      /* a copy cut off half way (a conversion error, the disk full) is not left there */
-      if (IBMiDotEnv.isIBMi()) java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(copy));
-      else new IFSFile(system, copy).delete();
-      throw new IllegalArgumentException("The copy for the download failed: " + command + ": " + e.getMessage());
+      try {
+        for (String command : how.commands) {
+          ps.setString(1, command);
+          ps.execute();
+          done++;
+        }
+      } catch (SQLException e) {
+        /* a copy cut off half way (a conversion error, the disk full) is not left there */
+        if (IBMiDotEnv.isIBMi()) java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(copy));
+        else new IFSFile(system, copy).delete();
+        throw new IllegalArgumentException("The copy for the download failed: " + how.commands.get(done) + ": " + e.getMessage());
+      } finally {
+        if (how.cleanup != null && done > 0) {
+          try {
+            ps.setString(1, how.cleanup);
+            ps.execute();
+          } catch (SQLException e) {
+            logger.warn("{} failed: {}", how.cleanup, e.getMessage());
+          }
+        }
+      }
     }
     return copy;
   }

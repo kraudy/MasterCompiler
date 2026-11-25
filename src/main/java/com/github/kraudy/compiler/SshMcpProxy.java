@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -1017,8 +1019,8 @@ public class SshMcpProxy {
         sendResult(request.get("id"), upload(params.path("arguments")));
         return null;
       }
-      if ("download_file".equals(params.path("name").asText())) {  // the file comes to this PC: SFTP on the open connection
-        sendResult(request.get("id"), download(params.path("arguments")));
+      if (DOWNLOADS.contains(params.path("name").asText())) {  // the file comes to this PC: SFTP on the open connection
+        sendResult(request.get("id"), download(params.path("name").asText(), params.path("arguments")));
         return null;
       }
       if ("clean_remote".equals(params.path("name").asText())) {  // ends MC there: run here, on the calls thread
@@ -1174,8 +1176,8 @@ public class SshMcpProxy {
     return remains;
   }
 
-  /* download_file over this server's SSH session, once it is up: no sign-on of its own */
-  private ObjectNode download(JsonNode args) {
+  /* download_file and download_object over this server's SSH session, once it is up: no sign-on of its own */
+  private ObjectNode download(String tool, JsonNode args) {
     ObjectNode result = mapper.createObjectNode();
     String text;
     boolean error = false;
@@ -1186,8 +1188,8 @@ public class SshMcpProxy {
         done = FileDownload.handle(args, project, FileDownload.over(ssh));
       } else {
         /* MC there copies it in its job (QTEMP is that job's); the copy comes over SFTP and is deleted */
-        FileDownload.stageCommand(args, "/check");  // wrong arguments: refused here, nothing runs there
-        String copy = mapper.readTree(ownText(ownResult("download_file", (ObjectNode) args, 600))).path("staged").asText("");
+        FileDownload.staging(args, "/check");  // wrong arguments: refused here, nothing runs there
+        String copy = mapper.readTree(ownText(ownResult(tool, (ObjectNode) args, 600))).path("staged").asText("");
         if (!copy.contains("/" + FileDownload.STAGED_PREFIX)) throw new IllegalStateException("MC on the IBM i named no copy");
         try {
           done = FileDownload.handleStaged(args, copy, project, FileDownload.over(ssh));
@@ -1543,6 +1545,8 @@ public class SshMcpProxy {
   /* Top-level folders of the IBM i copy that are MC's own working files there, never synced (nor walked: on a slow link
      each folder is a round trip) */
   static final Set<String> NOT_SYNCED = Collections.singleton(".mc");
+  /* Tools that bring a file to this PC: SFTP here, on the open connection */
+  static final Set<String> DOWNLOADS = new HashSet<String>(Arrays.asList("download_file", "download_object"));
 
   /* What a sync would change on the IBM i, worked out before anything is written there */
   static final class SyncPlan {

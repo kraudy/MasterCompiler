@@ -3,6 +3,19 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.45
+
+- `--download` takes object types after `LIB/OBJ`: `MYLIB/CUST:FILE:DTAARA` (the `*` is optional, `ALL` for every
+  object of that name). Without types it saves `*MODULE *PGM *SRVPGM` into `<LIB>_<OBJ>.savf` as before; with types
+  the file is `<LIB>_<OBJ>.DTAARA.FILE.savf`, so two items of one object do not overwrite each other.
+- `SAVOBJ` runs with `UPDHST(*NO)`: a download no longer changes the object's save history (last save date).
+- New MCP tool `download_object` (`object`, `type`, `name`): MC's job saves the object into a save file in `QTEMP`
+  (no library of yours is written), copies it into a stream file and it lands in `.mc/results/` as
+  `<LIB>_<OBJ>[.TYPE].savf`; both copies are deleted. Over SSH on the open connection (no sign-on of its own), up to
+  512 MB (the save file stops there instead of filling the disk). A *FILE in use by another job may be refused.
+- MC on the IBM i deletes download copies (`.mc-stage-*` in its `.mc/results/`) left over an hour ago by a download
+  whose wait ran out.
+
 ## v0.3.44
 
 - A build no longer runs `CRTSRCPF` (and logs `Command failed` / `failed: CRTSRCPF`) for a source file that exists

@@ -5,12 +5,18 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.SecureRandom;
 import java.sql.Timestamp;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,9 +31,10 @@ import com.jcraft.jsch.SftpATTRS;
 /*
  * download_file: one IFS stream file to this PC byte for byte (no CCSID conversion), into the project's .mc/results/.
  * Over SSH through the session's SFTP channel (no new sign-on); otherwise through the file host server, as --fetch.
- * A member, or a stream file wanted in another CCSID (toCcsid), is first copied into a stream file by MC's IBM i job
- * (the one run_command runs in, so QTEMP is that job's), with the command STAGE_COMMANDS has for it; that copy is
- * downloaded and deleted. It only writes below .mc/results/ (and that copy), so it needs no confirm.
+ * A member, a stream file wanted in another CCSID (toCcsid), or an object (download_object: a save file of it), is
+ * first copied into a stream file by MC's IBM i job (the one run_command runs in, so QTEMP is that job's), with the
+ * commands STAGES has for it; that copy is downloaded and deleted. It only writes below .mc/results/ (and that copy),
+ * so it needs no confirm.
  */
 final class FileDownload {
 
@@ -40,26 +47,79 @@ final class FileDownload {
   static final long MAX_BYTES = 512L * 1024 * 1024;
   private static final ObjectMapper mapper = new ObjectMapper();
 
-  /* What is copied into a stream file before the download -> the CL that copies it (from, into, CCSID) */
-  static final Map<String, String> STAGE_COMMANDS = new LinkedHashMap<String, String>();
+  /*
+   * How a copy is made in MC's job: its commands, in order; the command that removes what the first one made, run
+   * afterwards whatever happened but only once that first one succeeded (never something that was there before); and
+   * for the answer what was copied (under fromKey), the default file name and a note
+   */
+  static final class Staging {
+    final List<String> commands;
+    final String cleanup;
+    final String fromKey;
+    final String from;
+    final String name;
+    final String note;
+
+    Staging(List<String> commands, String cleanup, String fromKey, String from, String name, String note) {
+      this.commands = commands;
+      this.cleanup = cleanup;
+      this.fromKey = fromKey;
+      this.from = from;
+      this.name = name;
+      this.note = note;
+    }
+  }
+
+  /* What is copied into a stream file before the download -> how, from args and the copy's path ('into') */
+  static final Map<String, BiFunction<JsonNode, String, Staging>> STAGES = new LinkedHashMap<String, BiFunction<JsonNode, String, Staging>>();
   static {
-    STAGE_COMMANDS.put("member", "CPYTOSTMF FROMMBR('%s') TOSTMF('%s') STMFOPT(*REPLACE) STMFCCSID(%d) ENDLINFMT(*LF)");
-    STAGE_COMMANDS.put("path", "CPY OBJ('%s') TOOBJ('%s') TOCCSID(%d) DTAFMT(*TEXT) REPLACE(*YES)");
+    STAGES.put("object", ObjectDownload::staging);
+    STAGES.put("member", (args, into) -> asText(args, "CPYTOSTMF FROMMBR('%s') TOSTMF('%s') STMFOPT(*REPLACE) STMFCCSID(%d) ENDLINFMT(*LF)",
+        into, DataFetch.fileName(source(args)).replaceAll("\\.MBR$", "").toLowerCase(Locale.ROOT) + ".txt", "CPYTOSTMF"));
+    STAGES.put("path", (args, into) -> asText(args, "CPY OBJ('%s') TOOBJ('%s') TOCCSID(%d) DTAFMT(*TEXT) REPLACE(*YES)",
+        into, DataFetch.fileName(source(args)), "CPY"));
   }
   static final int TEXT_CCSID = 1208;  // a member arrives as UTF-8 unless toCcsid says otherwise
   static final String STAGED_PREFIX = ".mc-stage-";
+  static final long STALE_STAGED_MILLIS = 3600 * 1000L;  // a copy whose download was given up (the proxy's wait ran out)
   private static final String NAME = "[A-Z$#@][A-Z0-9$#@_]{0,9}";
   private static final Pattern MEMBER = Pattern.compile("(?i)(" + NAME + ")/(" + NAME + ")(?:/(" + NAME + ")|\\((" + NAME + ")\\))");
 
-  /* "member" or "path" when args ask for a copy first (a member, or toCcsid), null when the file comes as it is */
-  static String stageKind(JsonNode args) {
-    return args.hasNonNull("member") ? "member" : args.hasNonNull("toCcsid") ? "path" : null;
+  /* A member or a stream file copied as text in a CCSID, by one command (from, into, CCSID) */
+  private static Staging asText(JsonNode args, String command, String into, String name, String how) {
+    String from = source(args);
+    return new Staging(Collections.singletonList(String.format(command, clText(from), clText(into), ccsid(args))), null,
+        "path", from, name, "Copied on the IBM i into CCSID " + ccsid(args) + " (" + how + ", as text), then downloaded "
+        + "byte for byte; that copy was deleted");
   }
 
-  /* The CL that copies what args name into the stream file 'into'; IllegalArgumentException when args are wrong */
-  static String stageCommand(JsonNode args, String into) {
-    return String.format(STAGE_COMMANDS.get(stageKind(args)), clText(source(args)), clText(into), ccsid(args));
+  /* The STAGES key when args ask for a copy first (an object, a member, or toCcsid), null when the file comes as it is */
+  static String stageKind(JsonNode args) {
+    return args.hasNonNull("object") ? "object" : args.hasNonNull("member") ? "member" : args.hasNonNull("toCcsid") ? "path" : null;
   }
+
+  /* How what args name is copied into the stream file 'into'; IllegalArgumentException when args are wrong */
+  static Staging staging(JsonNode args, String into) {
+    Staging how = STAGES.get(stageKind(args)).apply(args, into);
+    checkName(args.path("name").asText(how.name));  // a wrong name is refused before the copy, not after it
+    return how;
+  }
+
+  /*
+   * Copies left in folder by downloads given up over an hour ago, deleted (a local folder: MC on the IBM i); looked
+   * for at most once an hour, the folder's other files are not read
+   */
+  static void deleteStale(File folder) {
+    long now = System.currentTimeMillis();
+    if (now - lastStaleSweep < STALE_STAGED_MILLIS) return;
+    lastStaleSweep = now;
+    try (DirectoryStream<Path> copies = Files.newDirectoryStream(folder.toPath(), STAGED_PREFIX + "*")) {
+      for (Path copy : copies) if (now - Files.getLastModifiedTime(copy).toMillis() > STALE_STAGED_MILLIS) Files.deleteIfExists(copy);
+    } catch (IOException e) {
+      // the next sweep tries again
+    }
+  }
+  private static volatile long lastStaleSweep;
 
   /* The IFS path of what is copied: the member's /QSYS.LIB path (QTEMP: the job's own), or 'path' */
   static String source(JsonNode args) {
@@ -88,7 +148,7 @@ final class FileDownload {
   }
 
   /* A CL quoted literal's text: apostrophes doubled (the command goes to QCMDEXC as a parameter, not inside SQL) */
-  private static String clText(String text) {
+  static String clText(String text) {
     return text.replace("'", "''");
   }
 
@@ -102,32 +162,37 @@ final class FileDownload {
 
   /* The copy's path in folder on the IBM i: a name of MC's own, deleted after the download */
   static String stagedPath(String folder) {
-    return folder + "/" + STAGED_PREFIX + Long.toHexString(new java.security.SecureRandom().nextLong() & Long.MAX_VALUE) + ".txt";
+    return folder + "/" + STAGED_PREFIX + Long.toHexString(new SecureRandom().nextLong() & Long.MAX_VALUE) + ".txt";
   }
 
-  /* The copy made at 'staged', downloaded under 'name' (default: the member's, lower case, .txt; or the file's name) */
+  /* The copy made at 'staged', downloaded under 'name' (default: the Staging's) */
   static ObjectNode handleStaged(JsonNode args, String staged, File project, Source source) throws Exception {
-    String from = source(args);
-    String member = args.hasNonNull("member") ? DataFetch.fileName(from).replaceAll("\\.MBR$", "").toLowerCase(Locale.ROOT) + ".txt" : null;
+    Staging how = staging(args, staged);
     ObjectNode copy = mapper.createObjectNode();
     copy.put("path", staged);
-    copy.put("name", args.path("name").asText(member != null ? member : DataFetch.fileName(from)));
+    copy.put("name", args.path("name").asText(how.name));
     ObjectNode result = handle(copy, project, source);
-    result.put("path", from);
-    result.put("note", "Copied on the IBM i into CCSID " + ccsid(args) + " (" + (member != null ? "CPYTOSTMF" : "CPY")
-        + ", as text), then downloaded byte for byte; that copy was deleted");
+    if (!how.fromKey.equals("path")) result.remove("path");  // the copy's path: what was copied replaces it
+    result.put(how.fromKey, how.from);
+    result.put("note", how.note);
     return result;
   }
 
   private FileDownload() {}
 
-  static ObjectNode handle(JsonNode args, File project, Source source) throws Exception {
-    String path = args.path("path").asText("").trim();
-    checkPath(path);
-    String name = args.path("name").asText(DataFetch.fileName(path)).trim();
+  /* The local file's name, trimmed; IllegalArgumentException when it is not a plain file name */
+  static String checkName(String given) {
+    String name = given.trim();
     if (name.isEmpty() || !name.equals(DataFetch.fileName(name)) || name.startsWith(".")) {
       throw new IllegalArgumentException("'name' is a file name, without folders");
     }
+    return name;
+  }
+
+  static ObjectNode handle(JsonNode args, File project, Source source) throws Exception {
+    String path = args.path("path").asText("").trim();
+    checkPath(path);
+    String name = checkName(args.path("name").asText(DataFetch.fileName(path)));
     long[] remote = source.stat(path);
     if (remote == null) throw new IllegalArgumentException(path + " is not a stream file on the IBM i (or this user cannot see it)");
     if (remote[0] > MAX_BYTES) throw new IllegalArgumentException(path + " is larger than 512 MB");

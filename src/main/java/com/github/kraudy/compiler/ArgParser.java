@@ -57,7 +57,7 @@ public class ArgParser {
     PASSWORD_COMMAND(null, "password-command", Kind.VALUE, "Command whose first output line is the IBM i password (secret-tool lookup ..., pass show ...); IBMI_PASSWORD_COMMAND is the same"),
     CLEAN_REMOTE  (null, "clean-remote", Kind.FLAG,  "With --remote: after a successful build, delete the uploaded project copy and MC's jar from the IBM i"),
     LOCAL_PROJECT (null, "local-project", Kind.VALUE, "Internal, set by --remote and --mcp --ssh: the project folder on the PC that uploaded it; CHGCURDIR hooks naming it point at --project instead"),
-    DOWNLOAD      (null, "download",     Kind.VALUE, "Over SSH, save objects (*MODULE, *PGM, *SRVPGM) into a save file each and download them to -o <dir> (default .): LIB/OBJ, comma-separated"),
+    DOWNLOAD      (null, "download",     Kind.VALUE, "Over SSH, save objects (*MODULE, *PGM, *SRVPGM, or the types after LIB/OBJ: MYLIB/CUST:FILE:DTAARA) into a save file each and download them to -o <dir> (default .): LIB/OBJ[:TYPE...], comma-separated"),
     SRVPGM_FROM_EXPORTS(null, "srvpgm-from-exports", Kind.FLAG, "With --scan: a module that exports procedures, and that no service program binds, gets a service program (EXPORT(*ALL))"),
     STRICT_HOST_KEY(null, "strict-host-key", Kind.FLAG, "SSH: refuse a host key that is not in known_hosts (fails with its fingerprint) instead of trusting it; IBMI_SSH_KNOWN_HOSTS names the known_hosts file"),
     HOST_SERVERS  (null, "host-servers", Kind.FLAG,  "With --setup-vscode: connect through the host servers (like ACS) instead of SSH"),
@@ -517,7 +517,7 @@ public class ArgParser {
     if (download != null) {
       if (mcp || setupVscode || remote || installSkills || version || importSelection != null || yamlFile != null
           || scanRoot != null || tobiRoot != null || push != null || projectRoot != null || generateOnly) {
-        throw new IllegalArgumentException("--download takes only LIB/OBJ[,LIB/OBJ...], -o <folder>, --code4i, --connection, "
+        throw new IllegalArgumentException("--download takes only LIB/OBJ[:TYPE...][,...], -o <folder>, --code4i, --connection, "
             + "--ssh-port, --strict-host-key, --password-stdin, --password-command, --curlib, -v");
       }
       /* --download runs first and returns: a --sql, --fetch or --call beside it would be dropped without a word
