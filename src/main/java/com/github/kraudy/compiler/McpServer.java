@@ -1510,15 +1510,17 @@ public class McpServer {
     if (args.hasNonNull("since")) return cleanSince(args);
     connect();
     BuildSpec spec = loadSpec();
+    connectWithLibraryList(spec);  // the build's current library, also as a session's first call: DLTOBJ uses *CURLIB
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
-    for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
-      if (hook.getSystemCommand() == CompilationPattern.SysCmd.CHGCURLIB) executor.executeCommand(hook);  // DLTOBJ uses *CURLIB
-    }
 
     ObjectDescriptor objects = new ObjectDescriptor(connection, parser.isDebug(), parser.isVerbose());
     List<TargetKey> existing = new java.util.ArrayList<TargetKey>();
     boolean former = args.path("formerTargets").asBoolean(false);
     String curlib = currentLibrary();
+    if (spec.protectedLibs.stream().anyMatch(p -> p != null && p.trim().equalsIgnoreCase(curlib.trim()))) {  // the spec read once
+      return toolResult("clean deletes only in the current library (" + curlib + "), and it is in protectedLibs: nothing was "
+          + "deleted", true);
+    }
     ObjectNode result = mapper.createObjectNode();
     ArrayNode elsewhere = mapper.createArrayNode();
     List<TargetKey> targets = new java.util.ArrayList<TargetKey>();
@@ -1531,7 +1533,7 @@ public class McpServer {
       }
       for (String target : FormerTargets.former(projectDir(), current)) {
         TargetKey key = new TargetKey(target);
-        if (!key.getLibrary().equalsIgnoreCase(curlib) || protectedLibs().stream().anyMatch(p -> p.equalsIgnoreCase(key.getLibrary()))) {
+        if (!key.getLibrary().equalsIgnoreCase(curlib)) {
           elsewhere.add(target + ": in " + key.getLibrary() + ", not the current library (" + curlib + "): not deleted here");
           continue;
         }
@@ -1774,19 +1776,26 @@ public class McpServer {
   /* Connected, with the developer's library list (unqualified names resolve as in their compiles) */
   /* The connection's library list, then the spec's own CHGLIBL / CHGCURLIB hooks, as a build applies them */
   private void connectWithLibraryList() throws Exception {
+    connectWithLibraryList(null);
+  }
+
+  /* loaded: the spec the caller read already (with --scan reading it scans the sources), null to read it here */
+  private void connectWithLibraryList(BuildSpec loaded) throws Exception {
     connect();
     if (readOnlyMode) return;  // its library list is the libraries it reads
     CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
     for (CommandObject hook : MasterCompiler.libraryHooks(parser, MasterCompiler.code4i(parser))) {
       executor.executeCommand(hook);
     }
-    BuildSpec spec;
-    File settings = specSettingsFile();
-    try {
-      spec = loadSpecOrSettings();
-    } catch (Exception noSpecYet) {
-      if (settings != null && settings.isFile()) throw noSpecYet;
-      return;  // e.g. an empty repository import_source is filling
+    BuildSpec spec = loaded;
+    if (spec == null) {
+      try {
+        spec = loadSpecOrSettings();
+      } catch (Exception noSpecYet) {
+        File settings = specSettingsFile();
+        if (settings != null && settings.isFile()) throw noSpecYet;
+        return;  // e.g. an empty repository import_source is filling
+      }
     }
     for (CommandObject hook : spec.before) {
       if (CommandExecutor.isLibraryListCommand(hook)) executor.executeCommand(hook);

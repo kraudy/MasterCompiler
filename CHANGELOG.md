@@ -3,6 +3,12 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.47
+
+- `clean` applies the spec's library list (its `curlib:` / `libl:`, CHGLIBL / CHGCURLIB) before it reads the current
+  library, as a build does: as the first call of a new MCP session it no longer looks in the user profile's current
+  library and finds nothing to delete. It refuses when that library is in `protectedLibs`.
+
 ## v0.3.46
 
 - A quote inside a quoted parameter (`COMPILEOPT`, `TEXT`, `SRCSTMF`, ...) reaches the command doubled, as CL needs it:
