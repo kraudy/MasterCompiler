@@ -8,7 +8,9 @@ import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +51,29 @@ public class CommandExecutor {
 
   }
  
+  /* Message ids never reported from the joblog: MC's own (SQL0443, CPC0904, CPF2407), then the spec's ignoreMessages
+     (another program's messages in this job, e.g. a host server exit program's on every request) */
+  private static final List<String> NOT_REPORTED = Arrays.asList("SQL0443", "CPC0904", "CPF2407");
+  private static final Pattern MESSAGE_ID = Pattern.compile("[A-Z][A-Z0-9]{2}[0-9A-F]{4}");
+  private String notReported = sqlList(NOT_REPORTED);
+
+  public CommandExecutor ignoreMessages(Collection<String> ids) {
+    List<String> all = new ArrayList<String>(NOT_REPORTED);
+    for (String id : ids) {
+      String upper = id == null ? "" : id.trim().toUpperCase();
+      if (!MESSAGE_ID.matcher(upper).matches()) {
+        throw new IllegalArgumentException("ignoreMessages: '" + id + "' is not a message id (CPF9898, CPF9897)");
+      }
+      if (!all.contains(upper)) all.add(upper);
+    }
+    notReported = sqlList(all);
+    return this;
+  }
+
+  private static String sqlList(List<String> ids) {
+    return "'" + String.join("', '", ids) + "'";
+  }
+
   public void watch(BuildProgress progress, JobWatch watch, Integer hookTimeout) {
     this.progress = progress;
     this.watch = watch;
@@ -433,7 +458,7 @@ public class CommandExecutor {
              "WHERE FROM_USER = USER " +
              "AND MESSAGE_TIMESTAMP > '" + since + "' " +
              (until != null ? "AND MESSAGE_TIMESTAMP <= '" + until + "' " : "") +
-             "AND MESSAGE_ID NOT IN ('SQL0443', 'CPC0904', 'CPF2407') " +
+             "AND MESSAGE_ID NOT IN (" + notReported + ") " +
              "ORDER BY MESSAGE_TIMESTAMP ASC"
          )) {
 

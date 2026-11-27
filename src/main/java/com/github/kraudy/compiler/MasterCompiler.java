@@ -177,7 +177,8 @@ public class MasterCompiler{
   public void build() {
 
     /* Init command executor */
-    commandExec = new CommandExecutor(connection, debug, verbose, dryRun);
+    commandExec = new CommandExecutor(connection, debug, verbose, dryRun)
+        .ignoreMessages(globalSpec != null ? globalSpec.ignoreMessages : Collections.<String>emptyList());
     if (progress == null) progress = new BuildProgress("cli");
     if (watch == null) {
       watch = JobWatch.own(system, connections);  // opens its connection only if a hook times out
@@ -272,7 +273,7 @@ public class MasterCompiler{
 
       /* Get full compiler exception context */
       logger.error(e.getFullContext());
-      if (report.failed == 0 && report.error == null) report.error = describe(e);
+      if (report.failed == 0 && report.error == null) report.error = CommandFailure.withListing(connection, describe(e), e);
 
       /* Global compiler failure: not after a cancel or an ENDJOB (they are meant to stop everything) */
       try{
@@ -355,6 +356,7 @@ public class MasterCompiler{
       String stage = "hook";  // where a failure happens: hook (before / after the compile), compile
       int testsBefore = commandExec.getTestRuns().size();
       String command = null;
+      boolean existed = false;  // before its compile: the compile marks it there (a plan's too)
 
       try{
 
@@ -385,6 +387,7 @@ public class MasterCompiler{
         /* Only whether it exists: compile params come from the spec and MC's defaults, never from the
            existing object (that would carry over whatever someone compiled by hand: TGTRLS, TEXT, ...) */
         odes.objectExists(key);
+        existed = key.objectExists();
 
         /* Set global defaults params per target */
         key.putAll(globalSpec.defaults);
@@ -445,7 +448,7 @@ public class MasterCompiler{
 
         priorHooks.addAll(targetSpec.success);
         priorHooks.addAll(targetSpec.after);
-        if (reporting()) reportTarget(key, dryRun ? BuildReport.PLANNED : BuildReport.BUILT, command, null, targetStart);
+        if (reporting()) reportTarget(key, existed, dryRun ? BuildReport.PLANNED : BuildReport.BUILT, command, null, targetStart);
         if (reporting()) assignTests(key, testsBefore);
 
       } catch (CompilerException e){
@@ -460,9 +463,9 @@ public class MasterCompiler{
           if (commandExec.timedOut()) failedAt = "timeout";
           if (progress.cancelRequested) failedAt = "cancelled";
           String error = "hook".equals(failedAt) || "tests".equals(failedAt) || "timeout".equals(failedAt)
-              || "cancelled".equals(failedAt) ? describe(e) : e.getMessage();
+              || "cancelled".equals(failedAt) ? CommandFailure.withListing(connection, describe(e), e) : e.getMessage();
           if ("tests".equals(failedAt)) error = (compileEnd != null ? "Compiled; the" : "The") + " tests failed (see tests). " + error;
-          reportTarget(key, BuildReport.FAILED, command, error, targetStart);
+          reportTarget(key, existed, BuildReport.FAILED, command, error, targetStart);
           BuildReport.TargetResult result = report.targets.get(report.targets.size() - 1);
           result.failedAt = failedAt;
           if ("hook".equals(failedAt) || "tests".equals(failedAt)) result.failedCommand = failedCommand(e);
@@ -487,7 +490,7 @@ public class MasterCompiler{
         if (verbose) logger.error("Unhandled exception in Target: " + key.asString());
         if (reporting()) {
           assignTests(key, testsBefore);
-          reportTarget(key, BuildReport.FAILED, command, e.toString(), targetStart);
+          reportTarget(key, existed, BuildReport.FAILED, command, e.toString(), targetStart);
           report.targets.get(report.targets.size() - 1).failedAt = progress.cancelRequested ? "cancelled" : stage;
         }
         if (progress.cancelRequested || progress.jobEnded) throw e;
@@ -718,19 +721,19 @@ public class MasterCompiler{
   }
 
   /* Adds the target to the report with its joblog and, when compiled, its EVFEVENT errors */
-  private void reportTarget(TargetKey key, String status, String command, String error, Timestamp since) {
+  private void reportTarget(TargetKey key, boolean existed, String status, String command, String error, Timestamp since) {
     BuildReport.TargetResult result = report.add(key.asString(), status);
     result.command = command;
     result.error = error;
     result.writes = targetWrites.get(key);
     result.bindingDirectories = targetBndDirs.get(key);
-    result.existed = key.objectExists();
+    result.existed = existed;
     result.compiled = !dryRun && compileEnd != null;  // also when a hook after it failed
-    if (key.objectExists() && key.isRecreate() && key.getObjectTypeEnum() == CompilationPattern.ObjectType.BNDDIR) {
+    if (existed && key.isRecreate() && key.getObjectTypeEnum() == CompilationPattern.ObjectType.BNDDIR) {
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *BNDDIR and create it again (recreate: true): "
           + "only the spec's entries remain";
     }
-    if (key.objectExists() && CommandExecutor.RECREATED.contains(key.getObjectTypeEnum())) {
+    if (existed && CommandExecutor.RECREATED.contains(key.getObjectTypeEnum())) {
       result.warning = (dryRun ? "Would delete" : "Deleted") + " the existing *" + key.getObjectTypeEnum().name()
           + " and create it again" + (key.getObjectTypeEnum() == CompilationPattern.ObjectType.PF ? ": its data is lost" : "");
     }
@@ -754,8 +757,9 @@ public class MasterCompiler{
           /* The listing also carries warnings (e.g. SQL7905 not journaled): read it only on failure */
           if (!BuildReport.FAILED.equals(status)) return;
           String stmf = key.containsStreamFile() ? key.getStreamFile() : null;
-          String spool = stmf != null ? new java.io.File(stmf).getName().split("\\.")[0] : key.getObjectName();
-          result.errors = EventFile.readSqlListing(connection, spool, since, stmf);
+          String spool = stmf != null ? CommandFailure.spoolName(stmf) : key.getObjectName();
+          result.errors = EventFile.readListing(connection, spool, "SQL", compileStart != null ? compileStart : since, compileEnd,
+              true, stmf);
         } else {
           result.errors = EventFile.read(connection, key.getLibrary(), key.getObjectName(), since, compileBaseDir);
         }

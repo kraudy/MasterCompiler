@@ -36,6 +36,7 @@ public final class SpecWriter {
     SETTINGS.put("protectedLibs", s -> s.protectedLibs);
     SETTINGS.put("uploadFolders", s -> s.uploadFolders);
     SETTINGS.put("uploadSources", s -> s.uploadSources);
+    SETTINGS.put("ignoreMessages", s -> s.ignoreMessages);
     SETTINGS.put("hookTimeout", s -> s.hookTimeout);
     SETTINGS.put("inquiryReply", s -> s.inquiryReply);
     SETTINGS.put("connections", s -> s.connections);

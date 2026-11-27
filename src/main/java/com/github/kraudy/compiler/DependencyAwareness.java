@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -399,29 +400,33 @@ public class DependencyAwareness {
 
       if (!target.isCmd()) continue;
 
-      String pgmName = null;
+      /* As written: PGM(DEVLIB/RUNAPP) keeps its library; the name alone finds the target */
+      String pgm = null;
       if (targetSpec.params.containsKey(ParamCmd.PGM)) {
         String existing = targetSpec.params.get(ParamCmd.PGM);
-        if (existing != null && !existing.trim().isEmpty()) {
-          pgmName = stripLibQualifier(existing.trim());
-        }
+        if (existing != null && !existing.trim().isEmpty()) pgm = existing.trim();
       }
-      if (pgmName == null && target.containsKey(ParamCmd.PGM)) {
+      if (pgm == null && target.containsKey(ParamCmd.PGM)) {
         String existing = target.get(ParamCmd.PGM);
-        if (existing != null && !existing.trim().isEmpty()) {
-          pgmName = stripLibQualifier(existing.trim());
-        }
+        if (existing != null && !existing.trim().isEmpty()) pgm = existing.trim();
       }
+      if (pgm == null) continue;
+      String pgmName = stripLibQualifier(pgm);
+      if (pgmName.isEmpty() || !pgmName.matches("[A-Z0-9$#@_]{1,10}")) continue;
 
-      if (pgmName == null || pgmName.isEmpty()) continue;
-      if (!pgmName.matches("[A-Z0-9$#@_]{1,10}")) continue;
-
-      targetSpec.params.put(ParamCmd.PGM, pgmName);
+      targetSpec.params.put(ParamCmd.PGM, pgm);
       try {
-        target.put(ParamCmd.PGM, pgmName);
+        target.put(ParamCmd.PGM, pgm);
       } catch (Exception ignore) {}
 
       TargetKey pgmKey = keyLookup.get(pgmName + "." + ObjectType.PGM.name());
+      String library = pgm.contains("/") ? pgm.substring(0, pgm.lastIndexOf('/')).trim().toUpperCase() : null;
+      if (pgmKey != null && library != null && !library.startsWith("*") && !pgmKey.isCurLib()
+          && !library.equalsIgnoreCase(pgmKey.getLibrary())) {
+        if (verbose) logger.info("CRTCMD PGM {} for {} names another library than the target {}: no dependency", pgm,
+            target.asString(), pgmKey.asString());
+        continue;
+      }
       if (pgmKey == null || !pgmKey.isProgram()) {
         if (verbose) {
           logger.info("CRTCMD PGM {} for {} is not a build target (param only)",
@@ -1442,9 +1447,11 @@ public class DependencyAwareness {
 
   private void getClCallDependencies(TargetKey target, String sourceCode, List<String> logs) {
     Set<String> calledPgms = new HashSet<>();
+    BitSet text = quoted(sourceCode);
 
     Matcher m = CALL_PGM_PATTERN.matcher(sourceCode);
     while (m.find()) {
+      if (text.get(m.start())) continue;  // MSGDTA('... CALL X ...'): words of a message, not a call
       String full = m.group(1).trim().toUpperCase();
       // Strip library if qualified (MYLIB/PGM -> PGM)
       String pgm = full.replaceAll("^.*[\\/]", "");
@@ -1455,6 +1462,7 @@ public class DependencyAwareness {
 
     m = CALL_DIRECT_PGM_PATTERN.matcher(sourceCode);
     while (m.find()) {
+      if (text.get(m.start())) continue;
       String pgm = m.group(2).toUpperCase();
       if (pgm.isEmpty()) continue;
       calledPgms.add(pgm);
@@ -1483,8 +1491,10 @@ public class DependencyAwareness {
     if (projectCmdStmtPattern == null || projectCmds.isEmpty()) return;
 
     Set<String> found = new LinkedHashSet<>();
+    BitSet text = quoted(sourceCode);
     Matcher m = projectCmdStmtPattern.matcher(sourceCode);
     while (m.find()) {
+      if (text.get(m.start(1))) continue;  // a continuation line of MSGDTA('... +' that starts with the command's name
       String name = m.group(1).trim().toUpperCase();
       if (!name.isEmpty()) found.add(name);
     }
@@ -1688,6 +1698,17 @@ public class DependencyAwareness {
       else if (!inString && line.startsWith(marker, i)) return line.substring(0, i);
     }
     return line;
+  }
+
+  /* The positions inside CL quotes, across continuation lines ('' inside a literal toggles twice: still inside) */
+  static BitSet quoted(String code) {
+    BitSet inside = new BitSet(code.length());
+    boolean inString = false;
+    for (int i = 0; i < code.length(); i++) {
+      if (code.charAt(i) == '\'') inString = !inString;
+      else if (inString) inside.set(i);
+    }
+    return inside;
   }
 
   /* Slash-star blocks outside strings blanked; their line breaks kept */

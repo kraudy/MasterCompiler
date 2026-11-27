@@ -22,6 +22,7 @@ public class SpecWriterRoundTripTest {
     Files.write(first, ("protectedLibs: [PRODLIB, PRODDTA]\n"
         + "uploadFolders: [/home/me/drop]\n"
         + "uploadSources: [data]\n"
+        + "ignoreMessages: [CPF9898, CPF9897]\n"
         + "hookTimeout: 120\n"
         + "inquiryReply: \"*SYSRPYL\"\n"
         + "connections:\n"
@@ -54,6 +55,7 @@ public class SpecWriterRoundTripTest {
     assertEquals(read.protectedLibs, again.protectedLibs);
     assertEquals(read.uploadFolders, again.uploadFolders);
     assertEquals(read.uploadSources, again.uploadSources);
+    assertEquals(read.ignoreMessages, again.ignoreMessages);
     assertEquals(read.hookTimeout, again.hookTimeout);
     assertEquals(read.inquiryReply, again.inquiryReply);
     assertEquals(read.connections, again.connections);

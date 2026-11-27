@@ -33,14 +33,19 @@ final class ProtectedLibs {
 
   /* The libraries the file lists (empty: none, or no such file) */
   static List<String> read(File file) {
-    List<String> libs = new ArrayList<String>();
-    if (file == null || !file.isFile()) return libs;
+    return list(file, KEY);
+  }
+
+  /* Another top-level list of the same file, upper case (ignoreMessages): read at each call, as protectedLibs */
+  static List<String> list(File file, String key) {
+    List<String> values = new ArrayList<String>();
+    if (file == null || !file.isFile()) return values;
     try {
-      for (JsonNode lib : YAML.readTree(file).path(KEY)) {
-        if (!lib.asText("").trim().isEmpty()) libs.add(lib.asText().trim().toUpperCase());
+      for (JsonNode value : YAML.readTree(file).path(key)) {
+        if (!value.asText("").trim().isEmpty()) values.add(value.asText().trim().toUpperCase());
       }
     } catch (Exception unreadable) { /* the build reports a spec it cannot read */ }
-    return libs;
+    return values;
   }
 
   /* What to do when it is missing: the exact line and the file it goes in */

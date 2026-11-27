@@ -89,6 +89,7 @@ public class ObjectDescriptor {
    * object elsewhere in the library list is not this target.
    */
   public void objectExists(TargetKey key) throws SQLException {
+    key.setObjectExists(false);  // what it is now: a plan before the build (noOverwrite) marked it there after its dry compile
     if (key.getObjectTypeEnum() == ObjectType.FUNCTION) {
       try (Statement stmt = connection.createStatement();
           ResultSet rs = stmt.executeQuery(

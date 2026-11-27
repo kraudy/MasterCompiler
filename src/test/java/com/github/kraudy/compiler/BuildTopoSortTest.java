@@ -86,8 +86,8 @@ public class BuildTopoSortTest {
 
     RuntimeException ex = assertThrows(RuntimeException.class,
         () -> new BuildTopoSort(false, false).topologicalSort(spec));
-    assertTrue(ex.getMessage().contains("Sample path:"), ex.getMessage());
-    assertTrue(ex.getMessage().contains("->"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("\"dependencyCycle\""), ex.getMessage());
+    assertTrue(ex.getMessage().contains("CURLIB.A.PGM.RPGLE") && ex.getMessage().contains("\"cycle\""), ex.getMessage());
   }
 
   @Test

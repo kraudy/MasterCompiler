@@ -180,40 +180,51 @@ public final class EventFile {
    * after the source, e.g. EMPLOYEE for employee.table. Message lines look like
    *   SQL0104  30      15  Position 27 Token ( was not valid. Valid tokens: ) ,.
    *   msg id, severity, record (= line of the stream file), text
-   */
-  public static List<BuildReport.CompileError> readSqlListing(Connection connection, String spoolName,
-      Timestamp since, String sourceFile) {
-    return readListing(connection, spoolName, "SQL", since, sourceFile);
-  }
-
-  /*
-   * The SQL messages of the user's listings named spoolName with that user data (RUNSQLSTM: SQL; the SQL precompilers:
-   * the command, e.g. CRTSQLCI), spooled since then. They go to the user's QPRTJOB, not the compiling job.
+   * The SQL precompilers' listings are named after the object, with the command as user data (CRTSQLCI). They go to
+   * the user's QPRTJOB, not the compiling job.
+   *
+   * The listing named spoolName with that user data, spooled from since to until (null: now), the first one. orOnly:
+   * else the one listing of that user data then, whatever its name (RUNSQLSTM spools QSYSPRT on some systems); two or
+   * more of other names may be another session's: none is taken.
    */
   public static List<BuildReport.CompileError> readListing(Connection connection, String spoolName, String userData,
-      Timestamp since, String sourceFile) {
+      Timestamp since, Timestamp until, boolean orOnly, String sourceFile) {
     if (connection == null || spoolName == null || spoolName.isEmpty()) return new ArrayList<BuildReport.CompileError>();
     String name = spoolName.toUpperCase();
     if (name.length() > 10) name = name.substring(0, 10);
     List<String> lines = new ArrayList<String>();
-    try (PreparedStatement stmt = connection.prepareStatement(
-           "SELECT S.SPOOLED_FILE_NUMBER, D.SPOOLED_DATA " +
-           "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER, STARTING_TIMESTAMP => ?)) S " +
-           "INNER JOIN TABLE(SYSTOOLS.SPOOLED_FILE_DATA(JOB_NAME => S.QUALIFIED_JOB_NAME, " +
-             "SPOOLED_FILE_NAME => S.SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER => S.SPOOLED_FILE_NUMBER)) D ON 1 = 1 " +
-           "WHERE S.SPOOLED_FILE_NAME = ? AND S.USER_DATA = ? ORDER BY S.SPOOLED_FILE_NUMBER, D.ORDINAL_POSITION")) {
-      stmt.setTimestamp(1, since);
-      stmt.setString(2, name);
-      stmt.setString(3, userData);
-      try (ResultSet rs = stmt.executeQuery()) {
-        Integer first = null;  // the first listing since then only: never two merged (same name, another library or session)
-        while (rs.next()) {
-          if (first == null) first = rs.getInt(1);
-          if (rs.getInt(1) != first) break;
-          lines.add(rs.getString(2) == null ? "" : rs.getString(2));
+    try {
+      String[] chosen = null;  // job, spooled file name, number
+      List<String[]> others = new ArrayList<String[]>();
+      try (PreparedStatement stmt = connection.prepareStatement(
+             "SELECT QUALIFIED_JOB_NAME, SPOOLED_FILE_NAME, SPOOLED_FILE_NUMBER " +
+             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => USER, STARTING_TIMESTAMP => ?)) " +
+             "WHERE USER_DATA = ?" + (until != null ? " AND CREATION_TIMESTAMP <= ?" : "") +
+             " ORDER BY CREATION_TIMESTAMP, SPOOLED_FILE_NUMBER")) {
+        stmt.setTimestamp(1, since);
+        stmt.setString(2, userData);
+        if (until != null) stmt.setTimestamp(3, until);
+        try (ResultSet rs = stmt.executeQuery()) {
+          while (rs.next() && chosen == null) {
+            String[] spool = { rs.getString(1), rs.getString(2).trim(), rs.getString(3) };
+            if (spool[1].equalsIgnoreCase(name)) chosen = spool;  // the first of that name only: never two merged
+            else others.add(spool);
+          }
         }
       }
-    } catch (SQLException e) {
+      if (chosen == null && orOnly && others.size() == 1) chosen = others.get(0);
+      if (chosen == null) return new ArrayList<BuildReport.CompileError>();
+      try (PreparedStatement stmt = connection.prepareStatement(
+             "SELECT SPOOLED_DATA FROM TABLE(SYSTOOLS.SPOOLED_FILE_DATA(JOB_NAME => ?, SPOOLED_FILE_NAME => ?, " +
+             "SPOOLED_FILE_NUMBER => ?)) ORDER BY ORDINAL_POSITION")) {
+        stmt.setString(1, chosen[0]);
+        stmt.setString(2, chosen[1]);
+        stmt.setInt(3, Integer.parseInt(chosen[2].trim()));
+        try (ResultSet rs = stmt.executeQuery()) {
+          while (rs.next()) lines.add(rs.getString(1) == null ? "" : rs.getString(1));
+        }
+      }
+    } catch (SQLException | NumberFormatException e) {
       logger.info("Could not read listing {}: {}", name, e.getMessage());
     }
     return parseListing(lines, sourceFile);

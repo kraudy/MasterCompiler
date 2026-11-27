@@ -14,6 +14,10 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 /**
  * Topological sort of build targets.
  * <p>
@@ -34,7 +38,7 @@ public class BuildTopoSort {
 
   /**
    * @return build order: dependencies first, dependents last
-   * @throws RuntimeException if a cycle is detected
+   * @throws DependencyCycle if a cycle is detected
    */
   public List<TargetKey> topologicalSort(BuildSpec globalSpec) {
     Map<TargetKey, Integer> inDegree = new HashMap<>();
@@ -86,10 +90,7 @@ public class BuildTopoSort {
           remaining.add(e.getKey().asString());
         }
       }
-      String path = sampleCyclePath(inDegree);
-      throw new RuntimeException(
-          "Cycle detected in dependency graph! Unresolved targets: " + remaining
-              + (path.isEmpty() ? "" : " Sample path: " + path));
+      throw new DependencyCycle(sampleCyclePath(inDegree), remaining);
     }
 
     if (verbose) {
@@ -106,26 +107,61 @@ public class BuildTopoSort {
    * Walk remaining nodes along child edges and return one closed path
    * ({@code A -> B -> A}) when a cycle exists inside the unresolved set.
    */
-  private static String sampleCyclePath(Map<TargetKey, Integer> inDegree) {
+  static List<String> sampleCyclePath(Map<TargetKey, Integer> inDegree) {
     Set<TargetKey> remaining = new HashSet<>();
     for (Map.Entry<TargetKey, Integer> e : inDegree.entrySet()) {
       if (e.getValue() > 0) remaining.add(e.getKey());
     }
-    if (remaining.isEmpty()) return "";
-
+    List<String> path = new ArrayList<>();
     for (TargetKey start : remaining) {
       List<TargetKey> stack = new ArrayList<>();
       Set<TargetKey> onStack = new LinkedHashSet<>();
       if (walkCycle(start, remaining, stack, onStack)) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < stack.size(); i++) {
-          if (i > 0) sb.append(" -> ");
-          sb.append(stack.get(i).asString());
-        }
-        return sb.toString();
+        /* the walk may reach the cycle from outside it (D, A, B, A): the cycle starts where its last node first is */
+        TargetKey closing = stack.get(stack.size() - 1);
+        for (TargetKey key : stack.subList(stack.indexOf(closing), stack.size())) path.add(key.asString());
+        return path;
       }
     }
-    return "";
+    return path;
+  }
+
+  /*
+   * The targets depend on each other in a circle: no order builds them. Its message is the report, as JSON (the
+   * agent reads it as it reads a build report): the circle, every target it leaves unbuilt, and what to look at.
+   */
+  static final class DependencyCycle extends IllegalArgumentException {
+    private static final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+    final List<String> cycle;
+    final List<String> unresolved;
+
+    DependencyCycle(List<String> cycle, List<String> unresolved) {
+      super("Cycle detected in dependency graph: " + (cycle.isEmpty() ? unresolved : String.join(" -> ", cycle)));
+      this.cycle = cycle;
+      this.unresolved = unresolved;
+    }
+
+    @Override public String getMessage() {
+      ObjectNode report = mapper.createObjectNode();
+      report.put("error", "dependencyCycle");
+      report.put("success", false);
+      report.putPOJO("cycle", cycle);
+      report.putPOJO("unresolved", unresolved);
+      report.put("next", "Each target in the cycle needs the next one built first, so nothing was built. MC finds these "
+          + "dependencies in the sources (CALL, a project command at the start of a CL statement, /copy, EXTPGM, files, "
+          + "SQL tables) and in the spec (a command's PGM, a service program's MODULE): look in the cycle's sources for "
+          + "the reference that is not one (impact on one of them lists what depends on it; MC's log with --verbose names each "
+          + "dependency it found and why).");
+      try {
+        return mapper.writeValueAsString(report);
+      } catch (Exception e) {
+        return super.getMessage();
+      }
+    }
+
+    @Override public String toString() {
+      return getMessage();
+    }
   }
 
   private static boolean walkCycle(

@@ -646,15 +646,20 @@ public class McpServer {
     ObjectNode uploadSchema = mapper.createObjectNode();
     uploadSchema.put("type", "object");
     ObjectNode uploadProps = uploadSchema.putObject("properties");
-    uploadProps.putObject("file").put("type", "string").put("description", "A file in the project folder on this PC (e.g. target/app.jar)");
+    uploadProps.putObject("file").put("type", "string").put("description", "A file in the project folder on this PC (e.g. "
+        + "target/app.jar), or in a folder of the spec's uploadSources (absolute or project-relative: ../shared/sql/ddl.sql)");
     uploadProps.putObject("to").put("type", "string").put("description", "IFS folder: one of the spec's uploadFolders or below it");
     uploadProps.putObject("name").put("type", "string").put("description", "File name there (default: the same name)");
+    uploadProps.putObject("extract").put("type", "boolean").put("description", "true: the file is a .zip, .tar, .tar.gz or "
+        + ".tgz; its files and folders go into 'to' (only files and folders, names inside the archive, up to "
+        + FileUpload.MAX_ENTRIES + " entries and 512 MB unpacked), each written as a single upload is. Not with 'name'");
     uploadProps.putObject("confirm").put("type", "boolean")
         .put("description", "false (default): show what would be uploaded and what it replaces. true: upload, after the user agreed");
     uploadSchema.putArray("required").add("file").add("to");
     tools.add(tool("upload_file",
-        "Upload a file of the project folder (a built jar, a properties file, test input) to an IFS folder the spec allows "
-        + "(uploadFolders). Text files are tagged UTF-8, others are copied as they are. First call without confirm and show "
+        "Upload a file of the project folder or of the spec's uploadSources (folders on the PC beside it: a workspace's "
+        + "shared sources) to an IFS folder the spec allows (uploadFolders), or with extract: true unpack an archive "
+        + "there (a deploy bundle of SQL and scripts). Text files are tagged UTF-8, others are copied as they are. First call without confirm and show "
         + "the user the file, its size and SHA-256 and what it replaces; call again with confirm: true only if they agree. "
         + "Confirmed uploads are logged in .mc/uploads.log.",
         uploadSchema));
@@ -954,6 +959,11 @@ public class McpServer {
         "build only (default false, true with --no-overwrite): a plan runs first, and when an object the build would "
         + "replace is there and this project did not build it (not in .mc/built-objects.json), nothing runs: the answer "
         + "lists them. plan lists the same objects in wouldReplace");
+    props.putObject("globalHooks").put("type", "boolean").put("description",
+        "false: leave out the spec's global hooks (before, after, success, failure) this time, all but CHGLIBL, CHGCURLIB "
+        + "and CHGCURDIR; the targets' own hooks run (default true). For a quick rebuild of a few targets once a build "
+        + "ran them in this session and nothing undid what they set up (copied files, journaling, overrides). The "
+        + "report counts them in globalHooksLeftOut");
     props.putObject("showExternal").put("type", "boolean").put("description",
         "true: list the objects the sources use that the project does not build ('external': \"CUSTSRV *SRVPGM\" -> "
         + "the targets using it); by default only externalCount");
@@ -1343,6 +1353,7 @@ public class McpServer {
   private ObjectNode build(JsonNode args, boolean dryRun, BuildProgress progress) throws Exception {
     connect();
     BuildSpec spec = loadSpec();
+    int hooksLeftOut = args.path("globalHooks").asBoolean(true) ? 0 : spec.leaveOutGlobalHooks();
     /* noOverwrite: a plan first; an object there that this project did not build stops it before anything runs */
     if (!dryRun && args.path("noOverwrite").asBoolean(parser.isNoOverwrite())) {
       MasterCompiler check = compiler(args, spec, true, null);
@@ -1358,6 +1369,7 @@ public class McpServer {
     if (!dryRun) objectsChanged = true;  // also when it fails: what it compiled before is replaced
     compiler.build();
     BuildReport report = compiler.getReport();
+    if (hooksLeftOut > 0) report.globalHooksLeftOut = hooksLeftOut;
     if (dryRun) {
       List<String> foreign = FormerTargets.foreign(projectDir(), report);
       if (!foreign.isEmpty()) report.wouldReplace = foreign;
@@ -2267,7 +2279,8 @@ public class McpServer {
       result.put("next", "Nothing ran. Show this to the user; if they agree, call again with confirm: true.");
       return toolResult(pretty.writeValueAsString(result), false);
     }
-    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
+    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false)
+        .ignoreMessages(ProtectedLibs.list(specSettingsFile(), "ignoreMessages"));
     /* Followed like a build's command: whats_running shows it, cancel stops it (a CALL that hangs, a MSGW) */
     BuildProgress progress = new BuildProgress(BuildProgress.COMMAND);
     progress.stage("running the command");
@@ -2291,10 +2304,9 @@ public class McpServer {
     List<BuildReport.JoblogMessage> joblog = executor.getJoblogMessages(since);
     if (!ok) {
       /* why, in one line (also the --rpc error's message); an SQL precompiler's errors are in its listing */
-      String listingName = CommandFailure.listingName(command);
-      List<BuildReport.CompileError> listing = listingName == null ? Collections.<BuildReport.CompileError>emptyList()
-          : EventFile.readListing(connection, listingName, ReadOnlyCommands.name(command), since, null);
-      listing = listing.subList(0, Math.min(listing.size(), CommandFailure.MAX_LISTING));
+      List<BuildReport.CompileError> listing = CommandFailure.listingName(command) == null
+          ? Collections.<BuildReport.CompileError>emptyList()
+          : CommandFailure.listing(connection, command, since, executor.getCurrentTime());
       result.put("error", CommandFailure.summary(joblog, listing, failure));
       if (!listing.isEmpty()) {
         ArrayNode listed = result.putArray("listing");
@@ -2609,7 +2621,8 @@ public class McpServer {
 
   private ObjectNode joblog() throws Exception {
     connect();
-    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false);
+    CommandExecutor executor = new CommandExecutor(connection, parser.isDebug(), parser.isVerbose(), false)
+        .ignoreMessages(ProtectedLibs.list(specSettingsFile(), "ignoreMessages"));
     Timestamp now = executor.getCurrentTime();
     List<BuildReport.JoblogMessage> messages = executor.getJoblogMessages(lastJoblog);
     lastJoblog = now;

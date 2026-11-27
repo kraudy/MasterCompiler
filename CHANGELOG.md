@@ -3,6 +3,33 @@
 What changed in each release, for people updating MasterCompiler (MC) and for agents reading the setup guide.
 Download any release from https://github.com/kraudy/MasterCompiler/releases.
 
+## v0.3.48
+
+- CL sources: a project command or `CALL` named inside a quoted string (`MSGDTA('... +` with the next line starting
+  `ENDAPP ...`) is no longer a dependency. Such false dependencies could make a cycle.
+- A dependency cycle is a JSON answer, not a bare `RuntimeException`: `error: "dependencyCycle"`, the `cycle`
+  (only the targets in it), the `unresolved` targets and what to look at.
+- `plan` no longer lists brand-new targets in `wouldReplace`: whether the object existed is taken before its (dry)
+  compile. A build's "Deleted the existing *PF/*DTAARA ..." warning is no longer given for a new object either.
+- A command's `PGM: DEVLIB/RUNAPP` (spec or `mc-base.yaml`) stays qualified in `CRTCMD ... PGM(...)`. It orders
+  the command after that program target unless the library names another one.
+- `build` and `plan` take `globalHooks: false`: the spec's global hooks are left out this time (all but CHGLIBL,
+  CHGCURLIB and CHGCURDIR), for a quick rebuild of a few targets once a build ran them. The report counts them in
+  `globalHooksLeftOut`.
+- New spec setting `ignoreMessages: [CPF9898, CPF9897]`: message ids left out of every joblog MC reports (build
+  report `errors` and `hookJoblog`, `run_command`, `joblog`), for another program's messages in MC's job such as a
+  host server exit program's.
+- A failed `RUNSQLSTM`, as a hook or with `run_command`, now carries its listing's messages (`SQL0104 record 1:
+  ...`) and not only `SQL9010`. The listing is the one named after the source as the system shortens it
+  (`mc-deploy_tables-48.sql`: `MC_DEPLOY_`), else the only SQL listing spooled while the command ran (`QSYSPRT` on
+  some systems). A `RUNSQLSTM` target whose stream file name has a `-` now finds its listing too.
+- `upload_file` takes `extract: true` for a `.zip`, `.tar`, `.tar.gz` or `.tgz`: its files and folders go into
+  `to`, each written as a single upload is (`.part`, checked, renamed, text tagged UTF-8). Only files and folders,
+  names that stay inside `to` (up to 1024 characters, 32 folders deep; `/home` does not tell `A.sql` from
+  `a.sql`), folders that do not lead out of `uploadFolders`, up to 5000 entries and 512 MB unpacked; otherwise
+  nothing is written. The archive is read once into a private folder: what is uploaded is what was checked. The tool's description now names `uploadSources` (folders on the PC
+  beside the project, e.g. a workspace's shared sources).
+
 ## v0.3.47
 
 - `clean` applies the spec's library list (its `curlib:` / `libl:`, CHGLIBL / CHGCURLIB) before it reads the current

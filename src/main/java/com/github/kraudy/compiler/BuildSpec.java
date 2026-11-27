@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.github.kraudy.compiler.CompilationPattern.ParamCmd;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -127,6 +129,29 @@ public class BuildSpec {
   /* IFS folders upload_file may write to (and below them); none: upload_file is refused */
   @JsonProperty(value = "uploadFolders", required = false)
   public final List<String> uploadFolders = new ArrayList<>();
+
+  /*
+   * globalHooks: false (build, plan): the global hooks are left out of this build, all but what puts the job where the
+   * spec builds (its library list and current folder), also written as a Cmd (Cmd: QSYS/CHGCURLIB ...). How many.
+   */
+  public int leaveOutGlobalHooks() {
+    int left = 0;
+    for (List<CommandObject> hooks : Arrays.asList(before, after, success, failure)) {
+      int had = hooks.size();
+      hooks.removeIf(hook -> !PLACES_THE_JOB.contains(hook.getSystemCommand() != null ? hook.getSystemCommand().name()
+          : ReadOnlyCommands.name(CommandStringParser.toPasteable(hook.getCommandStringWithoutSummary()))));
+      left += had - hooks.size();
+    }
+    return left;
+  }
+
+  private static final Set<String> PLACES_THE_JOB = new HashSet<>(Arrays.asList(
+      "CHGLIBL", "CHGCURLIB", "ADDLIBLE", "RMVLIBLE", "CHGCURDIR", "CD", "CHDIR"));
+
+  /* Message ids left out of every joblog MC reports (build report, run_command, joblog): another program's messages
+     in MC's job, e.g. a host server exit program's on every request (CPF9898, CPF9897) */
+  @JsonProperty(value = "ignoreMessages", required = false)
+  public final List<String> ignoreMessages = new ArrayList<>();
 
   /* Folders on the PC upload_file may also take files from, besides the project (absolute or project-relative) */
   @JsonProperty(value = "uploadSources", required = false)

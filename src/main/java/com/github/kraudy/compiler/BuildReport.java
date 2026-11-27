@@ -49,6 +49,7 @@ public class BuildReport {
   public String skippedNote;     // compact without showSkipped: the skipped targets are only counted
   public List<String> formerTargets;  // objects MC built for targets the spec no longer has (clean formerTargets: true)
   public List<String> wouldReplace;   // plan: objects there now that this project did not build (build noOverwrite refuses them)
+  public Integer globalHooksLeftOut;  // globalHooks: false: the spec's global hooks that did not run (library list aside)
   /* Objects the sources use that the project does not build ("CUSTSRV *SRVPGM" -> targets using it):
      find_source / import_source fetch their sources when an agent needs to read them */
   public java.util.Map<String, List<String>> external = new java.util.TreeMap<String, List<String>>();
